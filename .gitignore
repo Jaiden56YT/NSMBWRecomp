@@ -1,0 +1,5 @@
+extracted/
+code/
+generated/
+third_party/
+*.log
