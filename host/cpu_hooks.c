@@ -19,6 +19,7 @@ extern u8 g_locked_cache[0x4000];
    DMAL (923) = cache address | load (mem->cache) | length low | trigger. */
 static void lc_dma(CPUState* cpu, u32 dmau, u32 dmal) {
     u32 mem = dmau & 0xFFFFFFE0u;
+    if (mem < 0x80000000u) mem |= 0x80000000u;  /* physical -> cached (MEM1 0x0..., MEM2 0x1...) */
     u32 lc = dmal & 0xFFFFFFE0u;
     u32 lines = ((dmau & 0x1Fu) << 2) | ((dmal >> 2) & 3u);
     if (!lines) lines = 128;

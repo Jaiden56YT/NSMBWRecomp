@@ -813,10 +813,20 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
     if (dump_frame == -2) { const char* e = getenv("DUMP_FRAME"); dump_frame = e ? atol(e) : -1; }
     if ((long)g_frame == dump_frame) {
         OutVtx* v0 = &outv[0];
-        LOG("draw prim %02X n %u vat %d pos0 (%.2f %.2f %.3f %.2f) raw (%.2f %.2f %.2f) pm %d col0 %.2f,%.2f,%.2f,%.2f vp %.0f,%.0f,%.0f,%.0f proj %u z %X cm %X tev %u tref %06X tex0 %08X fmt %u genmode %X\n",
-            prim, count, vat, v0->pos[0], v0->pos[1], v0->pos[2], v0->pos[3], raw.pos[0], raw.pos[1], raw.pos[2], raw.pmidx,
+        extern int g_in_dl;
+        LOG("%sdraw prim %02X n %u vat %d pos0 (%.2f %.2f %.3f %.2f) raw (%.2f %.2f %.2f) pm %d col0 %.2f,%.2f,%.2f,%.2f vp %.0f,%.0f,%.0f,%.0f proj %u z %X cm %X tev %u tref %06X tex0 %08X fmt %u genmode %X\n",
+            g_in_dl ? "DL" : "", prim, count, vat, v0->pos[0], v0->pos[1], v0->pos[2], v0->pos[3], raw.pos[0], raw.pos[1], raw.pos[2], raw.pmidx,
             v0->col[0][0], v0->col[0][1], v0->col[0][2], v0->col[0][3], xff(0x101A), xff(0x101B), xff(0x101D), xff(0x101E),
             g_xf[0x1026], g_bp[0x40], g_bp[0x41], ((g_bp[0] >> 10) & 15) + 1, g_bp[0x28], (g_bp[0x94] & 0xFFFFFF) << 5, (g_bp[0x88] >> 20) & 15, g_bp[0]);
+        if (g_in_dl) {
+            u32 ma = (u32)raw.pmidx * 4;
+            LOG("   VCD %08X %08X MI %08X pm %d mtx %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f\n", g_cp[0x50], g_cp[0x60], g_cp[0x30], raw.pmidx,
+                xff(ma), xff(ma + 1), xff(ma + 2), xff(ma + 3), xff(ma + 4), xff(ma + 5), xff(ma + 6), xff(ma + 7), xff(ma + 8), xff(ma + 9), xff(ma + 10), xff(ma + 11));
+        }
+        if (((g_bp[0x88] >> 20) & 15) == 5)
+            for (u32 k = 0; k < count && k < 4; k++)
+                LOG("   v%u clip %.3f %.3f %.3f %.3f tex %.3f %.3f %.3f col %.2f %.2f %.2f %.2f\n", k, outv[k].pos[0], outv[k].pos[1], outv[k].pos[2], outv[k].pos[3],
+                    outv[k].tex[0][0], outv[k].tex[0][1], outv[k].tex[0][2], outv[k].col[0][0], outv[k].col[0][1], outv[k].col[0][2], outv[k].col[0][3]);
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);

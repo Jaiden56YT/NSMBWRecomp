@@ -111,11 +111,15 @@ one core Wii Remote on channel 1, held sideways, fed from the keyboard or any SD
 Testing without a keyboard: `-press "40:800,44:100"` holds buttons (hex WPAD bits) for 0.2 s at those guest seconds.
 
 Status: through the save dialog to the title screen ("Press 2 to Start") and the Select Players menu.
-Known problems: the title screen's background is black (no perspective draws reach the GPU there);
-heavy scenes (~1900 draws/frame) run at about half speed.
+Known problems: heavy scenes (~1900 draws/frame) run at about half speed. The 4:3 default
+letterboxes the title (SYSCONF widescreen not set).
+
+Fixed: the title's black background / missing 3D models. NW4R g3d builds its matrices in the locked
+cache and DMAs them to RAM with *physical* addresses; the DMA dropped those writes, so every model
+was transformed by zero matrices.
 
 ## Next
-1. Title-screen background (find why the level's distant view isn't drawn), then play a level.
+1. Play into a level; check tilt/shake and the remaining renderer gaps there.
 2. Not yet in the renderer: indirect textures, fog, z-textures, culling, EFB copies back to RAM, upscaling.
 3. Audio (AX mixing), real-time pacing, then the Switch build.
 

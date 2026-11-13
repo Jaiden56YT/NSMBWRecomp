@@ -22,7 +22,7 @@ u32 g_cp[256];
 u32 g_bp[256];
 u32 g_xf[0x1100];  /* 0x0000-0x0FFF matrix memory, 0x1000+ registers */
 
-u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_pe_done;
+u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_pe_done, g_gx_dlcalls, g_gx_idxloads;
 
 static CPUState* g_cpu;
 
@@ -97,7 +97,8 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize);
 void gx_copy_efb(void);
 void render_tlut_load(void);
 
-u32 g_konst[4][4];  /* TEV constant colours K0..K3 (RGBA 0..255) */
+u32 g_konst[4][4];
+int g_in_dl;  /* TEV constant colours K0..K3 (RGBA 0..255) */
 
 static void bp_write(u32 cmd) {
     u32 reg = cmd >> 24, val = cmd & 0xFFFFFF;
@@ -153,7 +154,10 @@ static void call_display_list(u32 addr, u32 size, int depth) {
     if (phys < g_cpu->ram_size) host = g_cpu->ram + phys;
     else if (phys >= 0x10000000 && phys - 0x10000000 < g_cpu->mem2_size) host = g_cpu->mem2 + (phys - 0x10000000);
     if (!host) { LOG("gx: display list at %08X out of range\n", addr); return; }
+    extern int g_in_dl;
+    g_in_dl++;
     gx_run(host, size, depth + 1);
+    g_in_dl--;
 }
 
 static u32 be32(const u8* p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
@@ -186,6 +190,7 @@ static u32 gx_run(const u8* buf, u32 len, int depth) {
             if (len - pos < 5) return pos;
             u32 v = be32(buf + pos + 1);
             u32 arr = 12 + ((op - 0x20) >> 3);
+            g_gx_idxloads++;
             u32 idx = v >> 16, n = ((v >> 12) & 15) + 1, xa = v & 0xFFF;
             u32 src = (g_cp[0xA0 + arr] & 0x3FFFFFFFu) + idx * (g_cp[0xB0 + arr] & 0xFF);
             for (u32 i = 0; i < n; i++)
@@ -195,6 +200,7 @@ static u32 gx_run(const u8* buf, u32 len, int depth) {
         }
         case 0x40:  /* call display list */
             if (len - pos < 9) return pos;
+            g_gx_dlcalls++;
             call_display_list(be32(buf + pos + 1), be32(buf + pos + 5), depth);
             pos += 9;
             continue;

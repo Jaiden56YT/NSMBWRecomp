@@ -264,7 +264,8 @@ int main(int argc, char** argv) {
         if (sample_n[i] > 4) LOG("hot %08X x%llu\n", sample_pc[i], (unsigned long long)sample_n[i]);
     {
         extern u64 g_gxfifo_bytes, g_di_reads, g_ipc_requests, g_vi_count;
-        extern u64 g_gx_draws, g_gx_vertices, g_gx_frames;
+        extern u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_gx_dlcalls, g_gx_idxloads;
+        LOG("gx: %llu display-list calls, %llu indexed XF loads\n", (unsigned long long)g_gx_dlcalls, (unsigned long long)g_gx_idxloads);
         LOG("gx: %llu draws, %llu vertices, %llu XFB copies\n", (unsigned long long)g_gx_draws,
             (unsigned long long)g_gx_vertices, (unsigned long long)g_gx_frames);
         LOG("stats: vi %llu, ipc %llu, di reads %llu, gx fifo %llu bytes, tb %.2fs\n",
