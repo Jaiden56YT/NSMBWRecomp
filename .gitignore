@@ -3,3 +3,7 @@ code/
 generated/
 third_party/
 *.log
+nand/
+host/build/
+run.log
+gxfifo.bin

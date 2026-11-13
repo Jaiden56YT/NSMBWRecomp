@@ -55,7 +55,37 @@ $R -j8 code/rels     SMNE01 generated/rels
    `extracted/files`, GX graphics → OpenGL/deko3d, AX/DSP audio, Wiimote/Nunchuk → Joy-Con, NAND saves.
    DolRecomp points at ModernGekko-Template as a starting runtime; NWiiRecomp's `nWiiRuntime` is another.
 
-## Next: phase 2 — boot on the Mac
+## Phase 2 progress (2026-11-13): the game runs on the Mac (no picture yet)
+
+`host/` is a Mac program that runs the recompiled code (`cmake -S host -B host/build && host/run.sh 60`,
+log in `run.log`). It stands in for the Wii hardware and IOS:
+
+| File | What it emulates |
+|------|------------------|
+| `main.c` | boot, dispatch loop, exceptions/interrupts (OS exception table at 0x80003000), thread dump |
+| `boot.c` | low-memory boot state (disc ID, memory sizes, FST/BI2 at top of MEM1) |
+| `cpu_hooks.c` | SPRs (HID, SRR0/1, decrementer, GQR), cache ops, locked cache + its DMA |
+| `mmio.c` | registers: PI interrupts, VI 60 Hz retrace, DSP mailbox (AX protocol), ARAM/audio DMA, AI, EXI |
+| `ios.c` | IOS over IPC: `/dev/di` (reads from `extracted/`), `/dev/es`, `/dev/fs` + NAND files in `nand/`, `/dev/stm`, a minimal Bluetooth HCI controller |
+| `gx.c` | GPU command processor: CPU/GP FIFOs in RAM, display lists, vertex sizes, PE draw-done/token interrupts |
+| `hle.c` | `OSReport` to the log; `OSLink` redirect for RELs |
+
+**RELs:** the four modules are recompiled at fixed addresses above the game's 24 MB of MEM1
+(`--rel-base 0x81800000`; the host gives MEM1 32 MB). When the game calls `OSLink` on its own buffer, the host
+links a fresh copy at the recompiled address and copies the linked header back.
+
+Status: the OS, NAND, DVD, GX, VI, WPAD/KPAD, AX/DSP, NW4R libraries all initialise; all four RELs link
+and run; the game reads ~100 files, issues ~900 draw calls and ~100 XFB copies in a minute.
+
+Notes: NSMBW checks the disc BCA (byte 0x33 must be 1). The game draws debug lines into display lists,
+so the write-gather pipe must go through the RAM FIFO, not straight to the parser.
+
+## Next
+1. A renderer for the GX draws (OpenGL/Metal on Mac), to see the title screen.
+2. Why only ~2 frames/s of guest time are produced (the main thread waits in `GXDrawDone` a lot).
+3. Wii Remote input (Bluetooth HID emulation or WPAD HLE), audio (AX mixing), saves.
+
+## (Phase 2 plan, original)
 
 Pick a runtime base, link the generated DOL + REL code into a Mac executable, HLE the OS/DVD layer,
 and get the game running far enough to issue its first GX draws (then the title screen).
