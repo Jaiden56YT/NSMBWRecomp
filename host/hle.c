@@ -115,6 +115,17 @@ int hle_dispatch(CPUState* cpu) {
         LOG("rel: linked, result %u, prolog %08X\n", cpu->gpr[3], mem_read32(cpu, link_base + 0x34));
         cpu->pc = link_ret;
         return 1;
+    case 0x801ED3A0u:  /* KPADRead */
+    case 0x801ED3B0u: {  /* KPADReadEx */
+        void hle_kpad_read(CPUState*, int);
+        hle_kpad_read(cpu, cpu->pc == 0x801ED3B0u);
+        return 1;
+    }
+    case 0x801E0F40u: {  /* WPADProbe */
+        void hle_wpad_probe(CPUState*);
+        hle_wpad_probe(cpu);
+        return 1;
+    }
     case ADDR_OSLINK:
     case ADDR_OSLINKFIXED:
         redirect_link(cpu);

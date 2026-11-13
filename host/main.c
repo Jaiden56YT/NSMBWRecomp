@@ -24,6 +24,22 @@ const char* g_disc_root = "extracted";
 static u32 g_break = 0x801A9BA0u; /* PPCHalt */
 static u32 g_dump[8]; static int g_ndump;
 static int g_norender;
+static const char* g_press;
+extern u32 g_input_script_hold;
+
+static void scripted_input(CPUState* cpu) {
+    if (!g_press) return;
+    double t = cpu->timebase / 60750000.0;
+    u32 hold = 0;
+    for (const char* p = g_press; p && *p;) {
+        double at = strtod(p, (char**)&p);
+        if (*p == ':') p++;
+        u32 btn = (u32)strtoul(p, (char**)&p, 16);
+        if (t >= at && t < at + 0.2) hold |= btn;
+        if (*p == ',') p++;
+    }
+    g_input_script_hold = hold;
+}
 
 DolRecompFunction nsmbw_find_rel1(u32 address);
 DolRecompFunction nsmbw_find_rel2(u32 address);
@@ -137,6 +153,10 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-S") && i + 1 < argc) { extern int g_shot_every; g_shot_every = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "-hidden")) { extern int g_hidden_window; g_hidden_window = 1; }
         else if (!strcmp(argv[i], "-norender")) g_norender = 1;
+        else if (!strcmp(argv[i], "-press") && i + 1 < argc) {
+            /* testing: -press "SECS:BUTTONHEX[,SECS:BUTTONHEX...]" holds buttons for 0.2 s at guest time SECS */
+            g_press = argv[++i];
+        }
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) g_disc_root = argv[++i];
     }
     g_log = stdout;
@@ -214,6 +234,7 @@ int main(int argc, char** argv) {
             if (cpu.exception & ~PPC_EXC_SYSTEM_CALL) break;
             cpu.exception = 0;
         }
+        if ((blocks & 0x3FF) == 0) scripted_input(&cpu);
         mmio_tick(&cpu);
         ios_tick(&cpu);
         /* Interrupts are taken between blocks when MSR[EE] is set. */

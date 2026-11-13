@@ -93,8 +93,29 @@ Options: `-hidden` (no visible window), `-s DIR -S N` (save every Nth frame as P
 Status: 60 fps at about real time. The strap screen renders correctly; the game creates its save
 (`nand/title/00010000/534d4e45/data/wiimj2d.sav`) and waits on "save data has been created — OK!".
 
+## Input (2026-11-13)
+
+`host/input.c` replaces `WPADProbe` (0x801E0F40) and `KPADRead`/`KPADReadEx` (0x801ED3A0/0x801ED3B0):
+one core Wii Remote on channel 1, held sideways, fed from the keyboard or any SDL gamepad.
+
+| Wii Remote (sideways) | Keyboard | Gamepad |
+|---|---|---|
+| D-pad (rotated for sideways) | arrow keys | d-pad / left stick |
+| 2 (jump, confirm) | X or Space | south button |
+| 1 (run, back) | Z | west button |
+| A | Enter | east button |
+| B | C | left shoulder |
+| + / − / Home | P / M / H | Start / Back / Guide |
+| shake | S or Shift | north button / right shoulder |
+
+Testing without a keyboard: `-press "40:800,44:100"` holds buttons (hex WPAD bits) for 0.2 s at those guest seconds.
+
+Status: through the save dialog to the title screen ("Press 2 to Start") and the Select Players menu.
+Known problems: the title screen's background is black (no perspective draws reach the GPU there);
+heavy scenes (~1900 draws/frame) run at about half speed.
+
 ## Next
-1. Wii Remote input (Bluetooth HID emulation, or HLE at WPAD/KPAD) — needed to press OK and reach the title screen.
+1. Title-screen background (find why the level's distant view isn't drawn), then play a level.
 2. Not yet in the renderer: indirect textures, fog, z-textures, culling, EFB copies back to RAM, upscaling.
 3. Audio (AX mixing), real-time pacing, then the Switch build.
 

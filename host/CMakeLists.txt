@@ -32,7 +32,7 @@ add_library(dr_cpu STATIC ${DOLRECOMP}/src/cpu/cpu.c)
 target_include_directories(dr_cpu PUBLIC ${DOLRECOMP}/src)
 
 find_package(SDL2 REQUIRED)
-add_executable(nsmbw main.c boot.c mmio.c cpu_hooks.c hle.c ios.c gx.c render.c)
+add_executable(nsmbw main.c boot.c mmio.c cpu_hooks.c hle.c ios.c gx.c render.c input.c)
 target_include_directories(nsmbw PRIVATE ${SDL2_INCLUDE_DIRS} /opt/homebrew/include)
 target_compile_definitions(nsmbw PRIVATE GL_SILENCE_DEPRECATION)
 target_compile_definitions(nsmbw PRIVATE DOLRECOMP_RUN_SLICE=4096)

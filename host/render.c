@@ -25,6 +25,7 @@ static SDL_GLContext glctx;
 static GLuint efb_fbo, efb_color, efb_depth;
 static GLuint vao, vbo;
 static int render_ok;
+static int dbg_noalpha, dbg_nodepth, dbg_noblend, dbg_noscissor;
 
 #define EFB_W 640
 #define EFB_H 528
@@ -334,6 +335,8 @@ typedef struct {
 
 #define TEXCACHE 1024
 static TexEntry texcache[TEXCACHE];
+#define EFBCOPIES 64
+static TexEntry efbcopies[EFBCOPIES];  /* EFB-to-texture copies, found by address */
 
 static u64 fnv(const u8* p, size_t n) {
     u64 h = 1469598103934665603ull;
@@ -478,6 +481,8 @@ static GLuint bind_texmap(int map, u64 frame) {
     u32 tlut_hash = ncol ? (u32)fnv(pal, ncol * 2 > sizeof(g_tmem) - tlut_off ? 0 : ncol * 2) ^ tlut_fmt : 0;
 
     TexEntry* e = NULL;
+    for (int i = 0; i < EFBCOPIES; i++)
+        if (efbcopies[i].tex && efbcopies[i].addr == addr) { e = &efbcopies[i]; goto params; }
     int slot = (int)(((addr >> 5) ^ (w * 31 + h) ^ fmt * 7 ^ tlut_hash) % TEXCACHE);
     for (int i = 0; i < 16; i++) {
         TexEntry* c = &texcache[(slot + i) % TEXCACHE];
@@ -704,6 +709,7 @@ static Shader* get_shader(void) {
     static const char* lop[4] = {"&&", "||", "!=", "=="};
     cat(&p, " float A = floor(outc.a * 255.0 + 0.5) / 255.0;\n");
     snprintf(line, sizeof(line), " if (!((%s) %s (%s))) discard;\n", t0, lop[logic], t1);
+    if (dbg_noalpha) line[0] = 0;
     cat(&p, line);
     cat(&p, " if (u_const_alpha >= 0.0) outc.a = u_const_alpha;\n o_color = outc;\n}\n");
 
@@ -745,15 +751,17 @@ static void apply_state(void) {
     /* scissor */
     int st = (int)(g_bp[0x20] & 0x7FF) - 342, sl = (int)((g_bp[0x20] >> 12) & 0x7FF) - 342;
     int sb = (int)(g_bp[0x21] & 0x7FF) - 342, sr = (int)((g_bp[0x21] >> 12) & 0x7FF) - 342;
-    glEnable(GL_SCISSOR_TEST);
+    if (dbg_noscissor) glDisable(GL_SCISSOR_TEST); else glEnable(GL_SCISSOR_TEST);
     glScissor(sl, st, sr - sl + 1 > 0 ? sr - sl + 1 : 0, sb - st + 1 > 0 ? sb - st + 1 : 0);
     /* depth */
     u32 z = g_bp[0x40];
     static const GLenum zf[8] = {GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS};
+    if (dbg_nodepth) z = 0;
     if (z & 1) { glEnable(GL_DEPTH_TEST); glDepthFunc(zf[(z >> 1) & 7]); } else glDisable(GL_DEPTH_TEST);
     glDepthMask((z & 1) && (z & 0x10) ? GL_TRUE : GL_FALSE);
     /* blending */
     u32 cm = g_bp[0x41];
+    if (dbg_noblend) cm &= ~0x801u;
     static const GLenum srcf[8] = {GL_ZERO, GL_ONE, GL_DST_COLOR, GL_ONE_MINUS_DST_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
     static const GLenum dstf[8] = {GL_ZERO, GL_ONE, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
     if (cm & 0x800) {
@@ -764,6 +772,7 @@ static void apply_state(void) {
     int has_alpha = (g_bp[0x43] & 7) == 1;  /* RGBA6_Z24 */
     glColorMask((cm & 8) != 0, (cm & 8) != 0, (cm & 8) != 0, has_alpha && (cm & 0x10));
     glDisable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_CLAMP);  /* GX clamps depth instead of clipping at the far plane */
 }
 
 /* ------------------------------------------------------------------ */
@@ -800,6 +809,15 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
     }
 #undef EMIT
     if (!n) return;
+    static long dump_frame = -2;
+    if (dump_frame == -2) { const char* e = getenv("DUMP_FRAME"); dump_frame = e ? atol(e) : -1; }
+    if ((long)g_frame == dump_frame) {
+        OutVtx* v0 = &outv[0];
+        LOG("draw prim %02X n %u vat %d pos0 (%.2f %.2f %.3f %.2f) raw (%.2f %.2f %.2f) pm %d col0 %.2f,%.2f,%.2f,%.2f vp %.0f,%.0f,%.0f,%.0f proj %u z %X cm %X tev %u tref %06X tex0 %08X fmt %u genmode %X\n",
+            prim, count, vat, v0->pos[0], v0->pos[1], v0->pos[2], v0->pos[3], raw.pos[0], raw.pos[1], raw.pos[2], raw.pmidx,
+            v0->col[0][0], v0->col[0][1], v0->col[0][2], v0->col[0][3], xff(0x101A), xff(0x101B), xff(0x101D), xff(0x101E),
+            g_xf[0x1026], g_bp[0x40], g_bp[0x41], ((g_bp[0] >> 10) & 15) + 1, g_bp[0x28], (g_bp[0x94] & 0xFFFFFF) << 5, (g_bp[0x88] >> 20) & 15, g_bp[0]);
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
     apply_state();
@@ -883,8 +901,10 @@ void gx_copy_efb(void) {
         int half = (ctl >> 9) & 1;
         int tw = half ? sw / 2 : sw, th = half ? sh / 2 : sh;
         TexEntry* e = NULL;
-        for (int i = 0; i < TEXCACHE; i++) if (texcache[i].tex && texcache[i].addr == addr) { e = &texcache[i]; break; }
-        if (!e) for (int i = 0; i < TEXCACHE; i++) if (!texcache[i].tex) { e = &texcache[i]; glGenTextures(1, &e->tex); break; }
+        for (int i = 0; i < EFBCOPIES; i++) if (efbcopies[i].tex && efbcopies[i].addr == addr) { e = &efbcopies[i]; break; }
+        if (!e) for (int i = 0; i < EFBCOPIES; i++) if (!efbcopies[i].tex) { e = &efbcopies[i]; glGenTextures(1, &e->tex); break; }
+        static int efb_log;
+        if (efb_log++ < 10) LOG("render: EFB copy %dx%d at (%d,%d) -> %08X%s\n", tw, th, sx, sy, addr, half ? " (half)" : "");
         if (e) {
             e->addr = addr; e->efb = 1; e->w = (u32)tw; e->h = (u32)th;
             glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_fbo);
@@ -921,6 +941,8 @@ void gx_copy_efb(void) {
 
 int render_init(CPUState* cpu) {
     R = cpu;
+    dbg_noalpha = getenv("NO_ALPHA") != NULL; dbg_nodepth = getenv("NO_DEPTH") != NULL;
+    dbg_noblend = getenv("NO_BLEND") != NULL; dbg_noscissor = getenv("NO_SCISSOR") != NULL;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) { LOG("render: SDL_Init: %s\n", SDL_GetError()); return 0; }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);

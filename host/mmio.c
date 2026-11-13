@@ -335,6 +335,7 @@ void mmio_tick(CPUState* cpu) {
                 (unsigned long long)g_gx_frames, (unsigned long long)g_pe_done, mmio_get32(0xCC003000u), mmio_get32(0xCC003004u), cpu->msr);
         }
         { int render_poll(void); if (!render_poll()) exit(0); }
+        { void input_update(void); input_update(); }
     }
     if (dsp_reply_pending && cpu->timebase >= dsp_reply_tb) {
         dsp_reply_pending = 0;
