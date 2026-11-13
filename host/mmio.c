@@ -4,6 +4,7 @@
 #include "host.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 void gx_fifo_write(CPUState* cpu, u64 value, u8 size);
 void gx_pe_ctrl_write(u16 v);
@@ -328,6 +329,12 @@ void mmio_tick(CPUState* cpu) {
     if (cpu->timebase >= g_vi_next_tb) {
         g_vi_next_tb = cpu->timebase + 1012500u;
         vi_retrace();
+        if (g_vi_count % 300 == 0) {
+            extern u64 g_gx_frames, g_pe_done;
+            LOG("tick: vi %llu xfb %llu pe_done %llu pi_sr %08X pi_mr %08X msr %08X\n", (unsigned long long)g_vi_count,
+                (unsigned long long)g_gx_frames, (unsigned long long)g_pe_done, mmio_get32(0xCC003000u), mmio_get32(0xCC003004u), cpu->msr);
+        }
+        { int render_poll(void); if (!render_poll()) exit(0); }
     }
     if (dsp_reply_pending && cpu->timebase >= dsp_reply_tb) {
         dsp_reply_pending = 0;

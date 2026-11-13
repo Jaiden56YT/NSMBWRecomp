@@ -23,6 +23,7 @@ int g_verbose;
 const char* g_disc_root = "extracted";
 static u32 g_break = 0x801A9BA0u; /* PPCHalt */
 static u32 g_dump[8]; static int g_ndump;
+static int g_norender;
 
 DolRecompFunction nsmbw_find_rel1(u32 address);
 DolRecompFunction nsmbw_find_rel2(u32 address);
@@ -132,6 +133,10 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-n") && i + 1 < argc) max_blocks = strtoull(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "-b") && i + 1 < argc) g_break = (u32)strtoul(argv[++i], NULL, 16);
         else if (!strcmp(argv[i], "-m") && i + 1 < argc) g_dump[g_ndump++ & 7] = (u32)strtoul(argv[++i], NULL, 16);
+        else if (!strcmp(argv[i], "-s") && i + 1 < argc) { extern const char* g_shot_dir; g_shot_dir = argv[++i]; }
+        else if (!strcmp(argv[i], "-S") && i + 1 < argc) { extern int g_shot_every; g_shot_every = atoi(argv[++i]); }
+        else if (!strcmp(argv[i], "-hidden")) { extern int g_hidden_window; g_hidden_window = 1; }
+        else if (!strcmp(argv[i], "-norender")) g_norender = 1;
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) g_disc_root = argv[++i];
     }
     g_log = stdout;
@@ -154,6 +159,7 @@ int main(int argc, char** argv) {
     boot_setup_lowmem(&cpu);
     ios_init(&cpu);
     gx_init(&cpu);
+    if (!g_norender) { int render_init(CPUState*); render_init(&cpu); }
 
     cpu.pc = entry;
     cpu.msr = 0x00003032u;  /* FP, ME, IR, DR, RI */

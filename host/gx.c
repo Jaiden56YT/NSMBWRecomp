@@ -22,7 +22,7 @@ u32 g_cp[256];
 u32 g_bp[256];
 u32 g_xf[0x1100];  /* 0x0000-0x0FFF matrix memory, 0x1000+ registers */
 
-u64 g_gx_draws, g_gx_vertices, g_gx_frames;
+u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_pe_done;
 
 static CPUState* g_cpu;
 
@@ -92,16 +92,23 @@ void gx_pe_ctrl_write(u16 v) {
     pe_update_pi();
 }
 
-/* Rendering backend hook (none yet). */
-void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) __attribute__((weak));
-void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
-    (void)prim; (void)vat; (void)count; (void)data; (void)vsize;
-}
-void gx_copy_efb(void) __attribute__((weak));
-void gx_copy_efb(void) {}
+/* Renderer (render.c). */
+void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize);
+void gx_copy_efb(void);
+void render_tlut_load(void);
+
+u32 g_konst[4][4];  /* TEV constant colours K0..K3 (RGBA 0..255) */
 
 static void bp_write(u32 cmd) {
     u32 reg = cmd >> 24, val = cmd & 0xFFFFFF;
+    /* TEV colour registers 0xE0-0xE7: bit 23 selects the konst bank. */
+    if (reg >= 0xE0 && reg <= 0xE7 && (val & 0x800000)) {
+        int i = (int)(reg - 0xE0) / 2;
+        if ((reg & 1) == 0) { g_konst[i][0] = val & 0xFF; g_konst[i][3] = (val >> 12) & 0xFF; }
+        else { g_konst[i][2] = val & 0xFF; g_konst[i][1] = (val >> 12) & 0xFF; }
+        g_bp[0xFE] = 0xFFFFFF;
+        return;
+    }
     /* BP mask register (0xFE) applies to the next write */
     if (reg != 0xFE) {
         u32 mask = g_bp[0xFE] ? g_bp[0xFE] : 0xFFFFFF;
@@ -110,7 +117,11 @@ static void bp_write(u32 cmd) {
     }
     g_bp[reg] = val;
     switch (reg) {
+    case 0x65:  /* TLUT load */
+        render_tlut_load();
+        break;
     case 0x45:  /* PE_DONE: draw done */
+        g_pe_done++;
         { static int n; if (n++ < 5) LOG("gx: draw done (PE_CTRL %04X)\n", mmio_get16(PE_CTRL)); }
         mmio_set16(PE_CTRL, (u16)(mmio_get16(PE_CTRL) | 0x8));
         pe_update_pi();
@@ -158,7 +169,6 @@ static u32 gx_run(const u8* buf, u32 len, int depth) {
         case 0x08:  /* CP reg */
             if (len - pos < 6) return pos;
             g_cp[buf[pos + 1]] = be32(buf + pos + 2);
-            if (g_gx_draws >= 1 && g_gx_draws < 3) LOG("gx: cp %02X = %08X\n", buf[pos + 1], be32(buf + pos + 2));
             pos += 6;
             continue;
         case 0x10: {  /* XF regs */
@@ -172,10 +182,17 @@ static u32 gx_run(const u8* buf, u32 len, int depth) {
             pos += need;
             continue;
         }
-        case 0x20: case 0x28: case 0x30: case 0x38:  /* indexed XF loads */
+        case 0x20: case 0x28: case 0x30: case 0x38: {  /* indexed XF loads from arrays 12-15 */
             if (len - pos < 5) return pos;
+            u32 v = be32(buf + pos + 1);
+            u32 arr = 12 + ((op - 0x20) >> 3);
+            u32 idx = v >> 16, n = ((v >> 12) & 15) + 1, xa = v & 0xFFF;
+            u32 src = (g_cp[0xA0 + arr] & 0x3FFFFFFFu) + idx * (g_cp[0xB0 + arr] & 0xFF);
+            for (u32 i = 0; i < n; i++)
+                if (xa + i < 0x1100) g_xf[xa + i] = mem_read32(g_cpu, (src + 4 * i) | 0x80000000u);
             pos += 5;
             continue;
+        }
         case 0x40:  /* call display list */
             if (len - pos < 9) return pos;
             call_display_list(be32(buf + pos + 1), be32(buf + pos + 5), depth);
@@ -197,12 +214,6 @@ static u32 gx_run(const u8* buf, u32 len, int depth) {
             int vsize = gx_vertex_size(vat);
             need = 3 + count * (u32)vsize;
             if (len - pos < need) return pos;
-            if (g_gx_draws < 12) {
-                LOG("gx: draw %02X vat %d count %u vsize %d VCD %08X %08X VAT %08X %08X %08X data:", op & 0xF8, vat, count,
-                    vsize, g_cp[0x50], g_cp[0x60], g_cp[0x70 + vat], g_cp[0x80 + vat], g_cp[0x90 + vat]);
-                for (u32 k = 0; k < need + 8 && pos + k < len && k < 64; k++) LOG(" %02X", buf[pos + k]);
-                LOG("\n");
-            }
             gx_draw(op & 0xF8, vat, count, buf + pos + 3, vsize);
             g_gx_draws++;
             g_gx_vertices += count;
@@ -257,30 +268,42 @@ static void gp_process(void) {
         u8* h = phys_ptr(p);
         gp_buf[n++] = h ? *h : 0;
         p += 1;
-        if (p >= end + 32) p = base;  /* end is the last 32-byte line */
+        if (p >= end) p = (p + 31) & ~31u;
+        if (p >= ((end + 31) & ~31u)) p = base;  /* bursts wrap once past end */
     }
     u32 used = gx_run(gp_buf, n, 0);
-    for (u32 i = 0; i < used; i++) { rp += 1; if (rp >= end + 32) rp = base; }
+    for (u32 i = 0; i < used; i++) { rp += 1; if (rp >= ((end + 31) & ~31u)) rp = base; }
     cp_set32(0xCC000038u, rp);
 }
 
-void gx_fifo_write(CPUState* cpu, u64 value, u8 size) {
-    g_cpu = cpu;
+/* The write-gather pipe collects 32 bytes, then writes them as one burst
+   at the PI write pointer; the pointer wraps to base once it passes end. */
+static u8 gather[32];
+static u32 gather_len;
+
+static void fifo_burst(void) {
     u32 base = mmio_get32(PI_FIFO_BASE) & 0x3FFFFFE0u;
     u32 end = mmio_get32(PI_FIFO_END) & 0x3FFFFFE0u;
     u32 wreg = mmio_get32(PI_FIFO_WPTR);
     u32 wp = wreg & 0x03FFFFFFu;
+    gather_len = 0;
     if (!base || end <= base) return;
-    for (int i = size - 1; i >= 0; i--) {
-        u8* h = phys_ptr(wp);
-        if (h) *h = (u8)(value >> (8 * i));
-        wp++;
-        if (wp >= end) { wp = base; wreg ^= 0x20000000u; }  /* wrap flag */
-    }
+    u8* h = phys_ptr(wp);
+    if (h) memcpy(h, gather, 32);
+    wp += 32;
+    if (wp >= end) { wp = base; wreg ^= 0x20000000u; }  /* wrap flag */
     mmio_set32(PI_FIFO_WPTR, (wreg & ~0x03FFFFFFu) | wp);
     if (mmio_get16(CP_CTRL) & 0x10u) {  /* linked: GPU write pointer follows */
         cp_set32(0xCC000034u, wp);
-        if (wp % 32 == 0 || size >= 4) gp_process();
+        gp_process();
+    }
+}
+
+void gx_fifo_write(CPUState* cpu, u64 value, u8 size) {
+    g_cpu = cpu;
+    for (int i = size - 1; i >= 0; i--) {
+        gather[gather_len++] = (u8)(value >> (8 * i));
+        if (gather_len == 32) fifo_burst();
     }
 }
 

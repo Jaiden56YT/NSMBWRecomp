@@ -80,10 +80,23 @@ and run; the game reads ~100 files, issues ~900 draw calls and ~100 XFB copies i
 Notes: NSMBW checks the disc BCA (byte 0x33 must be 1). The game draws debug lines into display lists,
 so the write-gather pipe must go through the RAM FIFO, not straight to the parser.
 
+## Renderer (2026-11-13)
+
+`host/render.c`: SDL2 + OpenGL 4.1 core (the same stack exists in devkitPro for the Switch).
+Vertices are decoded and transformed on the CPU like the XF (matrices, lighting, texgen, dual-tex);
+each TEV configuration becomes a generated GLSL fragment shader (colour/alpha combiners, konst,
+swap tables, compare modes, alpha test); all GX texture formats incl. CMPR and palettes are decoded
+and cached by content hash; EFB-to-texture copies stay on the GPU; XFB copies go to the window.
+
+Options: `-hidden` (no visible window), `-s DIR -S N` (save every Nth frame as PNG), `-norender`.
+
+Status: 60 fps at about real time. The strap screen renders correctly; the game creates its save
+(`nand/title/00010000/534d4e45/data/wiimj2d.sav`) and waits on "save data has been created — OK!".
+
 ## Next
-1. A renderer for the GX draws (OpenGL/Metal on Mac), to see the title screen.
-2. Why only ~2 frames/s of guest time are produced (the main thread waits in `GXDrawDone` a lot).
-3. Wii Remote input (Bluetooth HID emulation or WPAD HLE), audio (AX mixing), saves.
+1. Wii Remote input (Bluetooth HID emulation, or HLE at WPAD/KPAD) — needed to press OK and reach the title screen.
+2. Not yet in the renderer: indirect textures, fog, z-textures, culling, EFB copies back to RAM, upscaling.
+3. Audio (AX mixing), real-time pacing, then the Switch build.
 
 ## (Phase 2 plan, original)
 
