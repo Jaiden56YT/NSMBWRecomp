@@ -172,3 +172,17 @@ What changed:
 
 Pick a runtime base, link the generated DOL + REL code into a Mac executable, HLE the OS/DVD layer,
 and get the game running far enough to issue its first GX draws (then the title screen).
+
+## Switch build (2026-11-13)
+
+```sh
+cmake -S host -B host/build-switch -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake
+cmake --build host/build-switch -j10          # ~16 min (generated code at -O2), makes nsmbw.nro
+tools/deploy_switch.sh 192.168.1.193:5000     # ftpd on the Switch; uploads .nro + game data
+```
+
+Same host code as the Mac: SDL2 + Mesa desktop GL 4.3 core (function pointers loaded via
+`SDL_GL_GetProcAddress`, `host/gl.h`/`gl.c`), the emulator on a 32 MB-stack thread, files next to the
+.nro (`sdmc:/switch/nsmbw/`), log in `nsmbw.log` there. Joy-Con/Pro buttons by position:
+B = 2 (jump), Y = 1 (run), A = A, X = shake, + / − as on the remote.
+Not yet run on hardware.

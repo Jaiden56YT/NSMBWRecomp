@@ -6,7 +6,7 @@
 #include "host.h"
 
 #include <SDL2/SDL.h>
-#include <OpenGL/gl3.h>
+#include "gl.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1150,16 +1150,25 @@ int render_init(CPUState* cpu) {
     dbg_noblend = getenv("NO_BLEND") != NULL; dbg_noscissor = getenv("NO_SCISSOR") != NULL;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) { LOG("render: SDL_Init: %s\n", SDL_GetError()); return 0; }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+#ifdef __SWITCH__
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);  /* Mesa nouveau on the Switch: GL 4.3 core */
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#endif
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+#ifdef __SWITCH__
+    window = SDL_CreateWindow("NSMBW Recomp", 0, 0, 1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
+    if (0)
+#endif
     window = SDL_CreateWindow("NSMBW Recomp", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 720,
                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                               (g_hidden_window ? SDL_WINDOW_HIDDEN : 0));
     if (!window) { LOG("render: window: %s\n", SDL_GetError()); return 0; }
     glctx = SDL_GL_CreateContext(window);
     if (!glctx) { LOG("render: GL context: %s\n", SDL_GetError()); return 0; }
+    if (!gl_load(SDL_GL_GetProcAddress)) { LOG("render: missing GL functions\n"); return 0; }
     SDL_GL_SetSwapInterval(0);
     LOG("render: %s / %s\n", glGetString(GL_RENDERER), glGetString(GL_VERSION));
 

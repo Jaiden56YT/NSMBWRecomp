@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <time.h>
 #include <signal.h>
 
@@ -218,7 +219,30 @@ static void backtrace_guest(CPUState* cpu) {
     }
 }
 
+#ifdef __SWITCH__
+#include <pthread.h>
+#include <switch.h>
+static int real_main(int argc, char** argv);
+static int g_argc; static char** g_argv; static int g_ret;
+static void* main_thread(void* arg) { (void)arg; g_ret = real_main(g_argc, g_argv); return NULL; }
+
+/* The generated code turns guest calls into host recursion (up to 24 deep,
+   large frames), so run everything on a thread with a big stack. */
 int main(int argc, char** argv) {
+    g_argc = argc; g_argv = argv;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 32u << 20);
+    pthread_t t;
+    if (pthread_create(&t, &attr, main_thread, NULL) != 0) return 1;
+    pthread_join(t, NULL);
+    return g_ret;
+}
+
+static int real_main(int argc, char** argv) {
+#else
+int main(int argc, char** argv) {
+#endif
     u64 max_blocks = ~0ull;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) g_verbose = 1;
@@ -241,7 +265,19 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) g_disc_root = argv[++i];
     }
     g_log = stdout;
-    setvbuf(stdout, NULL, _IOLBF, 0);
+#ifdef __SWITCH__
+    /* Files live next to the .nro: extracted/, code/rels/, nand/, nsmbw.log */
+    if (argc > 0 && argv[0]) {
+        static char dir[512];
+        snprintf(dir, sizeof(dir), "%s", argv[0]);
+        char* slash = strrchr(dir, '/');
+        if (slash) { *slash = 0; chdir(dir); }
+    }
+    if (access("extracted/sys/main.dol", F_OK) != 0) chdir("sdmc:/switch/nsmbw");
+    g_log = fopen("nsmbw.log", "w");
+    if (!g_log) g_log = stdout;
+#endif
+    setvbuf(g_log, NULL, _IOLBF, 0);
 
     static CPUState cpu;
     if (!cpu_init(&cpu) || !cpu_alloc_mem2(&cpu, WII_MEM2_SIZE)) return 1;
@@ -271,8 +307,10 @@ int main(int argc, char** argv) {
     u64 blocks = 0;
     u32 last_pc = 0;
     int dec_pending = 0;
+#ifndef __SWITCH__
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
+#endif
     while (blocks < max_blocks && !g_stop) {
         if ((blocks & 0xFFFF) == 0) sample(cpu.pc);
         if (g_stack_sampling && (blocks & 0xFFF) == 0 && cpu.timebase > (u64)g_stack_sampling * 60750000u) sample_stack(&cpu);

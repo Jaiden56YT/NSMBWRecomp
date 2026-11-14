@@ -7,3 +7,4 @@ nand/
 host/build/
 run.log
 gxfifo.bin
+host/build-switch/

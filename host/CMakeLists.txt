@@ -12,8 +12,14 @@ endif()
 file(GLOB DOL_CHUNKS ${GEN_DOL}/chunks/*.c)
 add_library(gen_dol STATIC ${DOL_CHUNKS} dispatch_dol.c)
 target_include_directories(gen_dol PUBLIC ${DOLRECOMP}/src ${GEN_DOL})
-# The generated code is huge and machine-made: optimise lightly, keep it quiet.
-target_compile_options(gen_dol PRIVATE -O1 -w)
+# The generated code is huge and machine-made: keep it quiet. -O1 on the Mac
+# (fast to build, plenty fast); -O2 on the Switch, whose CPU needs every bit.
+if(NINTENDO_SWITCH)
+  set(GEN_OPT -O2 -w)
+else()
+  set(GEN_OPT -O1 -w)
+endif()
+target_compile_options(gen_dol PRIVATE ${GEN_OPT})
 
 # REL modules, recompiled at fixed addresses from 0x81800000 (beyond the
 # 24 MB of MEM1 the game knows about; the host gives MEM1 32 MB).
@@ -23,7 +29,7 @@ foreach(MOD d_profileNP_1 d_basesNP_2 d_enemiesNP_3 d_en_bossNP_4)
   file(GLOB CH ${GEN_RELS}/${MOD}/chunks/*.c)
   add_library(gen_rel${ID} STATIC ${CH} dispatch_rel${ID}.c)
   target_include_directories(gen_rel${ID} PRIVATE ${DOLRECOMP}/src ${GEN_RELS}/${MOD})
-  target_compile_options(gen_rel${ID} PRIVATE -O1 -w)
+  target_compile_options(gen_rel${ID} PRIVATE ${GEN_OPT})
   list(APPEND REL_LIBS gen_rel${ID})
 endforeach()
 
@@ -31,10 +37,25 @@ endforeach()
 add_library(dr_cpu STATIC ${DOLRECOMP}/src/cpu/cpu.c)
 target_include_directories(dr_cpu PUBLIC ${DOLRECOMP}/src)
 
-find_package(SDL2 REQUIRED)
-add_executable(nsmbw main.c boot.c mmio.c cpu_hooks.c hle.c ios.c gx.c render.c input.c ax.c)
-target_include_directories(nsmbw PRIVATE ${SDL2_INCLUDE_DIRS} /opt/homebrew/include)
-target_compile_definitions(nsmbw PRIVATE GL_SILENCE_DEPRECATION)
-target_compile_options(nsmbw PRIVATE -O3 -mcpu=apple-m1)
-target_compile_definitions(nsmbw PRIVATE DOLRECOMP_RUN_SLICE=4096)
-target_link_libraries(nsmbw gen_dol ${REL_LIBS} dr_cpu m ${SDL2_LIBRARIES} "-framework OpenGL" z)
+set(HOST_SOURCES main.c boot.c mmio.c cpu_hooks.c hle.c ios.c gx.c render.c input.c ax.c gl.c)
+
+if(NINTENDO_SWITCH)
+  # Switch homebrew (.nro): SDL2 + Mesa desktop GL via EGL, from devkitPro portlibs.
+  # Configure with: cmake -S host -B host/build-switch -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake
+  add_executable(nsmbw ${HOST_SOURCES})
+  target_include_directories(nsmbw PRIVATE ${DEVKITPRO}/portlibs/switch/include)
+  target_compile_options(nsmbw PRIVATE -O3)
+  target_compile_definitions(nsmbw PRIVATE DOLRECOMP_RUN_SLICE=4096)
+  target_link_libraries(nsmbw gen_dol ${REL_LIBS} dr_cpu
+    -L${DEVKITPRO}/portlibs/switch/lib SDL2 EGL glapi drm_nouveau z stdc++ nx m)
+  nx_generate_nacp(nsmbw.nacp NAME "NSMBW Recomp" AUTHOR "you" VERSION "0.1.0")
+  nx_create_nro(nsmbw NACP nsmbw.nacp)
+else()
+  find_package(SDL2 REQUIRED)
+  add_executable(nsmbw ${HOST_SOURCES})
+  target_include_directories(nsmbw PRIVATE ${SDL2_INCLUDE_DIRS} /opt/homebrew/include)
+  target_compile_definitions(nsmbw PRIVATE GL_SILENCE_DEPRECATION)
+  target_compile_options(nsmbw PRIVATE -O3 -mcpu=apple-m1)
+  target_compile_definitions(nsmbw PRIVATE DOLRECOMP_RUN_SLICE=4096)
+  target_link_libraries(nsmbw gen_dol ${REL_LIBS} dr_cpu m ${SDL2_LIBRARIES} "-framework OpenGL" z)
+endif()

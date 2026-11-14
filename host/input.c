@@ -37,7 +37,11 @@ static void open_pad(void) {
 
 /* Sample the host devices; called once per guest field (60 Hz). */
 void input_update(void) {
-    if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER)) SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
+        /* buttons by position (south = jump), the same on Joy-Cons and other pads */
+        SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
+        SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    }
     open_pad();
     const u8* k = SDL_GetKeyboardState(NULL);
     u32 h = 0;
