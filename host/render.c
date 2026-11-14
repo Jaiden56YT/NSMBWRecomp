@@ -959,8 +959,27 @@ static void batch_flush(void) {
 
 double g_render_after;  /* -ra SECS: skip drawing before this guest time (faster test runs) */
 
+/* Frame skipping: -frameskip N draws one frame in N+1; "auto" (the Switch
+   default) skips a frame whenever the game is behind real time, at most 3 in
+   a row. A skipped frame does no GL work: no draws, EFB copies or clears. */
+#ifdef __SWITCH__
+int g_frameskip = -1;
+#else
+int g_frameskip = 0;
+#endif
+u64 g_frames_shown, g_frames_skipped;
+static int skip_cur, skip_run;
+
+static void frame_end(void) {
+    extern int g_behind;
+    if (skip_cur) { g_frames_skipped++; skip_run++; } else { g_frames_shown++; skip_run = 0; }
+    if (g_frameskip > 0) skip_cur = (g_frames_shown + g_frames_skipped) % (u64)(g_frameskip + 1) != 0;
+    else if (g_frameskip < 0) skip_cur = g_behind && skip_run < 3;
+    else skip_cur = 0;
+}
+
 void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
-    if (!render_ok || !count) return;
+    if (!render_ok || !count || skip_cur) return;
     if (g_render_after > 0 && R->timebase < (u64)(g_render_after * 60750000.0)) return;
     static RawVtx raw;
     static OutVtx outv[MAXV / 3];
@@ -1082,6 +1101,10 @@ static void present(int sx, int sy, int sw, int sh) {
 
 void gx_copy_efb(void) {
     if (!render_ok) return;
+    if (skip_cur) {
+        if (g_bp[0x52] & 0x4000) { g_frame++; frame_end(); }
+        return;
+    }
     batch_flush();
     tmem_generation++;  /* a copy may replace a texture already looked up this frame */
     u32 ctl = g_bp[0x52];
@@ -1090,6 +1113,7 @@ void gx_copy_efb(void) {
     if (ctl & 0x4000) {
         if (g_render_after > 0 && R->timebase < (u64)(g_render_after * 60750000.0)) { g_frame++; return; }
         present(sx, sy, sw, sh);
+        frame_end();
     } else {
         /* EFB to texture: keep it as a GL texture keyed by its RAM address. */
         u32 addr = (g_bp[0x4B] & 0x00FFFFFF) << 5;

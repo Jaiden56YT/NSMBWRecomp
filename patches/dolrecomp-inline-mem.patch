@@ -1,0 +1,69 @@
+diff --git a/src/cpu/cpu.c b/src/cpu/cpu.c
+index 27297aa..6d23071 100644
+--- a/src/cpu/cpu.c
++++ b/src/cpu/cpu.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ // Copyright (C) 2026 ExpansionPak
+ 
++#define DOLRECOMP_CPU_IMPL
+ #include "cpu.h"
+ #include <stdio.h>
+ #include <stdlib.h>
+diff --git a/src/cpu/cpu.h b/src/cpu/cpu.h
+index 29510f8..fd3d7a5 100644
+--- a/src/cpu/cpu.h
++++ b/src/cpu/cpu.h
+@@ -228,4 +228,52 @@ void ppc_lswx(CPUState* cpu, u8 rD, u8 rA, u8 rB, u32 cia);
+ void ppc_cache_control(CPUState* cpu, u8 operation, u32 ea, u32 cia);
+ void ppc_memory_fence(void);
+ 
++
++/* Inline fast path for plain RAM (MEM1/MEM2, cached or uncached): the
++   generated code does a call per load/store otherwise. Anything else, and
++   stores while a reservation or write journal is active, take the full
++   out-of-line path. cpu.c defines DOLRECOMP_CPU_IMPL to get the real ones. */
++#if !defined(DOLRECOMP_CPU_IMPL) && !defined(DOLRECOMP_NO_INLINE_MEM)
++#include <string.h>
++static inline u8* dr_fast_host(CPUState* cpu, u32 addr, u32 size) {
++    if (addr & 0x80000000u) {
++        u32 off = addr & 0x3FFFFFFFu;  /* 0x8/0xC -> MEM1 offset, 0x9/0xD -> 0x1xxxxxxx */
++        if (off + size <= cpu->ram_size) return cpu->ram + off;
++        off -= 0x10000000u;            /* 0x9/0xD: MEM2 */
++        if (off < 0x10000000u && off + size <= cpu->mem2_size && cpu->mem2) return cpu->mem2 + off;
++    }
++    return 0;
++}
++static inline int dr_fast_store_ok(CPUState* cpu) { return !cpu->reserve_valid && !g_mem_write_journal; }
++#define DR_FAST_READ(T, N, SWAP)                                              \
++    static inline T mem_read##N##_inl(CPUState* cpu, u32 addr) {              \
++        u8* p = dr_fast_host(cpu, addr, N / 8);                               \
++        if (__builtin_expect(p != 0, 1)) { T v; memcpy(&v, p, sizeof v); return SWAP(v); } \
++        return mem_read##N(cpu, addr);                                        \
++    }
++#define DR_FAST_WRITE(T, N, SWAP)                                             \
++    static inline void mem_write##N##_inl(CPUState* cpu, u32 addr, T value) { \
++        u8* p = dr_fast_host(cpu, addr, N / 8);                               \
++        if (__builtin_expect(p != 0 && dr_fast_store_ok(cpu), 1)) { T v = SWAP(value); memcpy(p, &v, sizeof v); return; } \
++        mem_write##N(cpu, addr, value);                                       \
++    }
++#define DR_NOSWAP(v) (v)
++DR_FAST_READ(u8, 8, DR_NOSWAP)
++DR_FAST_READ(u16, 16, __builtin_bswap16)
++DR_FAST_READ(u32, 32, __builtin_bswap32)
++DR_FAST_READ(u64, 64, __builtin_bswap64)
++DR_FAST_WRITE(u8, 8, DR_NOSWAP)
++DR_FAST_WRITE(u16, 16, __builtin_bswap16)
++DR_FAST_WRITE(u32, 32, __builtin_bswap32)
++DR_FAST_WRITE(u64, 64, __builtin_bswap64)
++#define mem_read8 mem_read8_inl
++#define mem_read16 mem_read16_inl
++#define mem_read32 mem_read32_inl
++#define mem_read64 mem_read64_inl
++#define mem_write8 mem_write8_inl
++#define mem_write16 mem_write16_inl
++#define mem_write32 mem_write32_inl
++#define mem_write64 mem_write64_inl
++#endif
++
+ #endif /* DOLRECOMP_CPU_H */

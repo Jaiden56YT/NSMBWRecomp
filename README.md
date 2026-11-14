@@ -175,6 +175,25 @@ What changed:
 Pick a runtime base, link the generated DOL + REL code into a Mac executable, HLE the OS/DVD layer,
 and get the game running far enough to issue its first GX draws (then the title screen).
 
+## Switch speed (2026-11-14)
+
+First run on hardware: boots and plays, but slow. Changes for it:
+- **Inline guest memory access** (`third_party/DolRecomp/src/cpu/cpu.h`, saved as `patches/dolrecomp-inline-mem.patch`; apply with `git -C third_party/DolRecomp apply ../../patches/dolrecomp-inline-mem.patch`): loads and stores to plain
+  MEM1/MEM2 are done inline in the generated code; everything else (MMIO, locked cache, stores while a
+  `lwarx` reservation is live) still goes through the out-of-line functions. Those calls were ~12% of
+  the main thread on the Mac.
+- **Frame skipping** (`render.c`): `-frameskip N` draws one frame in N+1; `-frameskip auto` (the Switch
+  default) skips a frame's GL work (draws, EFB copies, clears) whenever the game is behind real time,
+  at most 3 in a row. On the Mac, `-frameskip 1` takes 1-1 from ~1.1x to ~1.6x unpaced.
+- **`args.txt`** next to the game data (`switch/nsmbw/args.txt`) adds command-line options on the
+  Switch, e.g. `-boost` (the loading-screen CPU boost: 1785 MHz CPU, minimum GPU clock) or `-frameskip 0`.
+- The log has a `perf:` line every 5 s (frames shown/skipped) after each `tick:` line (wall vs guest
+  seconds), which gives the speed.
+
+Mac profile of 1-1 before these changes (main thread): ~50% GX (CPU vertex transform and batching ~30%,
+EFB copies and present ~20%), the rest guest code. Next big step if still slow: run the GX command
+processor and GL on a second core, as Dolphin's dual-core mode does.
+
 ## Switch build (2026-11-13)
 
 ```sh

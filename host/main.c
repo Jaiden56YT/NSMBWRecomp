@@ -239,7 +239,38 @@ int main(int argc, char** argv) {
     return g_ret;
 }
 
+/* Extra options from args.txt next to the game data (hbmenu passes none):
+   e.g. "-boost" or "-frameskip 1". */
+static int read_args_file(int argc, char** argv, char*** out) {
+    static char buf[1024];
+    static char* av[64];
+    int n = 0;
+    for (int i = 0; i < argc && n < 63; i++) av[n++] = argv[i];
+    FILE* f = fopen("args.txt", "r");
+    if (f) {
+        size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[len] = 0;
+        fclose(f);
+        for (char* t = strtok(buf, " \t\r\n"); t && n < 63; t = strtok(NULL, " \t\r\n")) av[n++] = t;
+    }
+    av[n] = NULL;
+    *out = av;
+    return n;
+}
+
+static void boost_off(void) { appletSetCpuBoostMode(ApmCpuBoostMode_Normal); }
+
 static int real_main(int argc, char** argv) {
+    /* Files live next to the .nro: extracted/, code/rels/, nand/, nsmbw.log */
+    if (argc > 0 && argv[0]) {
+        static char dir[512];
+        snprintf(dir, sizeof(dir), "%s", argv[0]);
+        char* slash = strrchr(dir, '/');
+        if (slash) { *slash = 0; chdir(dir); }
+    }
+    if (access("extracted/sys/main.dol", F_OK) != 0) chdir("sdmc:/switch/nsmbw");
+    argc = read_args_file(argc, argv, &argv);
+    int boost = 0;
 #else
 int main(int argc, char** argv) {
 #endif
@@ -253,6 +284,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-S") && i + 1 < argc) { extern int g_shot_every; g_shot_every = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "-hidden")) { extern int g_hidden_window; g_hidden_window = 1; }
         else if (!strcmp(argv[i], "-norender")) g_norender = 1;
+        else if (!strcmp(argv[i], "-frameskip") && i + 1 < argc) { extern int g_frameskip; i++; g_frameskip = !strcmp(argv[i], "auto") ? -1 : atoi(argv[i]); }
         else if (!strcmp(argv[i], "-fast")) { extern int g_fast; g_fast = 1; }
         else if (!strcmp(argv[i], "-noidle")) g_noidle = 1;
         else if (!strcmp(argv[i], "-press") && i + 1 < argc) {
@@ -263,21 +295,31 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-ra") && i + 1 < argc) { extern double g_render_after; g_render_after = atof(argv[++i]); }
         else if (!strcmp(argv[i], "-stacks") && i + 1 < argc) g_stack_sampling = atoi(argv[++i]);  /* from guest second N */
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) g_disc_root = argv[++i];
+#ifdef __SWITCH__
+        else if (!strcmp(argv[i], "-boost")) boost = 1;
+#endif
     }
     g_log = stdout;
 #ifdef __SWITCH__
-    /* Files live next to the .nro: extracted/, code/rels/, nand/, nsmbw.log */
-    if (argc > 0 && argv[0]) {
-        static char dir[512];
-        snprintf(dir, sizeof(dir), "%s", argv[0]);
-        char* slash = strrchr(dir, '/');
-        if (slash) { *slash = 0; chdir(dir); }
-    }
-    if (access("extracted/sys/main.dol", F_OK) != 0) chdir("sdmc:/switch/nsmbw");
     g_log = fopen("nsmbw.log", "w");
     if (!g_log) g_log = stdout;
 #endif
     setvbuf(g_log, NULL, _IOLBF, 0);
+#ifdef __SWITCH__
+    {
+        extern int g_frameskip;
+        LOG("switch: options:");
+        for (int i = 1; i < argc; i++) LOG(" %s", argv[i]);
+        LOG("\nswitch: frameskip %s\n", g_frameskip < 0 ? "auto" : g_frameskip ? "fixed" : "off");
+        /* -boost: the CPU boost games use while loading (1785 MHz), which also
+           drops the GPU to its lowest clock. Worth trying: the CPU is the bottleneck. */
+        if (boost) {
+            Result rc = appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
+            LOG("switch: CPU boost %s (rc %08X)\n", R_SUCCEEDED(rc) ? "on" : "failed", rc);
+            if (R_SUCCEEDED(rc)) atexit(boost_off);
+        }
+    }
+#endif
 
     static CPUState cpu;
     if (!cpu_init(&cpu) || !cpu_alloc_mem2(&cpu, WII_MEM2_SIZE)) return 1;

@@ -356,6 +356,7 @@ u64 mmio_next_event_tb(void) {
 
 /* Real-time pacing: keep guest time from running ahead of the wall clock. */
 int g_fast;
+int g_behind;  /* guest time is behind the wall clock (frame skipping uses it) */
 static void pace(CPUState* cpu) {
     static u64 tb0, ns0;
     if (g_fast) return;
@@ -365,6 +366,7 @@ static void pace(CPUState* cpu) {
     if (!ns0) { ns0 = now; tb0 = cpu->timebase; return; }
     u64 guest_ns = (cpu->timebase - tb0) * 1000000ull / 60750ull;  /* 60.75 MHz: 1 tick = 16.46 ns */
     u64 real_ns = now - ns0;
+    g_behind = real_ns > guest_ns + 8000000ull;  /* more than half a frame late */
     if (guest_ns > real_ns) {
         u64 d = guest_ns - real_ns;
         if (d > 200000000ull) { ns0 = now; tb0 = cpu->timebase; return; }  /* way ahead: resync */
@@ -382,11 +384,12 @@ void mmio_tick(CPUState* cpu) {
         vi_retrace();
         pace(cpu);
         if (g_vi_count % 300 == 0) {
-            extern u64 g_gx_frames, g_pe_done;
+            extern u64 g_gx_frames, g_pe_done, g_frames_shown, g_frames_skipped;
             struct timespec wt; clock_gettime(CLOCK_MONOTONIC, &wt);
             static double w0; double w = wt.tv_sec + wt.tv_nsec / 1e9; if (!w0) w0 = w;
             LOG("tick: wall %.1f guest %.1f vi %llu xfb %llu pe_done %llu pi_sr %08X pi_mr %08X msr %08X\n", w - w0, cpu->timebase / 60750000.0, (unsigned long long)g_vi_count,
                 (unsigned long long)g_gx_frames, (unsigned long long)g_pe_done, mmio_get32(0xCC003000u), mmio_get32(0xCC003004u), cpu->msr);
+            LOG("perf: frames shown %llu skipped %llu\n", (unsigned long long)g_frames_shown, (unsigned long long)g_frames_skipped);
         }
         { int render_poll(void); if (!render_poll()) exit(0); }
         { void input_update(void); input_update(); }
