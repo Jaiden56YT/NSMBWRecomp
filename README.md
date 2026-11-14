@@ -194,6 +194,27 @@ Mac profile of 1-1 before these changes (main thread): ~50% GX (CPU vertex trans
 EFB copies and present ~20%), the rest guest code. Next big step if still slow: run the GX command
 processor and GL on a second core, as Dolphin's dual-core mode does.
 
+### Render thread and dispatch loop (2026-11-14, v4)
+
+The v3 log (`tick`/`perf` lines) showed ~0.2x even while auto frame skip dropped 3 frames in 4: the
+CPU side, not drawing, was the limit. Changes:
+- **Render thread** (`gx.c` render queue): the CPU thread still parses the FIFO, keeps the
+  CPU-visible registers and raises PE interrupts; it forwards packets (CP/BP/XF writes with masks,
+  konst banks, display lists and indexed XF loads already resolved; draws with vertex data copied) through a
+  32 MB ring to a render thread, which keeps its own registers (`rs_*`; `render.c` maps `g_cp` etc.
+  to them) and does all vertex transform and GL work. The CPU thread waits if the renderer falls more
+  than 2 frames behind. Handoff is batched (64 KB or at draw-done/copy sync points). `-gpthread 0`
+  replays the packets inline. On the Switch the emulator is pinned to core 0, the renderer to core 1.
+- **Dispatch loop**: every `bl` returns to the host loop (~4.4 M times per guest second in 1-1), so the
+  per-block hardware/IOS/interrupt checks now run every 8 blocks, and an address bitmap skips
+  `hle_dispatch` for unhooked addresses.
+- **FIFO gather** appends new bytes instead of re-gathering the unfinished command byte by byte.
+- RAM fast path is `always_inline` (GCC won't inline into the huge chunk functions otherwise).
+
+Mac, 1-1 unpaced: 1.1x (v2) → 2.0x (render thread) → 2.3x (+ frame skip 1) → ~2.3–3.3x (+ loop changes).
+Profile after the render thread: only ~29% of the CPU thread was generated guest code; the rest was
+the dispatch loop, FIFO parsing, FP helpers (`binary_single`, exact FPSCR) and wakeups.
+
 ## Switch build (2026-11-13)
 
 ```sh
