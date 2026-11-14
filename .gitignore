@@ -9,3 +9,4 @@ run.log
 gxfifo.bin
 host/build-switch/
 dist/
+third_party/NSMBWiicompiled/

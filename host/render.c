@@ -133,7 +133,9 @@ typedef struct {
 static void vfmt_build(int vat, VFmt* f) {
     u32 lo = g_cp[0x50], hi = g_cp[0x60];
     u32 a = g_cp[0x70 + vat], b = g_cp[0x80 + vat], c = g_cp[0x90 + vat];
-    u32 mi_a = g_cp[0x30], mi_b = g_cp[0x40];
+    /* default matrix indices: the transform unit's own copy (XF 0x1018/0x1019), which
+       NW4R g3d updates on its own; the CP copy (0x30/0x40) can be stale */
+    u32 mi_a = g_xf[0x1018], mi_b = g_xf[0x1019];
     memset(f, 0, sizeof(*f));
     f->pmidx_def = mi_a & 0x3F;
     f->tmidx_def[0] = (mi_a >> 6) & 0x3F;  f->tmidx_def[1] = (mi_a >> 12) & 0x3F;
@@ -612,7 +614,17 @@ static GLuint bind_texmap_slow(int map, u64 frame) {
 
     TexEntry* e = NULL;
     for (int i = 0; i < EFBCOPIES; i++)
-        if (efbcopies[i].tex && efbcopies[i].addr == addr) { e = &efbcopies[i]; goto params; }
+        if (efbcopies[i].tex && efbcopies[i].addr == addr) {
+            e = &efbcopies[i];
+            if (getenv("EFB_LOG")) {
+                static u32 seen[64]; static int ns;
+                u32 key = addr ^ fmt << 28;
+                int found = 0;
+                for (int k = 0; k < ns; k++) if (seen[k] == key) found = 1;
+                if (!found && ns < 64) { seen[ns++] = key; LOG("efblog: sample copy %08X %ux%u as tex fmt %u (map %d)\n", addr, w, h, fmt, map); }
+            }
+            goto params;
+        }
     int slot = (int)(((addr >> 5) ^ (w * 31 + h) ^ fmt * 7 ^ tlut_hash) % TEXCACHE);
     for (int i = 0; i < 16; i++) {
         TexEntry* c = &texcache[(slot + i) % TEXCACHE];
@@ -669,7 +681,7 @@ void render_tlut_load(void) {
 /* ------------------------------------------------------------------ */
 /* TEV shader generation                                               */
 
-typedef struct { u64 key; GLuint prog; GLint u_reg, u_konst, u_aref, u_const_alpha; } Shader;
+typedef struct { u64 key; GLuint prog; GLint u_reg, u_konst, u_aref, u_const_alpha, u_indmtx; } Shader;
 #define SHADERS 512
 static Shader shaders[SHADERS];
 
@@ -732,6 +744,10 @@ static u64 tev_key(void) {
     for (u32 i = 0; i < 8; i++) MIX(g_bp[0x28 + i]);
     for (u32 i = 0; i < 8; i++) MIX(g_bp[0xF6 + i]);
     MIX(g_bp[0xF3] & 0xFF0000);
+    u32 nbump = (g_bp[0x00] >> 16) & 7;
+    MIX(nbump);
+    if (nbump) { MIX(g_bp[0x25]); MIX(g_bp[0x26]); MIX(g_bp[0x27]); }
+    for (u32 i = 0; i < n; i++) MIX(g_bp[0x10 + i] & 0x1FFFFF);
 #undef MIX
     return h;
 }
@@ -752,7 +768,10 @@ static Shader* get_shader(void) {
             "in vec4 v_col0; in vec4 v_col1; in vec3 v_tex[8];\n"
             "uniform sampler2D u_tex[8];\n"
             "uniform vec4 u_reg[4]; uniform vec4 u_konst[4]; uniform vec2 u_aref; uniform float u_const_alpha;\n"
+            "uniform ivec4 u_indmtx[6];\n"
             "out vec4 o_color;\n"
+            "ivec2 fixuv(int c, vec2 size){ vec3 t = v_tex[c]; return ivec2(trunc(t.xy / (t.z == 0.0 ? 1.0 : t.z) * size * 128.0)); }\n"
+            "ivec2 ishift(ivec2 v, int sh){ return sh >= 0 ? (v << sh) : (v >> (-sh)); }\n"
             "vec3 lrp(vec3 a, vec3 b, vec3 c){ return a*(vec3(1.0)-c)+b*c; }\n"
             "float lrp(float a, float b, float c){ return a*(1.0-c)+b*c; }\n"
             "void main(){\n"
@@ -765,6 +784,21 @@ static Shader* get_shader(void) {
     static const char* bias[3] = {"0.0", "0.5", "-0.5"};
     static const char* scale[4] = {"1.0", "2.0", "4.0", "0.5"};
     u32 last_dest = 0;
+    /* Indirect stages: sample each indirect texture (at its coordinate scaled
+       down by 2^ss); its A, B, G bytes become the S, T, U offsets. */
+    u32 nbump = (g_bp[0x00] >> 16) & 7;
+    for (u32 i = 0; i < nbump && i < 4; i++) {
+        u32 iref = g_bp[0x27];
+        u32 imap = (iref >> (6 * i)) & 7, icoord = (iref >> (6 * i + 3)) & 7;
+        u32 ss = g_bp[0x25 + i / 2] >> ((i & 1) * 8);
+        u32 ss_s = ss & 15, ss_t = (ss >> 4) & 15;
+        snprintf(line, sizeof(line),
+                 " ivec3 iind%u; { vec3 t = v_tex[%u]; vec2 uv = t.xy / (t.z == 0.0 ? 1.0 : t.z) / vec2(%u.0, %u.0);\n"
+                 "   iind%u = ivec3(round(texture(u_tex[%u], uv).abg * 255.0)); }\n",
+                 i, icoord, 1u << ss_s, 1u << ss_t, i, imap);
+        cat(&p, line);
+    }
+    cat(&p, " ivec2 tevcoord = ivec2(0);\n");
     for (u32 s = 0; s < n; s++) {
         u32 tref = g_bp[0x28 + s / 2] >> ((s & 1) * 12);
         u32 map = tref & 7, coord = (tref >> 3) & 7, en = (tref >> 6) & 1, chan = (tref >> 7) & 7;
@@ -776,7 +810,41 @@ static Shader* get_shader(void) {
         swap_str((int)((aenv >> 2) & 3), tsw);
         snprintf(line, sizeof(line), " { vec3 kc=%s; float ka=%s;\n", kc_name(kc), ka_name(ka));
         cat(&p, line);
-        if (en) {
+        u32 icmd = g_bp[0x10 + s];
+        u32 bt = icmd & 3, ifmt = (icmd >> 2) & 3, ibias = (icmd >> 4) & 7, mid = (icmd >> 9) & 15;
+        u32 sw = (icmd >> 13) & 7, tw = (icmd >> 16) & 7, fb = (icmd >> 20) & 1;
+        int ind_active = (icmd & 0x17FE00) != 0 && bt < nbump;
+        if (ind_active) {
+            /* Indirect: tevcoord = wrap(coord) + matrix * offsets, in 1/128 texel units */
+            static const char* fmask[4] = {"255", "31", "15", "7"};
+            static const char* badd[4] = {"-128", "1", "1", "1"};
+            snprintf(line, sizeof(line), "  { vec2 sz = vec2(textureSize(u_tex[%u], 0)); ivec2 fuv = fixuv(%u, sz);\n"
+                                         "    ivec3 ic = iind%u & %s;\n", map, coord, bt, fmask[ifmt]);
+            cat(&p, line);
+            for (int k = 0; k < 3; k++)
+                if (ibias & (1u << k)) { snprintf(line, sizeof(line), "    ic.%c += %s;\n", "xyz"[k], badd[ifmt]); cat(&p, line); }
+            if (mid >= 1 && mid <= 3) {
+                u32 mi = 2 * (mid - 1);
+                snprintf(line, sizeof(line), "    ivec2 itr = ishift(ivec2(dot(vec3(u_indmtx[%u].xyz), vec3(ic)), dot(vec3(u_indmtx[%u].xyz), vec3(ic))) >> 3, u_indmtx[%u].w);\n",
+                         mi, mi + 1, mi);
+            } else if (mid >= 5 && mid <= 7) {
+                snprintf(line, sizeof(line), "    ivec2 itr = ishift((fuv * ic.xx) >> 8, u_indmtx[%u].w);\n", 2 * (mid - 5));
+            } else if (mid >= 9 && mid <= 11) {
+                snprintf(line, sizeof(line), "    ivec2 itr = ishift((fuv * ic.yy) >> 8, u_indmtx[%u].w);\n", 2 * (mid - 9));
+            } else snprintf(line, sizeof(line), "    ivec2 itr = ivec2(0);\n");
+            cat(&p, line);
+            static const int wrapsz[8] = {0, 256 << 7, 128 << 7, 64 << 7, 32 << 7, 16 << 7, -1, 0};
+            char ws[64], wt[64];
+            if (sw == 6) snprintf(ws, sizeof(ws), "0"); else if (wrapsz[sw] > 0) snprintf(ws, sizeof(ws), "(fuv.x & %d)", wrapsz[sw] - 1); else snprintf(ws, sizeof(ws), "fuv.x");
+            if (tw == 6) snprintf(wt, sizeof(wt), "0"); else if (wrapsz[tw] > 0) snprintf(wt, sizeof(wt), "(fuv.y & %d)", wrapsz[tw] - 1); else snprintf(wt, sizeof(wt), "fuv.y");
+            snprintf(line, sizeof(line), "    tevcoord = %sivec2(%s, %s) + itr;\n", fb ? "tevcoord + " : "", ws, wt);
+            cat(&p, line);
+            if (en) {
+                snprintf(line, sizeof(line), "    tex = texture(u_tex[%u], vec2(tevcoord) / (128.0 * sz)).%s;\n", map, tsw);
+                cat(&p, line);
+            } else cat(&p, "    tex = vec4(0.0);\n");
+            cat(&p, "  }\n");
+        } else if (en) {
             snprintf(line, sizeof(line), "  tex = texture(u_tex[%u], v_tex[%u].xy / (v_tex[%u].z == 0.0 ? 1.0 : v_tex[%u].z)).%s;\n", map, coord, coord, coord, tsw);
             cat(&p, line);
         } else cat(&p, "  tex = vec4(0.0);\n");
@@ -866,6 +934,7 @@ static Shader* get_shader(void) {
     sh->u_konst = glGetUniformLocation(prog, "u_konst");
     sh->u_aref = glGetUniformLocation(prog, "u_aref");
     sh->u_const_alpha = glGetUniformLocation(prog, "u_const_alpha");
+    sh->u_indmtx = glGetUniformLocation(prog, "u_indmtx");
     return sh;
 }
 
@@ -878,6 +947,7 @@ typedef struct {
     GLuint prog;
     GLenum mode;
     float regs[16], konst[16], aref[2], calpha;
+    int indmtx[24];
     GLuint tex[8];
     u32 texmode[8];
     int vp[4], sc[4];
@@ -902,6 +972,19 @@ static void capture_state(DrawState* st, Shader* sh, GLenum mode) {
     st->aref[0] = (g_bp[0xF3] & 0xFF) / 255.f;
     st->aref[1] = ((g_bp[0xF3] >> 8) & 0xFF) / 255.f;
     st->calpha = (g_bp[0x42] & 0x100) ? (g_bp[0x42] & 0xFF) / 255.f : -1.f;
+    if ((g_bp[0x00] >> 16) & 7) {
+        /* indirect matrices: BP 0x06+3m = (ma,mb,s0), (mc,md,s1), (me,mf,s2);
+           rows (ma,mc,me) and (mb,md,mf), 11-bit signed; shift = scale - 17 */
+        for (int m = 0; m < 3; m++) {
+            u32 a = g_bp[0x06 + m * 3], b = g_bp[0x07 + m * 3], c = g_bp[0x08 + m * 3];
+#define SX11(v) ((int)((v) & 0x7FF) - (((v) & 0x400) ? 0x800 : 0))
+            int scale = (int)(((a >> 22) & 3) | (((b >> 22) & 3) << 2) | (((c >> 22) & 3) << 4));
+            int* r0 = st->indmtx + m * 8;
+            r0[0] = SX11(a); r0[1] = SX11(b); r0[2] = SX11(c); r0[3] = scale - 17;
+            r0[4] = SX11(a >> 11); r0[5] = SX11(b >> 11); r0[6] = SX11(c >> 11); r0[7] = scale - 17;
+#undef SX11
+        }
+    }
     float wd = xff(0x101A), ht = xff(0x101B), xo = xff(0x101D), yo = xff(0x101E);
     st->vp[0] = (int)lroundf(xo - wd - 342); st->vp[1] = (int)lroundf(yo + ht - 342);
     st->vp[2] = (int)lroundf(2 * wd);         st->vp[3] = (int)lroundf(-2 * ht);
@@ -937,6 +1020,7 @@ static void batch_flush(void) {
     glUniform4fv(cur_shader->u_konst, 4, st->konst);
     glUniform2f(cur_shader->u_aref, st->aref[0], st->aref[1]);
     glUniform1f(cur_shader->u_const_alpha, st->calpha);
+    if (cur_shader->u_indmtx >= 0) glUniform4iv(cur_shader->u_indmtx, 6, st->indmtx);
     static const GLenum wraps[4] = {GL_CLAMP_TO_EDGE, GL_REPEAT, GL_MIRRORED_REPEAT, GL_REPEAT};
     for (int m = 0; m < 8; m++) {
         if (!st->tex[m]) continue;
@@ -1017,6 +1101,12 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
         st.tex[m] = bind_texmap(m, g_frame);  /* may upload (flushes first) */
         st.texmode[m] = g_bp[texmap_regs_lo[m]];
     }
+    for (u32 i = 0; i < ((g_bp[0x00] >> 16) & 7) && i < 4; i++) {  /* indirect texture maps */
+        int m = (int)((g_bp[0x27] >> (6 * i)) & 7);
+        if (st.tex[m]) continue;
+        st.tex[m] = bind_texmap(m, g_frame);
+        st.texmode[m] = g_bp[texmap_regs_lo[m]];
+    }
     if (batch_n && (memcmp(&st, &cur_state, sizeof(st)) != 0 || batch_n + count * 3 > MAXV)) batch_flush();
     cur_state = st;
     cur_shader = sh;
@@ -1047,6 +1137,22 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
             g_in_dl ? "DL" : "", prim, count, vat, v0->pos[0], v0->pos[1], v0->pos[2], v0->pos[3], raw.pos[0], raw.pos[1], raw.pos[2], raw.pmidx,
             v0->col[0][0], v0->col[0][1], v0->col[0][2], v0->col[0][3], xff(0x101A), xff(0x101B), xff(0x101D), xff(0x101E),
             g_xf[0x1026], g_bp[0x40], g_bp[0x41], ((g_bp[0] >> 10) & 15) + 1, g_bp[0x28], (g_bp[0x94] & 0xFFFFFF) << 5, (g_bp[0x88] >> 20) & 15, g_bp[0]);
+        for (u32 i = 0; i < count && i < 4; i++) {
+            RawVtx rr; memset(&rr, 0, sizeof(rr));
+            decode_vertex(data + (size_t)i * (size_t)vsize, &vf, &rr);
+            LOG("   v%u raw tex0 %.3f %.3f nrm %.2f %.2f %.2f -> out tex0 %.3f %.3f %.3f tex1 %.3f %.3f tex2 %.3f %.3f\n", i, rr.tex[0][0], rr.tex[0][1],
+                rr.nrm[0], rr.nrm[1], rr.nrm[2], outv[i].tex[0][0], outv[i].tex[0][1], outv[i].tex[0][2], outv[i].tex[1][0], outv[i].tex[1][1], outv[i].tex[2][0], outv[i].tex[2][1]);
+        }
+        LOG("   vfmt tex0 mode %u n %u fmt %u; xf103F %08X genmode ntex %u\n", vf.tex_mode[0], vf.tex_n[0], vf.tex_fmt[0], g_xf[0x103F], g_bp[0] & 15);
+        for (int t = 1; t < 3 && t < (int)(g_xf[0x103F] & 15); t++) {
+            RawVtx rr; memset(&rr, 0, sizeof(rr));
+            decode_vertex(data, &vf, &rr);
+            u32 ma = (u32)rr.tmidx[t] * 4, pinfo = g_xf[0x1050 + t], pa = 0x500 + (pinfo & 0x3F) * 4;
+            LOG("   texgen%d info %08X tmidx %u pinfo %08X dual %u | M %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f | P %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f\n",
+                t, g_xf[0x1040 + t], rr.tmidx[t], pinfo, g_xf[0x1012] & 1,
+                xff(ma), xff(ma + 1), xff(ma + 2), xff(ma + 3), xff(ma + 4), xff(ma + 5), xff(ma + 6), xff(ma + 7), xff(ma + 8), xff(ma + 9), xff(ma + 10), xff(ma + 11),
+                xff(pa), xff(pa + 1), xff(pa + 2), xff(pa + 3), xff(pa + 4), xff(pa + 5), xff(pa + 6), xff(pa + 7), xff(pa + 8), xff(pa + 9), xff(pa + 10), xff(pa + 11));
+        }
         if (g_in_dl || xff(0x101B) > -40.0f) {
             LOG("   chan c0 %08X a0 %08X c1 %08X amb %08X mat %08X nchan %u light0 col %08X pos %.1f %.1f %.1f dir %.2f %.2f %.2f nrm %.2f %.2f %.2f has %d col0 %.2f %.2f %.2f %.2f\n",
                 g_xf[0x100E], g_xf[0x1010], g_xf[0x100F], g_xf[0x100A], g_xf[0x100C], g_xf[0x1009], g_xf[0x603], xff(0x60A), xff(0x60B), xff(0x60C),
@@ -1142,6 +1248,28 @@ void gx_copy_efb(void) {
             if (!e->tex) glGenTextures(1, &e->tex);
         }
         e->last_frame = g_frame;
+        {   /* EFB_DUMP=FRAME: save every EFB-to-texture copy made during that frame */
+            static long dump_at = -2;
+            if (dump_at == -2) dump_at = getenv("EFB_DUMP") ? atol(getenv("EFB_DUMP")) : -1;
+            if (dump_at >= 0 && (long)g_frame == dump_at && g_shot_dir) {
+                u8* px = malloc((size_t)sw * sh * 4);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_fbo);
+                glReadPixels(sx, sy, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, px);
+                char path[1024];
+                static int nd;
+                snprintf(path, sizeof(path), "%s/efbcopy_%03d_%08X_%dx%d_at%d_%d.png", g_shot_dir, nd++, addr, sw, sh, sx, sy);
+                save_png(path, px, sw, sh);
+                free(px);
+            }
+        }
+        if (getenv("EFB_LOG")) {
+            static u32 seen[64]; static int ns;
+            u32 key = addr ^ (ctl & 0xFFFF) << 16;
+            int found = 0;
+            for (int k = 0; k < ns; k++) if (seen[k] == key) found = 1;
+            if (!found && ns < 64) { seen[ns++] = key; LOG("efblog: copy %dx%d at (%d,%d) -> %08X ctl %05X fmt %u%s clamp %u gamma %u pixfmt %u\n", tw, th, sx, sy, addr, ctl,
+                ((ctl >> 4) & 7) | ((ctl >> 3) & 1) << 3, (ctl & 0x8000) ? " intensity" : "", ctl & 3, (ctl >> 7) & 3, g_bp[0x43] & 7); }
+        }
         static int efb_log;
         if (efb_log++ < 10) LOG("render: EFB copy %dx%d at (%d,%d) -> %08X%s\n", tw, th, sx, sy, addr, half ? " (half)" : "");
         if (e) {
