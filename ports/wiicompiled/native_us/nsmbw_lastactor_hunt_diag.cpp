@@ -44,9 +44,9 @@ extern "C" uint32_t g_nsmbwGameSetupScenePtr;
 extern "C" uint32_t g_nsmbwGameSetupLastActorPtr = 0;
 
 namespace {
-constexpr uint32_t kProfListMgDataPAddr = 0x8042A698u;
-constexpr uint32_t kSetTmpCtDataAddr = 0x80162B90u;
-constexpr uint32_t kRunCreateAddr = 0x80162A70u;
+constexpr uint32_t kProfListMgDataPAddr = 0x8042A3B8u;
+constexpr uint32_t kSetTmpCtDataAddr = 0x80162A50u;
+constexpr uint32_t kRunCreateAddr = 0x80162930u;
 constexpr uint32_t kMpOwnerOffset = 0x10u;
 constexpr uint32_t kLastActorProfile = 749u;
 constexpr uint32_t kGameSetupProfile = 0xAu;
@@ -64,8 +64,8 @@ constexpr uint32_t kProfNameOffset = 0x08u;
 // vtable slot* to call, not a per-object address, so they're valid for any fBase_c-family object
 // (already confirmed working for GAME_SETUP in nsmbw_gamesetup_executepack_diag.cpp; same
 // constants reused here for LASTACTOR).
-constexpr uint32_t kExecuteTriple = 0x803296ECu;
-constexpr uint32_t kPostExecuteTriple = 0x803296F8u;
+constexpr uint32_t kExecuteTriple = 0x803293A4u;
+constexpr uint32_t kPostExecuteTriple = 0x803293B0u;
 
 void ResolveAndDumpVirtual(const char* label, uint32_t objPtr, uint32_t triple) {
     try {

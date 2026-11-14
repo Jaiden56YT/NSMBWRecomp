@@ -54,10 +54,10 @@
 extern "C" uint32_t g_nsmbwGameSetupScenePtr;
 
 namespace {
-constexpr uint32_t kCommonPackAddr = 0x80161E00u;
-constexpr uint32_t kPreCreateTriple = 0x80329698u;
-constexpr uint32_t kCreateTriple = 0x803296A4u;
-constexpr uint32_t kPostCreateTriple = 0x803296B0u;
+constexpr uint32_t kCommonPackAddr = 0x80161CC0u;
+constexpr uint32_t kPreCreateTriple = 0x80329350u;
+constexpr uint32_t kCreateTriple = 0x8032935Cu;
+constexpr uint32_t kPostCreateTriple = 0x80329368u;
 }
 
 extern "C" uint32_t GameSetupCreatePack_Diag_80161F80(uint32_t thisPtr)

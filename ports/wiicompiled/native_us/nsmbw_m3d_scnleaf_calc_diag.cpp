@@ -23,7 +23,7 @@
 extern "C" uint32_t g_nsmbwCurrentSceneProfile;
 
 namespace {
-constexpr uint32_t kSetOptionAddr = 0x8016A230u;
+constexpr uint32_t kSetOptionAddr = 0x8016A0F0u;
 
 void SetOption(uint32_t thisPtr, uint32_t option, uint32_t value) {
     auto& cpu = GetPersistentCpuContext();
@@ -54,7 +54,7 @@ extern "C" void M3dScnLeafCalc_Diag_8016A2E0(uint32_t thisPtr, uint32_t keepEnab
         // Caller 0x800D36E0 (dPyMdlBase_c::_calc) keeps its `this` in r31 (non-volatile, untouched
         // by the callee at entry): mMtx @0xD8 is what it just passed to setLocalMtx, the scale
         // copy @0x144 is what dPyMdlBase_c::calc stored from its scale argument.
-        if (cc && lr == 0x800D3828u) {
+        if (cc && lr == 0x800D3738u) {
             const uint32_t py = static_cast<uint32_t>(cc->gpr[31]);
             float m[12], sc[3], rs[12];
             for (int i = 0; i < 12; ++i) m[i] = Memory::ReadFloat32(py + 0xD8u + i * 4);
@@ -104,7 +104,7 @@ extern "C" void M3dScnLeafCalc_Diag_8016A2E0(uint32_t thisPtr, uint32_t keepEnab
             auto& cpu3 = GetPersistentCpuContext();
             cpu3.gpr[3] = dst; cpu3.gpr[4] = dstScale; cpu3.gpr[5] = parent; cpu3.gpr[6] = parentScale;
             cpu3.gpr[7] = 0xF0000000u; cpu3.gpr[8] = result;
-            InvokeIndirectCpu(0x80256490u, &cpu3);
+            InvokeIndirectCpu(0x80256350u, &cpu3);
             float D[12];
             for (int i = 0; i < 12; ++i) D[i] = Memory::ReadFloat32(dst + i * 4);
             std::fprintf(stderr,
@@ -125,18 +125,18 @@ extern "C" void M3dScnLeafCalc_Diag_8016A2E0(uint32_t thisPtr, uint32_t keepEnab
                 auto& cpu4 = GetPersistentCpuContext();
                 cpu4.gpr[3] = scnNow + 0xE8u;
                 cpu4.gpr[4] = 0u;
-                InvokeIndirectCpu(0x8023B440u, &cpu4);
+                InvokeIndirectCpu(0x8023B300u, &cpu4);
                 const uint32_t nd = cpu4.gpr[3];
                 Memory::Write32(ndHandle, nd);
                 for (int i = 0; i < 0x80; i += 4) Memory::Write32(res + i, 0u);
                 cpu4.gpr[3] = ndHandle; cpu4.gpr[4] = res;
-                InvokeIndirectCpu(0x8023EFD0u, &cpu4);
+                InvokeIndirectCpu(0x8023EE90u, &cpu4);
                 const uint32_t flagsA = Memory::Read32(res);
                 float sA[3], tA[3];
                 for (int i = 0; i < 3; ++i) { sA[i] = Memory::ReadFloat32(res + 4 + i * 4); tA[i] = Memory::ReadFloat32(res + 0x1C + i * 4); }
                 Memory::Write32(res, flagsA | 0x200u);
                 cpu4.gpr[3] = ndHandle; cpu4.gpr[4] = res;
-                InvokeIndirectCpu(0x8023EE30u, &cpu4);
+                InvokeIndirectCpu(0x8023ECF0u, &cpu4);
                 const uint32_t flagsB = Memory::Read32(res);
                 float M[12];
                 for (int i = 0; i < 12; ++i) M[i] = Memory::ReadFloat32(res + 0x28 + i * 4);
@@ -151,7 +151,7 @@ extern "C" void M3dScnLeafCalc_Diag_8016A2E0(uint32_t thisPtr, uint32_t keepEnab
                 for (int i = 0; i < 3; ++i) { Memory::WriteFloat32(rootScale + i * 4, 1.f); Memory::WriteFloat32(dstScale2 + i * 4, 0.f); }
                 cpu4.gpr[3] = dst2; cpu4.gpr[4] = dstScale2; cpu4.gpr[5] = scnNow + 0x3Cu; cpu4.gpr[6] = rootScale;
                 cpu4.gpr[7] = 0xF0000000u; cpu4.gpr[8] = res;
-                InvokeIndirectCpu(0x80256490u, &cpu4);
+                InvokeIndirectCpu(0x80256350u, &cpu4);
                 float D2[12];
                 for (int i = 0; i < 12; ++i) D2[i] = Memory::ReadFloat32(dst2 + i * 4);
                 std::fprintf(stderr,
@@ -252,7 +252,7 @@ extern "C" void M3dScnLeafCalc_Diag_8016A2E0(uint32_t thisPtr, uint32_t keepEnab
                     auto& cpu2 = GetPersistentCpuContext();
                     cpu2.gpr[3] = scn + 0xE8u;
                     cpu2.gpr[4] = 0u;
-                    InvokeIndirectCpu(0x8023B440u, &cpu2);
+                    InvokeIndirectCpu(0x8023B300u, &cpu2);
                     const uint32_t nd = cpu2.gpr[3];
                     if (nd >= 0x80000000u && nd < 0x94000000u) {
                         uint32_t ndMtxId = 0, ndFlags = 0;

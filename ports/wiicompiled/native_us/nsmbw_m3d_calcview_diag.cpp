@@ -25,17 +25,17 @@
 extern "C" uint32_t g_nsmbwCurrentSceneProfile;
 
 namespace {
-constexpr uint32_t kR13 = 0x8042F980u;
+constexpr uint32_t kR13 = 0x8042F6A0u;
 constexpr uint32_t kLightMgrsAddr = kR13 - 0x52CCu;
 constexpr uint32_t kFogMgrsAddr = kR13 - 0x52C4u;
 constexpr uint32_t kScnRootAddr = kR13 - 0x52D4u;
-constexpr uint32_t kGetCurrentCamera = 0x80164C70u;
-constexpr uint32_t kGetCameraMtx = 0x802541F0u;
-constexpr uint32_t kGetCurrentCameraID = 0x80164C80u;
-constexpr uint32_t kFogCopyToG3D = 0x802C6950u;
-constexpr uint32_t kScnRootCalcView = 0x80259250u;
-constexpr uint32_t kScnRootGather = 0x802592D0u;
-constexpr uint32_t kScnRootZSort = 0x802593C0u;
+constexpr uint32_t kGetCurrentCamera = 0x80164B30u;
+constexpr uint32_t kGetCameraMtx = 0x802540B0u;
+constexpr uint32_t kGetCurrentCameraID = 0x80164B40u;
+constexpr uint32_t kFogCopyToG3D = 0x802C6660u;
+constexpr uint32_t kScnRootCalcView = 0x80259110u;
+constexpr uint32_t kScnRootGather = 0x80259190u;
+constexpr uint32_t kScnRootZSort = 0x80259280u;
 // Scratch in the locked-cache region, only used transiently by g3d's own calc passes, never
 // concurrently with this function.
 constexpr uint32_t kScratchCamHandle = 0xE0003C00u;
@@ -91,7 +91,7 @@ extern "C" void M3dCalcView_Diag_80164EA0(uint32_t idx) {
     float before[4] = {}, after[4] = {};
     uint32_t pal = 0;
     if (doLog) {
-        Memory::TryRead32(0x811E51E0u + 0xF4u, pal);
+        Memory::TryRead32(0x811E5220u + 0xF4u, pal);
         if (pal >= 0x80000000u && pal < 0x94000000u) for (int i = 0; i < 4; ++i) before[i] = Memory::ReadFloat32(pal + i * 4);
     }
 
@@ -126,7 +126,7 @@ extern "C" void M3dCalcView_Diag_80164EA0(uint32_t idx) {
     // whether ITS handler writes the palette. Splits "the scene pass never reaches this object's
     // handler" from "the handler computes zeros".
     if (doLog && (calls % 240) == 0) {
-        const uint32_t obj = 0x811E51E0u, camMtx = 0xE0003C40u;
+        const uint32_t obj = 0x811E5220u, camMtx = 0xE0003C40u;
         const float ident[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
         for (int i = 0; i < 12; ++i) Memory::WriteFloat32(camMtx + i * 4, ident[i]);
         uint32_t vtbl = 0, fn = 0;

@@ -27,6 +27,37 @@ DOTNET_ROLL_FORWARD=Major):
 Result: 40,514 unique functions in 200 shards; data initializer embeds 7.47 MB of the
 game's DOL/REL data, so builds contain game data and must not be shared.
 
+## Phase 2 (2026-11-14): macOS build - boots, intro cutscene at 60 fps
+Upstream changes are in `upstream-macos-us.patch` (apply in third_party/NSMBWiicompiled):
+- ARM64/macOS: `runtime/include/isa/host_simd.h` (x86 intrinsics via SIMDe in
+  third_party/simde; MXCSR FTZ/DAZ <-> FPCR.FZ), CMake host checks and `MKW_HOST_ARCH_FLAGS`,
+  NSMBW-only configure (`MKW_NSMBW_ONLY`), shm_open instead of memfd, backtrace(),
+  Mach-O section/underscore handling in the translator's blob writer
+  (`AssemblyBlobWriter.cs`), CPUID guard x86-only.
+- US addresses in the shared runtime: every constant in the main executable's range
+  (0x800B4604-0x80430000) goes through the PAL->US table, so US touches the same variables
+  upstream's PAL build did (including Mario Kart addresses upstream left in, which land in
+  NSMBW memory); NSMBW `#ifdef` sections likewise; 12 Mario Kart hooks that hit real US
+  functions are compiled out; OSInitContext 0x801ACFB0 / OSExitThread 0x801B53A0 from the
+  US OSCreateThread body. Product code: game ID SMNE, version 2, save path 534d4e45.
+- `native_us/`: five EXI overrides regenerated from the US translation
+  (`tools/regen_mmio_overrides.py`, flat accesses -> checked Memory::); createDylinkHeap body
+  with US values; REL bases/sizes from the US .rel headers (d_profileNP 0x80768500, d_basesNP
+  2313484 bytes); r13/r2-relative offsets converted (PAL base+off -> table -> minus US base,
+  cross-checked against US code); options-menu/full-save overrides disabled
+  (`native_us_disabled/`).
+- Lessons: PAL constants come in several forms - plain addresses, `u`-suffixed, hi/lo halves of
+  one address in copied bodies, small-data offsets, REL header addresses - and each needs its
+  own treatment.
+
+Build and run (macOS):
+    ./translate_all.sh
+    cmake -S ../../third_party/NSMBWiicompiled/runtime -B ../../third_party/NSMBWiicompiled/build_mac -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DMKW_BUILD_NSMBW=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+    ninja -C ../../third_party/NSMBWiicompiled/build_mac NSMBWCompiled      # ~4 min from clean
+    # config: $XDG_DATA_HOME/WiiCompiled/Config.toml with [paths] dvd_root = '<extracted disc>'
+Window screenshots: `swift tools/winid.swift NSMBWCompiled` then `screencapture -x -o -l <id> out.png`.
+
 ## Next
 1. Mac build of upstream's runtime + aurora (Metal via Dawn): NEON versions of the x86
    SIMD in runtime/include/isa (ppc_isa_float.h, ppc_isa_quantized.h, ppc_isa_fpenv.h),

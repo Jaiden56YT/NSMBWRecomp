@@ -150,7 +150,7 @@ extern "C" void GXSetTevColor_Diag_801C8570(uint32_t id, uint32_t colorPtr) {
         if (logLiquid && maskLogged < 40) {
             const CpuContext* c = TryGetCpuContext();
             const uint32_t lr = c ? static_cast<uint32_t>(c->lr) : 0u;
-            if (lr >= 0x800CB990u && lr < 0x800CC700u) {
+            if (lr >= 0x800CB8A0u && lr < 0x800CC610u) {
                 ++maskLogged;
                 std::fprintf(stderr, "[nsmbw][mask] GXSetTevColor id=%u rgba=(%u,%u,%u,%u) from LR=0x%08X\n", id, r, g, b, a, lr);
                 GXInsertDebugMarker("nsmbw-arm-drawlog");

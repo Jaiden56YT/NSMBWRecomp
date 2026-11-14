@@ -30,7 +30,7 @@ extern "C" uint32_t g_nsmbwCurrentScenePtr;
 
 namespace {
 constexpr uint32_t kBootProfile = 0;
-constexpr uint32_t kGameFlagAddr = 0x8042A260u;
+constexpr uint32_t kGameFlagAddr = 0x80429F80u;
 constexpr uint32_t kGameFlagAutoSkip = 1u << 19;
 constexpr uint32_t kWiiStrapOff = 240;
 constexpr uint32_t kControllerInfoOff = 252;

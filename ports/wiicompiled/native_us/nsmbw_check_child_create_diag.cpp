@@ -36,7 +36,7 @@
 #include <cstdio>
 
 namespace {
-constexpr uint32_t kGetChildProcessCreateStateAddr = 0x80162AF0u;
+constexpr uint32_t kGetChildProcessCreateStateAddr = 0x801629B0u;
 constexpr uint32_t kLifecycleStateOffset = 0xAu; // verified via disassembly, see header comment
 
 uint32_t g_lastLoggedThis = 0;

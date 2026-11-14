@@ -58,10 +58,10 @@ struct RelImage {
 void RestoreRelImages()
 {
     static const RelImage kImages[] = {
-        {0x8076D680u, 2313500u, kData_d_basesNP},
-        {0x80B1C920u, 463140u, kData_d_en_bossNP},
-        {0x809A2CA0u, 1546520u, kData_d_enemiesNP},
-        {0x807684C0u, 14992u, kData_d_profileNP},
+        {0x8076D6C0u, 2313484u, kData_d_basesNP},
+        {0x80B1C960u, 463140u, kData_d_en_bossNP},
+        {0x809A2CE0u, 1546520u, kData_d_enemiesNP},
+        {0x80768500u, 14992u, kData_d_profileNP},
     };
     for (const RelImage& image : kImages) {
         if (!Memory::Contains(image.address, image.size)) {
@@ -91,7 +91,7 @@ extern "C" void NsmbwGuestCtorHook_80004040(CpuContext* ctx)
     ctx->gpr[13] = savedSda;
     ctx->gpr[2] = savedSda2;
 
-    ctx->gpr[3] = Memory::Read8(ctx->gpr[13] - 0x4F68u);
+    ctx->gpr[3] = Memory::Read8(ctx->gpr[13] - 0x4F48u);
 }
 
 PPC_NATIVE_OVERRIDE_VOID(80004040, NsmbwGuestCtorHook_80004040, (CpuContext* ctx), (ctx));

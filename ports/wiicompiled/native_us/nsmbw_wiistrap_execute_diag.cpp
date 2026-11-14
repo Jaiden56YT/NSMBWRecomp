@@ -45,7 +45,7 @@ constexpr uint32_t kVisibleOffset = 0x209;
 constexpr uint32_t kMLytOffset = 0x70;
 constexpr uint32_t kMLytVtableOffset = 0x8;
 constexpr uint32_t kLytCalcVtableSlot = 0x10;
-constexpr uint32_t kAnimePlayAddr = 0x800C9650u;
+constexpr uint32_t kAnimePlayAddr = 0x800C9560u;
 
 // Same LytBase_c::AnimePlay offsets already confirmed in nsmbw_wipecircle_calc_diag.cpp for a
 // DIFFERENT LytBase_c instance (WipeCircle's mLyt) - reused here for WiiStrap's own mLayout, to

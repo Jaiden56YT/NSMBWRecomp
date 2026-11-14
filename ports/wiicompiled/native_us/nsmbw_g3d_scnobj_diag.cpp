@@ -29,7 +29,7 @@
 extern "C" uint32_t g_nsmbwCurrentSceneProfile;
 
 namespace {
-constexpr uint32_t kScnRootPtrAddr = 0x8042F980u - 0x52D4u; // l_scnRoot_p
+constexpr uint32_t kScnRootPtrAddr = 0x8042F6A0u - 0x52D4u; // l_scnRoot_p
 constexpr int kMaxTracked = 64;
 uint32_t g_tracked[kMaxTracked];
 int g_trackedCount = 0;
@@ -70,7 +70,7 @@ extern "C" void M3dPushBack_Diag_80164F90(uint32_t obj) {
         if (logLiquid && logged < 40) {
             const CpuContext* c = TryGetCpuContext();
             const uint32_t lr = c ? static_cast<uint32_t>(c->lr) : 0u;
-            if (lr >= 0x807B3000u && lr < 0x807B8000u) {
+            if (lr >= 0x807B3010u && lr < 0x807B8010u) {
                 ++logged;
                 std::fprintf(stderr, "[nsmbw][liquid] pushBack obj=0x%08X from LR=0x%08X (scene list size %u)\n", obj, lr, idx);
             }

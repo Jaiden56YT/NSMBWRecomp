@@ -76,7 +76,7 @@ bool ShouldLog() {
 //     LytBase_c::SetScissorMask 0x800C9680 and the save/restore helper 0x8008A230) decodes
 //     __gx+0x148/0x14C (suScis0/1, BP 0x20/0x21).
 // __GXData lives at *(0x8042E188) (lwz rX,-0x4EF8(r2) with r2=0x80433080 - see gx_internal.h).
-constexpr uint32_t kGxDataPtrAddr = 0x8042E468u;
+constexpr uint32_t kGxDataPtrAddr = 0x8042E188u;
 constexpr uint32_t kGxVpOff = 0x544u;          // float vpLeft, vpTop, vpWd, vpHt, vpNearz, vpFarz
 constexpr uint32_t kGxSuScis0Off = 0x148u;     // BP 0x20 word: (y0+342)<<12 | (x0+342)
 constexpr uint32_t kGxSuScis1Off = 0x14Cu;     // BP 0x21 word: (y1+342)<<12 | (x1+342)

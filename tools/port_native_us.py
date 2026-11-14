@@ -16,7 +16,7 @@ from make_syms import fix_ntsc_v2
 from pal_to_us_map import looks_like_start, word
 
 BIND = re.compile(r'(PPC_NATIVE_OVERRIDE[A-Z_]*\(\s*)([0-9A-Fa-f]{8})(\s*,)')
-CONST = re.compile(r'0x(8[01][0-9A-Fa-f]{6})\b')
+CONST = re.compile(r'0x(8[01][0-9A-Fa-f]{6})(?=[uU]?(?:[lL]{1,2})?\b)')
 
 
 def main():

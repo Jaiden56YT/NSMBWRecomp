@@ -43,7 +43,7 @@
 namespace {
 constexpr uint32_t kHasLoadedLayoutOffset = 0x208;
 constexpr uint32_t kVisibleOffset = 0x209;
-constexpr uint32_t kCreateLayoutAddr = 0x8010F1D0u;
+constexpr uint32_t kCreateLayoutAddr = 0x8010F0C0u;
 
 // TEMPORARY (continuation of the WiiStrap invisible-content investigation): live tracing
 // isolated one specific pane's vertex corner-color word to a fixed heap address that reads

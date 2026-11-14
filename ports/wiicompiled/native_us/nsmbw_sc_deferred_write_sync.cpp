@@ -33,7 +33,7 @@ extern "C" void nsmbw_sc_deferred_write_sync_801d9890(CpuContext* ctx)
     // silently before ever reaching func_801DBEB0's flag write (confirmed live: flag stayed 1).
     // r3!=0 skips verification and reaches func_801DBEB0 directly per static trace.
     ctx->gpr[3] = 1;
-    InvokeIndirectCpu(0x801DBC60u, ctx);
+    InvokeIndirectCpu(0x801DBB20u, ctx);
 }
 
 PPC_NATIVE_OVERRIDE_VOID(801D9750, nsmbw_sc_deferred_write_sync_801d9890, (CpuContext* ctx), (ctx));

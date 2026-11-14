@@ -37,7 +37,7 @@
 namespace MusicAttenuation {
 namespace {
 
-constexpr uint32_t kSndAudioMgrInstance = 0x8042A768u;
+constexpr uint32_t kSndAudioMgrInstance = 0x8042A488u;
 constexpr uint32_t kArcPlayerOffset = 0x5BCu;
 constexpr uint32_t kPlayableCountOffset = 0x24u;
 constexpr uint32_t kVolumeOffset = 0x2Cu;

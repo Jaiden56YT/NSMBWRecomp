@@ -38,9 +38,9 @@ extern "C" uint32_t OSInitSTM_NSMBW_801B6960(CpuContext* ctx)
 
     // Fake non-zero handles so callers' zero/negative-checks pass - same sentinel shape as MKW's
     // own override (real fd values are small positive integers; any non-negative value works).
-    Memory::Write32(r13 - 20352u, 0x00535401u); // "ST\x01" - /dev/stm/immediate
-    Memory::Write32(r13 - 20348u, 0x00535402u); // "ST\x02" - /dev/stm/eventhook
-    Memory::Write32(r13 - 20356u, 1u);          // STM_Initialized
+    Memory::Write32(r13 - 20320u, 0x00535401u); // "ST\x01" - /dev/stm/immediate
+    Memory::Write32(r13 - 20316u, 0x00535402u); // "ST\x02" - /dev/stm/eventhook
+    Memory::Write32(r13 - 20324u, 1u);          // STM_Initialized
 
     return 1;
 }

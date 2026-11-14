@@ -26,7 +26,7 @@
 extern "C" uint32_t g_nsmbwCurrentSceneProfile;
 
 namespace {
-constexpr uint32_t kUpdateCameraMtxAddr = 0x80254630u;
+constexpr uint32_t kUpdateCameraMtxAddr = 0x802544F0u;
 }
 
 extern "C" void G3dCamera_GetCameraMtx_Diag_802541F0(uint32_t thisPtr, uint32_t pMtx) {

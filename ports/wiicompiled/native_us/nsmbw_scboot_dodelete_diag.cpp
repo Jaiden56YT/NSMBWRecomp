@@ -43,17 +43,17 @@
 #include <cstdio>
 
 namespace {
-constexpr uint32_t kMyBackGroundPhaseAddr = 0x8042A638u; // sda_base(0x8042F6A0) - 0x5348
-constexpr uint32_t kPhaseCallMethodAddr = 0x8015F760u;   // sPhase_c::callMethod
+constexpr uint32_t kMyBackGroundPhaseAddr = 0x8042A358u; // sda_base(0x8042F6A0) - 0x5348
+constexpr uint32_t kPhaseCallMethodAddr = 0x8015F620u;   // sPhase_c::callMethod
 constexpr uint32_t kPhaseDone = 2u;                      // sPhase_c::DONE
 
-constexpr uint32_t kResetFlagAddr = 0x80428280u;         // sda_base - 0x7700
-constexpr uint32_t kBootCompleteAddr = 0x80108020u;
-constexpr uint32_t kPostBootHousekeepingAddr = 0x80108260u;
-constexpr uint32_t kSetFadeInFrameAddr = 0x800E2040u;
-constexpr uint32_t kSetFadeOutFrameAddr = 0x800E2050u;
+constexpr uint32_t kResetFlagAddr = 0x80427F70u;         // sda_base - 0x7700
+constexpr uint32_t kBootCompleteAddr = 0x80107F10u;
+constexpr uint32_t kPostBootHousekeepingAddr = 0x80108150u;
+constexpr uint32_t kSetFadeInFrameAddr = 0x800E1F50u;
+constexpr uint32_t kSetFadeOutFrameAddr = 0x800E1F60u;
 constexpr uint32_t kDylUnlinkAddr = 0x8008F610u;
-constexpr uint32_t kCreateEffectManagerPhase2Addr = 0x800E5170u;
+constexpr uint32_t kCreateEffectManagerPhase2Addr = 0x800E5060u;
 constexpr uint32_t kYesNoWindowProfile = 0x2C0u;
 constexpr uint32_t kControllerInfoProfile = 0x2E5u;
 

@@ -38,6 +38,7 @@ nsmbw_check_child_create_diag.cpp: const 80162B60 -> 80162A20 [code]
 nsmbw_check_child_create_diag.cpp: const 80162B60 -> 80162A20 [code]
 nsmbw_check_child_create_diag.cpp: const 80162AF0 -> 801629B0 [code]
 nsmbw_check_child_create_diag.cpp: const 80162AF0 -> 801629B0 [code]
+nsmbw_check_child_create_diag.cpp: const 80162AF0 -> 801629B0 [code]
 nsmbw_commonpack_diag.cpp: bind 80161E00 -> 80161CC0
 nsmbw_commonpack_diag.cpp: const 819E0228 -> 819E0268 [data]
 nsmbw_commonpack_diag.cpp: const 80161E00 -> 80161CC0 [code]
@@ -55,8 +56,15 @@ nsmbw_create_next_scene_diag.cpp: const 8042A328 -> 8042A048 [data]
 nsmbw_create_next_scene_diag.cpp: const 80162C60 -> 80162B20 [code]
 nsmbw_create_next_scene_diag.cpp: const 80162BB0 -> 80162A70 [code]
 nsmbw_create_next_scene_diag.cpp: const 8042A698 -> 8042A3B8 [data]
+nsmbw_create_next_scene_diag.cpp: const 80428A46 -> 80428736 [data]
+nsmbw_create_next_scene_diag.cpp: const 80428A40 -> 80428730 [data]
+nsmbw_create_next_scene_diag.cpp: const 80428A42 -> 80428732 [data]
+nsmbw_create_next_scene_diag.cpp: const 80428A44 -> 80428734 [data]
+nsmbw_create_next_scene_diag.cpp: const 8042A328 -> 8042A048 [data]
+nsmbw_create_next_scene_diag.cpp: const 80315E90 -> 80315B90 [data]
 nsmbw_create_next_scene_diag.cpp: const 8042A698 -> 8042A3B8 [data]
 nsmbw_create_next_scene_diag.cpp: const 80162BC4 -> 80162A84 [code]   (code address, not a function start: check)
+nsmbw_create_next_scene_diag.cpp: const 8042A698 -> 8042A3B8 [data]
 nsmbw_create_thread_override.cpp: bind 801B5270 -> 801B5130
 nsmbw_create_thread_override.cpp: const 801B5270 -> 801B5130 [code]
 nsmbw_create_thread_override.cpp: const 801B5270 -> 801B5130 [code]
@@ -84,6 +92,7 @@ nsmbw_disk_id_check_sync.cpp: const 801D0F94 -> 801D0E54 [code]
 nsmbw_disk_id_check_sync.cpp: const 801D07E0 -> 801D06A0 [code]
 nsmbw_disk_id_check_sync.cpp: const 80395D48 -> 80395A48 [data]
 nsmbw_disk_id_check_sync.cpp: const 8042993C -> 80429644 [data]
+nsmbw_disk_id_check_sync.cpp: const 80395D40 -> 80395A40 [data]
 nsmbw_dsp_overrides.cpp: bind 801D5880 -> 801D5740
 nsmbw_dsp_overrides.cpp: bind 801D60B0 -> 801D5F70
 nsmbw_dsp_overrides.cpp: bind 801D5860 -> 801D5720
@@ -144,8 +153,17 @@ nsmbw_dylink_heap_reserve.cpp: const 8076D680 -> 8076D6C0 [data]
 nsmbw_dylink_heap_reserve.cpp: const 8076D680 -> 8076D6C0 [data]
 nsmbw_dylink_heap_reserve.cpp: const 8016EC60 -> 8016EB20 [code]
 nsmbw_dylink_heap_reserve.cpp: const 8016EA30 -> 8016E8F0 [code]
+nsmbw_dylink_heap_reserve.cpp: const 802B8E00 -> 802B8CC0 [code]
+nsmbw_dylink_heap_reserve.cpp: const 802B90B0 -> 802B8F70 [code]
+nsmbw_dylink_heap_reserve.cpp: const 8076D680 -> 8076D6C0 [data]
+nsmbw_dylink_heap_reserve.cpp: const 809A2CA0 -> 809A2CE0 [data]
+nsmbw_dylink_heap_reserve.cpp: const 80B1C920 -> 80B1C960 [data]
+nsmbw_dylink_heap_reserve.cpp: const 80330000 -> 8032FCC0 [data]
+nsmbw_dylink_heap_reserve.cpp: const 8016EC78 -> 8016EB38 [code]   (code address, not a function start: check)
+nsmbw_dylink_heap_reserve.cpp: const 8016EA30 -> 8016E8F0 [code]
 nsmbw_exi_deselect.cpp: bind 801B9830 -> 801B96F0
 nsmbw_exi_deselect.cpp: const 801B9830 -> 801B96F0 [code]
+nsmbw_exi_deselect.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_deselect.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_deselect.cpp: const 801B1280 -> 801B1140 [code]
 nsmbw_exi_deselect.cpp: const 801B1280 -> 801B1140 [code]
@@ -158,6 +176,10 @@ nsmbw_exi_deselect.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a
 nsmbw_exi_deselect.cpp: const 801B12D4 -> 801B1194 [code]
 nsmbw_exi_deselect.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a function start: check)
 nsmbw_exi_deselect.cpp: const 801B12C0 -> 801B1180 [code]
+nsmbw_exi_deselect.cpp: const 801B98CC -> 801B978C [code]   (code address, not a function start: check)
+nsmbw_exi_deselect.cpp: const 801B16D0 -> 801B1590 [code]
+nsmbw_exi_deselect.cpp: const 801B98D8 -> 801B9798 [code]   (code address, not a function start: check)
+nsmbw_exi_deselect.cpp: const 801B16D0 -> 801B1590 [code]
 nsmbw_exi_deselect.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_deselect.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_deselect.cpp: const 801B12C4 -> 801B1184 [code]   (code address, not a function start: check)
@@ -167,6 +189,8 @@ nsmbw_exi_deselect.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a
 nsmbw_exi_deselect.cpp: const 801B12D4 -> 801B1194 [code]
 nsmbw_exi_deselect.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a function start: check)
 nsmbw_exi_deselect.cpp: const 801B12C0 -> 801B1180 [code]
+nsmbw_exi_deselect.cpp: const 801B98F8 -> 801B97B8 [code]   (code address, not a function start: check)
+nsmbw_exi_deselect.cpp: const 801B93A0 -> 801B9260 [code]
 nsmbw_exi_imm_start.cpp: bind 801B8C60 -> 801B8B20
 nsmbw_exi_imm_start.cpp: const 801B8C60 -> 801B8B20 [code]
 nsmbw_exi_imm_start.cpp: const 801B9090 -> 801B8F50 [code]
@@ -174,6 +198,7 @@ nsmbw_exi_imm_start.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_imm_start.cpp: const 801B9090 -> 801B8F50 [code]
 nsmbw_exi_imm_start.cpp: const 802DD05C -> 802DCD6C [code]   (code address, not a function start: check)
 nsmbw_exi_imm_start.cpp: const 802DD05C -> 802DCD6C [code]   (code address, not a function start: check)
+nsmbw_exi_imm_start.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_imm_start.cpp: const 801B1280 -> 801B1140 [code]
 nsmbw_exi_imm_start.cpp: const 801B1280 -> 801B1140 [code]
 nsmbw_exi_imm_start.cpp: const 801B12C0 -> 801B1180 [code]
@@ -185,6 +210,8 @@ nsmbw_exi_imm_start.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not 
 nsmbw_exi_imm_start.cpp: const 801B12D4 -> 801B1194 [code]
 nsmbw_exi_imm_start.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a function start: check)
 nsmbw_exi_imm_start.cpp: const 801B12C0 -> 801B1180 [code]
+nsmbw_exi_imm_start.cpp: const 801B8D04 -> 801B8BC4 [code]   (code address, not a function start: check)
+nsmbw_exi_imm_start.cpp: const 801B16D0 -> 801B1590 [code]
 nsmbw_exi_imm_start.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_imm_start.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_imm_start.cpp: const 801B12C4 -> 801B1184 [code]   (code address, not a function start: check)
@@ -202,8 +229,12 @@ nsmbw_exi_imm_wait.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_imm_wait.cpp: const 801AB2F0 -> 801AB1B0 [code]
 nsmbw_exi_imm_wait.cpp: const 801AA020 -> 801A9EE0 [code]
 nsmbw_exi_imm_wait.cpp: const 801AB2F0 -> 801AB1B0 [code]
+nsmbw_exi_imm_wait.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_imm_wait.cpp: const 801B1280 -> 801B1140 [code]
 nsmbw_exi_imm_wait.cpp: const 801B1280 -> 801B1140 [code]
+nsmbw_exi_imm_wait.cpp: const 801AB2F0 -> 801AB1B0 [code]
+nsmbw_exi_imm_wait.cpp: const 801B925C -> 801B911C [code]   (code address, not a function start: check)
+nsmbw_exi_imm_wait.cpp: const 801AA020 -> 801A9EE0 [code]
 nsmbw_exi_imm_wait.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_imm_wait.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_imm_wait.cpp: const 801B12C4 -> 801B1184 [code]   (code address, not a function start: check)
@@ -215,6 +246,15 @@ nsmbw_exi_imm_wait.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a
 nsmbw_exi_imm_wait.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_init.cpp: bind 801B9CE0 -> 801B9BA0
 nsmbw_exi_init.cpp: const 801B9CE0 -> 801B9BA0 [code]
+nsmbw_exi_init.cpp: const 801B9D3C -> 801B9BFC [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801B1650 -> 801B1510 [code]
+nsmbw_exi_init.cpp: const 801C0000 -> 801BFEC0 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
+nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
+nsmbw_exi_init.cpp: const 801C0000 -> 801BFEC0 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
+nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
+nsmbw_exi_init.cpp: const 801C0000 -> 801BFEC0 [code]   (code address, not a function start: check)
 nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
 nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
 nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
@@ -227,10 +267,23 @@ nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
 nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
 nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
 nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
-nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
-nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
-nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
-nsmbw_exi_init.cpp: const 801B12F0 -> 801B11B0 [code]
+nsmbw_exi_init.cpp: const 801B9DD4 -> 801B9C94 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801BA0C0 -> 801B9F80 [code]
+nsmbw_exi_init.cpp: const 80390000 -> 8038FD00 [data]
+nsmbw_exi_init.cpp: const 801B9E04 -> 801B9CC4 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801B93A0 -> 801B9260 [code]
+nsmbw_exi_init.cpp: const 801B9E0C -> 801B9CCC [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801B93A0 -> 801B9260 [code]
+nsmbw_exi_init.cpp: const 801B9E20 -> 801B9CE0 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801BA0C0 -> 801B9F80 [code]
+nsmbw_exi_init.cpp: const 801B9E44 -> 801B9D04 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801BA5F0 -> 801BA4B0 [code]
+nsmbw_exi_init.cpp: const 801B9E58 -> 801B9D18 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801BA0C0 -> 801B9F80 [code]
+nsmbw_exi_init.cpp: const 801B9E7C -> 801B9D3C [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801BA5F0 -> 801BA4B0 [code]
+nsmbw_exi_init.cpp: const 801B9E84 -> 801B9D44 [code]   (code address, not a function start: check)
+nsmbw_exi_init.cpp: const 801AB300 -> 801AB1C0 [code]
 nsmbw_exi_probe.cpp: bind 801BA0C0 -> 801B9F80
 nsmbw_exi_probe.cpp: const 801BA0C0 -> 801B9F80 [code]
 nsmbw_exi_probe.cpp: const 801B9CE0 -> 801B9BA0 [code]
@@ -240,8 +293,11 @@ nsmbw_exi_select.cpp: const 801B9700 -> 801B95C0 [code]
 nsmbw_exi_select.cpp: const 8038FA10 -> 8038F710 [data]
 nsmbw_exi_select.cpp: const 802DD064 -> 802DCD74 [code]   (code address, not a function start: check)
 nsmbw_exi_select.cpp: const 802DD064 -> 802DCD74 [code]   (code address, not a function start: check)
+nsmbw_exi_select.cpp: const 80390000 -> 8038FD00 [data]
 nsmbw_exi_select.cpp: const 801B1280 -> 801B1140 [code]
 nsmbw_exi_select.cpp: const 801B1280 -> 801B1140 [code]
+nsmbw_exi_select.cpp: const 801B9768 -> 801B9628 [code]   (code address, not a function start: check)
+nsmbw_exi_select.cpp: const 801B93A0 -> 801B9260 [code]
 nsmbw_exi_select.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_select.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_select.cpp: const 801B12C4 -> 801B1184 [code]   (code address, not a function start: check)
@@ -251,6 +307,10 @@ nsmbw_exi_select.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a f
 nsmbw_exi_select.cpp: const 801B12D4 -> 801B1194 [code]
 nsmbw_exi_select.cpp: const 801B12D8 -> 801B1198 [code]   (code address, not a function start: check)
 nsmbw_exi_select.cpp: const 801B12C0 -> 801B1180 [code]
+nsmbw_exi_select.cpp: const 801B97FC -> 801B96BC [code]   (code address, not a function start: check)
+nsmbw_exi_select.cpp: const 801B1650 -> 801B1510 [code]
+nsmbw_exi_select.cpp: const 801B9808 -> 801B96C8 [code]   (code address, not a function start: check)
+nsmbw_exi_select.cpp: const 801B1650 -> 801B1510 [code]
 nsmbw_exi_select.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_select.cpp: const 801B12C0 -> 801B1180 [code]
 nsmbw_exi_select.cpp: const 801B12C4 -> 801B1184 [code]   (code address, not a function start: check)
@@ -270,18 +330,25 @@ nsmbw_func_801af900_registration.cpp: bind 801AC980 -> 801AC840
 nsmbw_func_801af900_registration.cpp: bind 801B8B20 -> 801B89E0
 nsmbw_func_801af900_registration.cpp: bind 801AD620 -> 801AD4E0
 nsmbw_func_801af900_registration.cpp: bind 801AD9E0 -> 801AD8A0
+nsmbw_func_801af900_registration.cpp: const 801A9CE0 -> 801A9BA0 [code]
 nsmbw_func_801af900_registration.cpp: const 801AC060 -> 801ABF20 [code]
 nsmbw_func_801af900_registration.cpp: const 802EDFC0 -> 802EDCC0 [data]
+nsmbw_func_801af900_registration.cpp: const 802EDFC0 -> 802EDCC0 [data]
+nsmbw_func_801af900_registration.cpp: const 801A9CE0 -> 801A9BA0 [code]
 nsmbw_g3d_camera_diag.cpp: bind 802541F0 -> 802540B0
 nsmbw_g3d_camera_diag.cpp: const 802541F0 -> 802540B0 [code]
 nsmbw_g3d_camera_diag.cpp: const 80254630 -> 802544F0 [code]
 nsmbw_g3d_camera_diag.cpp: const 801C0640 -> 801C0500 [code]
+nsmbw_g3d_camera_diag.cpp: const 80254630 -> 802544F0 [code]
 nsmbw_g3d_scnobj_diag.cpp: bind 80164F90 -> 80164E50
 nsmbw_g3d_scnobj_diag.cpp: const 80164F90 -> 80164E50 [code]
+nsmbw_g3d_scnobj_diag.cpp: const 8042F980 -> 8042F6A0 [data]
 nsmbw_g3d_scnobj_diag.cpp: const 8042F980 -> 8042F6A0 [data]
 nsmbw_g3d_scnobj_diag.cpp: const 807B3000 -> 807B3010 [code]   (code address, not a function start: check)
 nsmbw_g3d_scnobj_diag.cpp: const 807B8000 -> 807B8010 [code]   (code address, not a function start: check)
 nsmbw_g3d_scnobj_diag.cpp: const 807B40A0 -> 807B40B0 [code]
+nsmbw_g3d_scnobj_diag.cpp: const 807B3000 -> 807B3010 [code]   (code address, not a function start: check)
+nsmbw_g3d_scnobj_diag.cpp: const 807B8000 -> 807B8010 [code]   (code address, not a function start: check)
 nsmbw_gamesetup_createpack_diag.cpp: bind 80161F80 -> 80161E40
 nsmbw_gamesetup_createpack_diag.cpp: const 80162A70 -> 80162930 [code]
 nsmbw_gamesetup_createpack_diag.cpp: const 80161F80 -> 80161E40 [code]
@@ -293,6 +360,10 @@ nsmbw_gamesetup_createpack_diag.cpp: const 802DCEEC -> 802DCBFC [code]
 nsmbw_gamesetup_createpack_diag.cpp: const 80329698 -> 80329350 [data]
 nsmbw_gamesetup_createpack_diag.cpp: const 803296A4 -> 8032935C [data]
 nsmbw_gamesetup_createpack_diag.cpp: const 803296B0 -> 80329368 [data]
+nsmbw_gamesetup_createpack_diag.cpp: const 80161E00 -> 80161CC0 [code]
+nsmbw_gamesetup_createpack_diag.cpp: const 80329698 -> 80329350 [data]
+nsmbw_gamesetup_createpack_diag.cpp: const 803296A4 -> 8032935C [data]
+nsmbw_gamesetup_createpack_diag.cpp: const 803296B0 -> 80329368 [data]
 nsmbw_gamesetup_executepack_diag.cpp: bind 80162260 -> 80162120
 nsmbw_gamesetup_executepack_diag.cpp: const 80162260 -> 80162120 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 80161E00 -> 80161CC0 [code]
@@ -301,14 +372,22 @@ nsmbw_gamesetup_executepack_diag.cpp: const 80329698 -> 80329350 [data]
 nsmbw_gamesetup_executepack_diag.cpp: const 803296E0 -> 80329398 [data]
 nsmbw_gamesetup_executepack_diag.cpp: const 803296EC -> 803293A4 [data]
 nsmbw_gamesetup_executepack_diag.cpp: const 803296F8 -> 803293B0 [data]
+nsmbw_gamesetup_executepack_diag.cpp: const 80161E00 -> 80161CC0 [code]
+nsmbw_gamesetup_executepack_diag.cpp: const 803296E0 -> 80329398 [data]
+nsmbw_gamesetup_executepack_diag.cpp: const 803296EC -> 803293A4 [data]
+nsmbw_gamesetup_executepack_diag.cpp: const 803296F8 -> 803293B0 [data]
+nsmbw_gamesetup_executepack_diag.cpp: const 800E1F50 -> 800E1E60 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 802DCEEC -> 802DCBFC [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 809183B0 -> 809183C0 [code]
+nsmbw_gamesetup_executepack_diag.cpp: const 809183F0 -> 80918400 [code]
+nsmbw_gamesetup_executepack_diag.cpp: const 80918330 -> 80918340 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 809183F0 -> 80918400 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 80918330 -> 80918340 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 80919560 -> 80919570 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 800E4940 -> 800E4850 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 8016F570 -> 8016F430 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 801BE430 -> 801BE2F0 [code]
+nsmbw_gamesetup_executepack_diag.cpp: const 80919560 -> 80919570 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 80919560 -> 80919570 [code]
 nsmbw_gamesetup_executepack_diag.cpp: const 803296F8 -> 803293B0 [data]
 nsmbw_gamesetup_executepack_diag.cpp: const 800E1F50 -> 800E1E60 [code]
@@ -320,6 +399,9 @@ nsmbw_guest_ctor_hook.cpp: const 801AA940 -> 801AA800 [code]
 nsmbw_guest_ctor_hook.cpp: const 8076A828 -> 8076A868 [data]
 nsmbw_guest_ctor_hook.cpp: const 804296E8 -> 804293F0 [data]
 nsmbw_guest_ctor_hook.cpp: const 801B8AB0 -> 801B8970 [code]
+nsmbw_guest_ctor_hook.cpp: const 8076D680 -> 8076D6C0 [data]
+nsmbw_guest_ctor_hook.cpp: const 80B1C920 -> 80B1C960 [data]
+nsmbw_guest_ctor_hook.cpp: const 809A2CA0 -> 809A2CE0 [data]
 nsmbw_gx_displaylist_overrides.cpp: bind 801C95B0 -> 801C9470
 nsmbw_gx_displaylist_overrides.cpp: bind 801C9670 -> 801C9530
 nsmbw_gx_displaylist_overrides.cpp: const 801C9690 -> 801C9550 [code]   (code address, not a function start: check)
@@ -334,6 +416,10 @@ nsmbw_gx_displaylist_overrides.cpp: const 80390E50 -> 80390B50 [data]
 nsmbw_gx_displaylist_overrides.cpp: const 80390850 -> 80390550 [data]
 nsmbw_gx_displaylist_overrides.cpp: const 803907EC -> 803904EC [data]
 nsmbw_gx_displaylist_overrides.cpp: const 8042E468 -> 8042E188 [data]
+nsmbw_gx_displaylist_overrides.cpp: const 80433360 -> 80433080 [data]
+nsmbw_gx_displaylist_overrides.cpp: const 801C5430 -> 801C52F0 [code]
+nsmbw_gx_displaylist_overrides.cpp: const 803907D0 -> 803904D0 [data]
+nsmbw_gx_displaylist_overrides.cpp: const 80390850 -> 80390550 [data]
 nsmbw_gx_mtxindx_overrides.cpp: bind 801C9AD0 -> 801C9990
 nsmbw_gx_mtxindx_overrides.cpp: bind 801C9B60 -> 801C9A20
 nsmbw_gx_mtxindx_overrides.cpp: const 801C9AD0 -> 801C9990 [code]
@@ -374,10 +460,13 @@ nsmbw_gx_overrides.cpp: const 801C9980 -> 801C9840 [code]
 nsmbw_gx_overrides.cpp: const 801C5430 -> 801C52F0 [code]
 nsmbw_gx_overrides.cpp: const 8042E468 -> 8042E188 [data]
 nsmbw_gx_overrides.cpp: const 80433360 -> 80433080 [data]
+nsmbw_gx_overrides.cpp: const 80433360 -> 80433080 [data]
+nsmbw_gx_overrides.cpp: const 801C5430 -> 801C52F0 [code]
 nsmbw_gx_overrides.cpp: const 80170F80 -> 80170E40 [code]   (code address, not a function start: check)
 nsmbw_gx_overrides.cpp: const 80170FA8 -> 80170E68 [code]   (code address, not a function start: check)
 nsmbw_gx_overrides.cpp: const 801C7660 -> 801C7520 [code]
 nsmbw_gx_overrides.cpp: const 801C7690 -> 801C7550 [code]
+nsmbw_gx_overrides.cpp: const 8042E468 -> 8042E188 [data]
 nsmbw_gx_overrides.cpp: const 801C5AE0 -> 801C59A0 [code]
 nsmbw_gx_posmtx_diag.cpp: bind 801C9A80 -> 801C9940
 nsmbw_gx_posmtx_diag.cpp: const 8017310C -> 80172FCC [code]   (code address, not a function start: check)
@@ -401,6 +490,7 @@ nsmbw_gx_setters_diag.cpp: const 801C9E10 -> 801C9CD0 [code]
 nsmbw_gx_setters_diag.cpp: const 800C9770 -> 800C9680 [code]
 nsmbw_gx_setters_diag.cpp: const 8042E468 -> 8042E188 [data]
 nsmbw_gx_setters_diag.cpp: const 80433360 -> 80433080 [data]
+nsmbw_gx_setters_diag.cpp: const 8042E468 -> 8042E188 [data]
 nsmbw_gx_setters_diag.cpp: const 801C9D50 -> 801C9C10 [code]
 nsmbw_gx_setters_diag.cpp: const 801C9C80 -> 801C9B40 [code]
 nsmbw_gx_setters_diag.cpp: const 801C9DA0 -> 801C9C60 [code]
@@ -454,23 +544,35 @@ nsmbw_kpad_overrides.cpp: const 8042C8A0 -> 8042C5C0 [data]
 nsmbw_kpad_overrides.cpp: const 801EB170 -> 801EB030 [code]
 nsmbw_kpad_overrides.cpp: const 801EAB00 -> 801EA9C0 [code]
 nsmbw_kpad_overrides.cpp: const 801EB2A0 -> 801EB160 [code]
+nsmbw_kpad_overrides.cpp: const 8042AB4C -> 8042A86C [data]
+nsmbw_kpad_overrides.cpp: const 8042A230 -> 80429F50 [data]
 nsmbw_kpad_overrides.cpp: const 801954C0 -> 80195380 [code]
 nsmbw_kpad_overrides.cpp: const 8042A768 -> 8042A488 [data]
 nsmbw_kpad_overrides.cpp: const 8015B118 -> 8015AFD8 [code]   (code address, not a function start: check)
+nsmbw_kpad_overrides.cpp: const 8042A768 -> 8042A488 [data]
+nsmbw_kpad_overrides.cpp: const 801954C0 -> 80195380 [code]
 nsmbw_kpad_overrides.cpp: const 8019C930 -> 8019C7F0 [code]
 nsmbw_kpad_overrides.cpp: const 8019C9C0 -> 8019C880 [code]
+nsmbw_kpad_overrides.cpp: const 8042A788 -> 8042A4A8 [data]
 nsmbw_kpad_overrides.cpp: const 8042A788 -> 8042A4A8 [data]
 nsmbw_kpad_overrides.cpp: const 80922910 -> 80922920 [code]
 nsmbw_kpad_overrides.cpp: const 80922DA8 -> 80922DB8 [code]
 nsmbw_kpad_overrides.cpp: const 800D11F0 -> 800D1100 [code]
 nsmbw_kpad_overrides.cpp: const 80102370 -> 80102260 [code]
 nsmbw_kpad_overrides.cpp: const 801019D0 -> 801018C0 [code]
+nsmbw_kpad_overrides.cpp: const 8042A498 -> 8042A1B8 [data]
+nsmbw_kpad_overrides.cpp: const 80102370 -> 80102260 [code]
 nsmbw_lastactor_hunt_diag.cpp: bind 80162BB0 -> 80162A70
 nsmbw_lastactor_hunt_diag.cpp: const 80162BB0 -> 80162A70 [code]
 nsmbw_lastactor_hunt_diag.cpp: const 80162BB0 -> 80162A70 [code]
 nsmbw_lastactor_hunt_diag.cpp: const 80162B90 -> 80162A50 [code]
 nsmbw_lastactor_hunt_diag.cpp: const 80162A70 -> 80162930 [code]
 nsmbw_lastactor_hunt_diag.cpp: const 8042A698 -> 8042A3B8 [data]
+nsmbw_lastactor_hunt_diag.cpp: const 8042A698 -> 8042A3B8 [data]
+nsmbw_lastactor_hunt_diag.cpp: const 80162B90 -> 80162A50 [code]
+nsmbw_lastactor_hunt_diag.cpp: const 80162A70 -> 80162930 [code]
+nsmbw_lastactor_hunt_diag.cpp: const 803296EC -> 803293A4 [data]
+nsmbw_lastactor_hunt_diag.cpp: const 803296F8 -> 803293B0 [data]
 nsmbw_m3d_calcview_diag.cpp: bind 80164EA0 -> 80164D60
 nsmbw_m3d_calcview_diag.cpp: const 80164EA0 -> 80164D60 [code]
 nsmbw_m3d_calcview_diag.cpp: const 80164C70 -> 80164B30 [code]
@@ -481,18 +583,36 @@ nsmbw_m3d_calcview_diag.cpp: const 80259250 -> 80259110 [code]
 nsmbw_m3d_calcview_diag.cpp: const 802592D0 -> 80259190 [code]
 nsmbw_m3d_calcview_diag.cpp: const 802593C0 -> 80259280 [code]
 nsmbw_m3d_calcview_diag.cpp: const 8042F980 -> 8042F6A0 [data]
+nsmbw_m3d_calcview_diag.cpp: const 8042F980 -> 8042F6A0 [data]
+nsmbw_m3d_calcview_diag.cpp: const 80164C70 -> 80164B30 [code]
+nsmbw_m3d_calcview_diag.cpp: const 802541F0 -> 802540B0 [code]
+nsmbw_m3d_calcview_diag.cpp: const 80164C80 -> 80164B40 [code]
+nsmbw_m3d_calcview_diag.cpp: const 802C6950 -> 802C6660 [code]
+nsmbw_m3d_calcview_diag.cpp: const 80259250 -> 80259110 [code]
+nsmbw_m3d_calcview_diag.cpp: const 802592D0 -> 80259190 [code]
+nsmbw_m3d_calcview_diag.cpp: const 802593C0 -> 80259280 [code]
+nsmbw_m3d_calcview_diag.cpp: const 811E51E0 -> 811E5220 [data]
+nsmbw_m3d_calcview_diag.cpp: const 811E51E0 -> 811E5220 [data]
 nsmbw_m3d_calcview_diag.cpp: const 811E51E0 -> 811E5220 [data]
 nsmbw_m3d_calcview_diag.cpp: const 811E51E0 -> 811E5220 [data]
 nsmbw_m3d_scnleaf_calc_diag.cpp: bind 8016A2E0 -> 8016A1A0
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 8016A2E0 -> 8016A1A0 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 8016A230 -> 8016A0F0 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 8016A230 -> 8016A0F0 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 800D37D0 -> 800D36E0 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 800D3828 -> 800D3738 [code]   (code address, not a function start: check)
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 800D58E0 -> 800D57F0 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 80256490 -> 80256350 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 80256490 -> 80256350 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 80256490 -> 80256350 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023B440 -> 8023B300 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023EFD0 -> 8023EE90 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023EE30 -> 8023ECF0 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023B440 -> 8023B300 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023EFD0 -> 8023EE90 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023EE30 -> 8023ECF0 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 80256490 -> 80256350 [code]
+nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023B440 -> 8023B300 [code]
 nsmbw_m3d_scnleaf_calc_diag.cpp: const 8023B440 -> 8023B300 [code]
 nsmbw_map_options.cpp: bind 8077AD70 -> 8077ADB0
 nsmbw_map_options.cpp: bind 8077ADC0 -> 8077AE00
@@ -510,17 +630,66 @@ nsmbw_map_options.cpp: const 8077AF10 -> 8077AF50 [code]
 nsmbw_map_options.cpp: const 8077B1A0 -> 8077B1E0 [code]
 nsmbw_map_options.cpp: const 8077B010 -> 8077B050 [code]
 nsmbw_map_options.cpp: const 8077ADC0 -> 8077AE00 [code]
+nsmbw_map_options.cpp: const 8042A768 -> 8042A488 [data]
+nsmbw_map_options.cpp: const 8042A5A8 -> 8042A2C8 [data]
+nsmbw_map_options.cpp: const 80990D28 -> 80990D68 [data]
+nsmbw_map_options.cpp: const 8077ADC0 -> 8077AE00 [code]
+nsmbw_map_options.cpp: const 800C93E0 -> 800C92F0 [code]
+nsmbw_map_options.cpp: const 800C94C0 -> 800C93D0 [code]
+nsmbw_map_options.cpp: const 800C95F0 -> 800C9500 [code]
+nsmbw_map_options.cpp: const 800C9700 -> 800C9610 [code]
+nsmbw_map_options.cpp: const 801954C0 -> 80195380 [code]
+nsmbw_map_options.cpp: const 800C91E0 -> 800C90F0 [code]
+nsmbw_map_options.cpp: const 800C91E0 -> 800C90F0 [code]
+nsmbw_map_options.cpp: const 800C8F30 -> 800C8E40 [code]
+nsmbw_map_options.cpp: const 8010C890 -> 8010C780 [code]
 nsmbw_map_options.cpp: const 8077ADC0 -> 8077AE00 [code]
 nsmbw_map_options.cpp: const 8077AD70 -> 8077ADB0 [code]
 nsmbw_map_options.cpp: const 8077ADC0 -> 8077AE00 [code]
 nsmbw_map_options.cpp: const 8077AF10 -> 8077AF50 [code]
 nsmbw_map_options.cpp: const 8077B1A0 -> 8077B1E0 [code]
+nsmbw_map_options.cpp: const 80940000 -> 80940010 [data]
+nsmbw_map_options.cpp: const 8077ABA0 -> 8077ABE0 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800C8D00 -> 800C8CB0 [code]
+nsmbw_map_options.cpp: const 8077ABCC -> 8077AC0C [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 8077ABDC -> 8077AC1C [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800C90A0 -> 800C8FB0 [code]
+nsmbw_map_options.cpp: const 80930000 -> 80930010 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 8077ABF4 -> 8077AC34 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800C91E0 -> 800C90F0 [code]
+nsmbw_map_options.cpp: const 8077AC14 -> 8077AC54 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800C8F30 -> 800C8E40 [code]
+nsmbw_map_options.cpp: const 8077AC28 -> 8077AC68 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800C8FA0 -> 800C8EB0 [code]
+nsmbw_map_options.cpp: const 80930000 -> 80930010 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 8077AC44 -> 8077AC84 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800C9010 -> 800C8F20 [code]
+nsmbw_map_options.cpp: const 80430000 -> 8042FD20 [data]
+nsmbw_map_options.cpp: const 80990000 -> 80990030 [data]
+nsmbw_map_options.cpp: const 8077B058 -> 8077B098 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 8077AD70 -> 8077ADB0 [code]
+nsmbw_map_options.cpp: const 80430000 -> 8042FD20 [data]
+nsmbw_map_options.cpp: const 8077B0A8 -> 8077B0E8 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 8077B0E4 -> 8077B124 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 8077B0F8 -> 8077B138 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 800B53F0 -> 800B53A0 [code]
+nsmbw_map_options.cpp: const 8077B118 -> 8077B158 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 80430000 -> 8042FD20 [data]
+nsmbw_map_options.cpp: const 8077B138 -> 8077B178 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 80430000 -> 8042FD20 [data]
+nsmbw_map_options.cpp: const 8077B154 -> 8077B194 [code]   (code address, not a function start: check)
+nsmbw_map_options.cpp: const 801954C0 -> 80195380 [code]
+nsmbw_map_options.cpp: const 8077B16C -> 8077B1AC [code]   (code address, not a function start: check)
 nsmbw_msg_lookup_diag.cpp: bind 802D7B50 -> 802D7860
 nsmbw_msg_lookup_diag.cpp: const 802D7B50 -> 802D7860 [code]
+nsmbw_msg_lookup_diag.cpp: const 802D7C90 -> 802D79A0 [code]
+nsmbw_msg_lookup_diag.cpp: const 802D7B68 -> 802D7878 [code]   (code address, not a function start: check)
 nsmbw_msg_lookup_diag.cpp: const 802D7C90 -> 802D79A0 [code]
 nsmbw_msg_lookup_diag.cpp: const 800D1010 -> 800D0F20 [code]
 nsmbw_msg_lookup_diag.cpp: const 80769130 -> 80769170 [code]
 nsmbw_msg_lookup_diag.cpp: const 80770000 -> 80770040 [code]   (code address, not a function start: check)
+nsmbw_msg_lookup_diag.cpp: const 8042F980 -> 8042F6A0 [data]
+nsmbw_msg_lookup_diag.cpp: const 8076A5F8 -> 8076A638 [data]
 nsmbw_msg_lookup_diag.cpp: const 8076A5F8 -> 8076A638 [data]
 nsmbw_os_init_stm.cpp: bind 801B6960 -> 801B6820
 nsmbw_os_init_stm.cpp: const 801B6960 -> 801B6820 [code]
@@ -577,8 +746,72 @@ nsmbw_pause_options.cpp: const 800C91E0 -> 800C90F0 [code]
 nsmbw_pause_options.cpp: const 800C93E0 -> 800C92F0 [code]
 nsmbw_pause_options.cpp: const 800C94C0 -> 800C93D0 [code]
 nsmbw_pause_options.cpp: const 800C95F0 -> 800C9500 [code]
+nsmbw_pause_options.cpp: const 8042A61C -> 8042A33C [data]
+nsmbw_pause_options.cpp: const 8042A768 -> 8042A488 [data]
+nsmbw_pause_options.cpp: const 80315E90 -> 80315B90 [data]
+nsmbw_pause_options.cpp: const 800C93E0 -> 800C92F0 [code]
+nsmbw_pause_options.cpp: const 800C94C0 -> 800C93D0 [code]
+nsmbw_pause_options.cpp: const 800C95F0 -> 800C9500 [code]
+nsmbw_pause_options.cpp: const 800C91E0 -> 800C90F0 [code]
+nsmbw_pause_options.cpp: const 800C91E0 -> 800C90F0 [code]
+nsmbw_pause_options.cpp: const 800C8F30 -> 800C8E40 [code]
+nsmbw_pause_options.cpp: const 803774C0 -> 803771C0 [data]
+nsmbw_pause_options.cpp: const 8042A5A8 -> 8042A2C8 [data]
+nsmbw_pause_options.cpp: const 800C9700 -> 800C9610 [code]
+nsmbw_pause_options.cpp: const 801954C0 -> 80195380 [code]
+nsmbw_pause_options.cpp: const 8010C890 -> 8010C780 [code]
+nsmbw_pause_options.cpp: const 800B4E30 -> 800B4DE0 [code]
+nsmbw_pause_options.cpp: const 80320000 -> 8031FCE8 [data]
+nsmbw_pause_options.cpp: const 802F0000 -> 802EFD00 [data]
+nsmbw_pause_options.cpp: const 8015A7A0 -> 8015A660 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C8D00 -> 800C8CB0 [code]
+nsmbw_pause_options.cpp: const 8015A7CC -> 8015A68C [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 8015A7DC -> 8015A69C [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C90A0 -> 800C8FB0 [code]
+nsmbw_pause_options.cpp: const 8015A7F0 -> 8015A6B0 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C91E0 -> 800C90F0 [code]
+nsmbw_pause_options.cpp: const 8015A808 -> 8015A6C8 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C9010 -> 800C8F20 [code]
+nsmbw_pause_options.cpp: const 8015A820 -> 8015A6E0 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C9010 -> 800C8F20 [code]
+nsmbw_pause_options.cpp: const 8015A834 -> 8015A6F4 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C8F30 -> 800C8E40 [code]
+nsmbw_pause_options.cpp: const 8015A848 -> 8015A708 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C8EC0 -> 800C8DD0 [code]
+nsmbw_pause_options.cpp: const 8015A85C -> 8015A71C [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C8FA0 -> 800C8EB0 [code]
+nsmbw_pause_options.cpp: const 8015A870 -> 8015A730 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C8E50 -> 800C8D60 [code]
+nsmbw_pause_options.cpp: const 8015A89C -> 8015A75C [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800B4E30 -> 800B4DE0 [code]
+nsmbw_pause_options.cpp: const 80310000 -> 8030FD00 [data]
+nsmbw_pause_options.cpp: const 80310000 -> 8030FD00 [data]
+nsmbw_pause_options.cpp: const 8015A924 -> 8015A7E4 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 8015AC60 -> 8015AB20 [code]
+nsmbw_pause_options.cpp: const 8015A92C -> 8015A7EC [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800C95F0 -> 800C9500 [code]
 nsmbw_pause_options.cpp: const 802DD060 -> 802DCD70 [code]   (code address, not a function start: check)
 nsmbw_pause_options.cpp: const 802DD060 -> 802DCD70 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800D0DD8 -> 800D0CE8 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 80370000 -> 8036FD00 [data]
+nsmbw_pause_options.cpp: const 800D0E24 -> 800D0D34 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800D0E30 -> 800D0D40 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800B53F0 -> 800B53A0 [code]
+nsmbw_pause_options.cpp: const 800D0E6C -> 800D0D7C [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800D0F80 -> 800D0E90 [code]
+nsmbw_pause_options.cpp: const 800D0E84 -> 800D0D94 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800B4E30 -> 800B4DE0 [code]
+nsmbw_pause_options.cpp: const 80310000 -> 8030FD00 [data]
+nsmbw_pause_options.cpp: const 800D0EA8 -> 800D0DB8 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800D0F80 -> 800D0E90 [code]
+nsmbw_pause_options.cpp: const 800D0EC8 -> 800D0DD8 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 801954C0 -> 80195380 [code]
+nsmbw_pause_options.cpp: const 800D0EDC -> 800D0DEC [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 801954C0 -> 80195380 [code]
+nsmbw_pause_options.cpp: const 800D0F04 -> 800D0E14 [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800D0CF0 -> 800D0C00 [code]
+nsmbw_pause_options.cpp: const 800D0F1C -> 800D0E2C [code]   (code address, not a function start: check)
+nsmbw_pause_options.cpp: const 800D0CF0 -> 800D0C00 [code]
 nsmbw_pause_options.cpp: const 802DD0AC -> 802DCDBC [code]   (code address, not a function start: check)
 nsmbw_pause_options.cpp: const 802DD0AC -> 802DCDBC [code]   (code address, not a function start: check)
 nsmbw_preseeded_rel_link.cpp: bind 80160080 -> 8015FF40
@@ -590,8 +823,13 @@ nsmbw_preseeded_rel_link.cpp: const 80160080 -> 8015FF40 [code]
 nsmbw_preseeded_rel_link.cpp: const 801602C0 -> 80160180 [code]
 nsmbw_preseeded_rel_link.cpp: const 80160080 -> 8015FF40 [code]
 nsmbw_preseeded_rel_link.cpp: const 80160160 -> 80160020 [code]
+nsmbw_preseeded_rel_link.cpp: const 8042A734 -> 8042A454 [data]
 nsmbw_preseeded_rel_link.cpp: const 8016EC60 -> 8016EB20 [code]
 nsmbw_preseeded_rel_link.cpp: const 8042A734 -> 8042A454 [data]
+nsmbw_preseeded_rel_link.cpp: const 8042A734 -> 8042A454 [data]
+nsmbw_preseeded_rel_link.cpp: const 8076D680 -> 8076D6C0 [data]
+nsmbw_preseeded_rel_link.cpp: const 809A2CA0 -> 809A2CE0 [data]
+nsmbw_preseeded_rel_link.cpp: const 80B1C920 -> 80B1C960 [data]
 nsmbw_psmtx_copy_diag.cpp: bind 801C0640 -> 801C0500
 nsmbw_psmtx_copy_diag.cpp: const 801C0640 -> 801C0500 [code]
 nsmbw_psmtx_copy_diag.cpp: const 80250FB0 -> 80250E70 [code]
@@ -614,6 +852,7 @@ nsmbw_sc_deferred_write_sync.cpp: const 8042AD30 -> 8042AA50 [data]
 nsmbw_sc_deferred_write_sync.cpp: const 803DA2C0 -> 803D9FC0 [data]
 nsmbw_sc_deferred_write_sync.cpp: const 803DA340 -> 803DA040 [data]
 nsmbw_sc_deferred_write_sync.cpp: const 8042AD30 -> 8042AA50 [data]
+nsmbw_sc_deferred_write_sync.cpp: const 801DBC60 -> 801DBB20 [code]
 nsmbw_scboot_dodelete_diag.cpp: bind 8015C600 -> 8015C4C0
 nsmbw_scboot_dodelete_diag.cpp: const 8015C600 -> 8015C4C0 [code]
 nsmbw_scboot_dodelete_diag.cpp: const 8015C6E0 -> 8015C5A0 [code]
@@ -628,13 +867,23 @@ nsmbw_scboot_dodelete_diag.cpp: const 80428280 -> 80427F70 [data]
 nsmbw_scboot_dodelete_diag.cpp: const 800E2040 -> 800E1F50 [code]
 nsmbw_scboot_dodelete_diag.cpp: const 800E2050 -> 800E1F60 [code]
 nsmbw_scboot_dodelete_diag.cpp: const 800E5170 -> 800E5060 [code]
+nsmbw_scboot_dodelete_diag.cpp: const 8042A638 -> 8042A358 [data]
 nsmbw_scboot_dodelete_diag.cpp: const 8042F980 -> 8042F6A0 [data]
+nsmbw_scboot_dodelete_diag.cpp: const 8015F760 -> 8015F620 [code]
+nsmbw_scboot_dodelete_diag.cpp: const 80428280 -> 80427F70 [data]
+nsmbw_scboot_dodelete_diag.cpp: const 80108020 -> 80107F10 [code]
+nsmbw_scboot_dodelete_diag.cpp: const 80108260 -> 80108150 [code]
+nsmbw_scboot_dodelete_diag.cpp: const 800E2040 -> 800E1F50 [code]
+nsmbw_scboot_dodelete_diag.cpp: const 800E2050 -> 800E1F60 [code]
+nsmbw_scboot_dodelete_diag.cpp: const 800E5170 -> 800E5060 [code]
 nsmbw_select_thread_override.cpp: bind 801B4FE0 -> 801B4EA0
 nsmbw_select_thread_override.cpp: const 801B4FE0 -> 801B4EA0 [code]
 nsmbw_select_thread_override.cpp: const 801A9C08 -> 801A9AC8 [code]
 nsmbw_select_thread_override.cpp: const 801B4FE0 -> 801B4EA0 [code]
 nsmbw_skip_boot_screens.cpp: const 8042A260 -> 80429F80 [data]
+nsmbw_skip_boot_screens.cpp: const 8042A260 -> 80429F80 [data]
 nsmbw_sound_volumes.cpp: const 809C2898 -> 809C28D8 [code]   (code address, not a function start: check)
+nsmbw_sound_volumes.cpp: const 8042A768 -> 8042A488 [data]
 nsmbw_sound_volumes.cpp: const 8042A768 -> 8042A488 [data]
 nsmbw_state_change_diag.cpp: bind 8015FD50 -> 8015FC10
 nsmbw_state_change_diag.cpp: const 8015FD50 -> 8015FC10 [code]
@@ -649,6 +898,8 @@ nsmbw_tevcolor_diag.cpp: const 801C8570 -> 801C8430 [code]
 nsmbw_tevcolor_diag.cpp: const 801C8570 -> 801C8430 [code]
 nsmbw_tevcolor_diag.cpp: const 800CB990 -> 800CB8A0 [code]
 nsmbw_tevcolor_diag.cpp: const 800CC700 -> 800CC610 [code]   (code address, not a function start: check)
+nsmbw_tevcolor_diag.cpp: const 800CB990 -> 800CB8A0 [code]
+nsmbw_tevcolor_diag.cpp: const 800CC700 -> 800CC610 [code]   (code address, not a function start: check)
 nsmbw_tick_read_pump.cpp: bind 801BE010 -> 801BDED0
 nsmbw_tick_read_pump.cpp: bind 800B0A20 -> 800B0A20
 nsmbw_tick_read_pump.cpp: bind 800B0B00 -> 800B0B00
@@ -659,24 +910,41 @@ nsmbw_tick_read_pump.cpp: const 801BE010 -> 801BDED0 [code]
 nsmbw_tick_read_pump.cpp: const 8099FDFC -> 8099FE3C [data]
 nsmbw_tick_read_pump.cpp: const 80103BD0 -> 80103AC0 [code]
 nsmbw_tick_read_pump.cpp: const 80321BD0 -> 803218B8 [data]
+nsmbw_tick_read_pump.cpp: const 8099FDFC -> 8099FE3C [data]
+nsmbw_tick_read_pump.cpp: const 8042AB4C -> 8042A86C [data]
 nsmbw_tick_read_pump.cpp: const 80830720 -> 80830730 [code]
 nsmbw_tick_read_pump.cpp: const 8042A16E -> 80429E8E [data]
 nsmbw_tick_read_pump.cpp: const 8042A162 -> 80429E82 [data]
+nsmbw_tick_read_pump.cpp: const 8042A16E -> 80429E8E [data]
+nsmbw_tick_read_pump.cpp: const 8042A162 -> 80429E82 [data]
+nsmbw_tick_read_pump.cpp: const 8042A698 -> 8042A3B8 [data]
 nsmbw_tick_read_pump.cpp: const 8042A698 -> 8042A3B8 [data]
 nsmbw_tick_read_pump.cpp: const 807B40A0 -> 807B40B0 [code]
+nsmbw_tick_read_pump.cpp: const 80950C28 -> 80950C38 [data]
+nsmbw_tick_read_pump.cpp: const 80950C48 -> 80950C58 [data]
+nsmbw_tick_read_pump.cpp: const 80F67700 -> 80F67740 [data]
 nsmbw_tick_read_pump.cpp: const 80F67700 -> 80F67740 [data]
 nsmbw_tick_read_pump.cpp: const 8042A490 -> 8042A1B0 [data]
 nsmbw_tick_read_pump.cpp: const 800BB8D0 -> 800BB880 [code]
+nsmbw_tick_read_pump.cpp: const 8042A490 -> 8042A1B0 [data]
 nsmbw_tick_read_pump.cpp: const 8042A720 -> 8042A440 [data]
 nsmbw_tick_read_pump.cpp: const 8016DE50 -> 8016DD10 [code]
+nsmbw_tick_read_pump.cpp: const 8042A720 -> 8042A440 [data]
 nsmbw_tick_read_pump.cpp: const 800E1CD0 -> 800E1BE0 [code]
+nsmbw_tick_read_pump.cpp: const 80428A4C -> 8042873C [data]
 nsmbw_tick_read_pump.cpp: const 80428A4C -> 8042873C [data]
 nsmbw_tick_read_pump.cpp: const 8076A628 -> 8076A668 [data]
 nsmbw_tick_read_pump.cpp: const 8076A637 -> 8076A677 [data]
 nsmbw_tick_read_pump.cpp: const 80355160 -> 80354E60 [data]
+nsmbw_tick_read_pump.cpp: const 80355160 -> 80354E60 [data]
+nsmbw_tick_read_pump.cpp: const 8042AB4C -> 8042A86C [data]
 nsmbw_tick_read_pump.cpp: const 8042A720 -> 8042A440 [data]
 nsmbw_tick_read_pump.cpp: const 8042A260 -> 80429F80 [data]
 nsmbw_tick_read_pump.cpp: const 8016DE20 -> 8016DCE0 [code]
+nsmbw_tick_read_pump.cpp: const 8042A260 -> 80429F80 [data]
+nsmbw_tick_read_pump.cpp: const 8042A720 -> 8042A440 [data]
+nsmbw_tick_read_pump.cpp: const 8016DE20 -> 8016DCE0 [code]
+nsmbw_tick_read_pump.cpp: const 8042A720 -> 8042A440 [data]
 nsmbw_vi_wait_for_retrace.cpp: bind 801BCE30 -> 801BCCF0
 nsmbw_vi_wait_for_retrace.cpp: bind 801BC520 -> 801BC3E0
 nsmbw_vi_wait_for_retrace.cpp: bind 801BC570 -> 801BC430
@@ -693,12 +961,14 @@ nsmbw_wiistrap_create_diag.cpp: const 8010F170 -> 8010F060 [code]
 nsmbw_wiistrap_create_diag.cpp: const 8010F170 -> 8010F060 [code]
 nsmbw_wiistrap_create_diag.cpp: const 8010F1D0 -> 8010F0C0 [code]
 nsmbw_wiistrap_create_diag.cpp: const 8010F1D0 -> 8010F0C0 [code]
+nsmbw_wiistrap_create_diag.cpp: const 8010F1D0 -> 8010F0C0 [code]
 nsmbw_wiistrap_dismiss.cpp: bind 8015CFB0 -> 8015CE70
 nsmbw_wiistrap_dismiss.cpp: const 8015CF30 -> 8015CDF0 [code]
 nsmbw_wiistrap_draw_diag.cpp: bind 8010F4E0 -> 8010F3A0
 nsmbw_wiistrap_draw_diag.cpp: const 8010F4E0 -> 8010F3A0 [code]
 nsmbw_wiistrap_execute_diag.cpp: bind 8010F480 -> 8010F340
 nsmbw_wiistrap_execute_diag.cpp: const 8010F480 -> 8010F340 [code]
+nsmbw_wiistrap_execute_diag.cpp: const 800C9650 -> 800C9560 [code]
 nsmbw_wiistrap_execute_diag.cpp: const 800C9650 -> 800C9560 [code]
 nsmbw_wipecircle_calc_diag.cpp: bind 8001B580 -> 8001B580
 nsmbw_wipecircle_calc_diag.cpp: const 802DCEEC -> 802DCBFC [code]
@@ -708,6 +978,7 @@ nsmbw_wipecircle_calc_diag.cpp: const 800C9360 -> 800C9270 [code]
 nsmbw_wipecircle_calc_diag.cpp: const 80163910 -> 801637D0 [code]
 nsmbw_wipecircle_calc_diag.cpp: const 80163930 -> 801637F0 [code]
 nsmbw_wipecircle_calc_diag.cpp: const 80163800 -> 801636C0 [code]
+nsmbw_wipecircle_calc_diag.cpp: const 800C9650 -> 800C9560 [code]
 nsmbw_wm_full_save.cpp: bind 8077AA10 -> 8077AA50
 nsmbw_wm_full_save.cpp: bind 8092FC30 -> 8092FC40
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
@@ -718,6 +989,9 @@ nsmbw_wm_full_save.cpp: const 80796080 -> 807960C0 [code]
 nsmbw_wm_full_save.cpp: const 80796250 -> 80796290 [code]
 nsmbw_wm_full_save.cpp: const 8077D9A0 -> 8077D9E0 [code]
 nsmbw_wm_full_save.cpp: const 801028D0 -> 801027C0 [code]
+nsmbw_wm_full_save.cpp: const 8077AA44 -> 8077AA84 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 8077AB70 -> 8077ABB0 [code]
+nsmbw_wm_full_save.cpp: const 80430000 -> 8042FD20 [data]
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
 nsmbw_wm_full_save.cpp: const 800E0478 -> 800E0388 [code]   (code address, not a function start: check)
@@ -726,9 +1000,27 @@ nsmbw_wm_full_save.cpp: const 800E047C -> 800E038C [code]   (code address, not a
 nsmbw_wm_full_save.cpp: const 800E0484 -> 800E0394 [code]   (code address, not a function start: check)
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
 nsmbw_wm_full_save.cpp: const 800CDD50 -> 800CDC60 [code]
+nsmbw_wm_full_save.cpp: const 80360000 -> 8035FD00 [data]
 nsmbw_wm_full_save.cpp: const 800CDD50 -> 800CDC60 [code]
+nsmbw_wm_full_save.cpp: const 8077AA88 -> 8077AAC8 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 800B5500 -> 800B54B0 [code]
+nsmbw_wm_full_save.cpp: const 8077AAFC -> 8077AB3C [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 800C9B50 -> 800C9A60 [code]
+nsmbw_wm_full_save.cpp: const 8077AB18 -> 8077AB58 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 800C9B50 -> 800C9A60 [code]
+nsmbw_wm_full_save.cpp: const 809A0000 -> 809A0040 [data]
+nsmbw_wm_full_save.cpp: const 80430000 -> 8042FD20 [data]
+nsmbw_wm_full_save.cpp: const 8092FC70 -> 8092FC80 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 801954C0 -> 80195380 [code]
 nsmbw_wm_full_save.cpp: const 808DEB70 -> 808DEB80 [code]
+nsmbw_wm_full_save.cpp: const 80430000 -> 8042FD20 [data]
 nsmbw_wm_full_save.cpp: const 808DEB70 -> 808DEB80 [code]
+nsmbw_wm_full_save.cpp: const 8092FCA0 -> 8092FCB0 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 80430000 -> 8042FD20 [data]
+nsmbw_wm_full_save.cpp: const 8092FCC0 -> 8092FCD0 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 801954C0 -> 80195380 [code]
+nsmbw_wm_full_save.cpp: const 8092FCE4 -> 8092FCF4 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 80430000 -> 8042FD20 [data]
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
 nsmbw_wm_full_save.cpp: const 800E0478 -> 800E0388 [code]   (code address, not a function start: check)
@@ -736,6 +1028,9 @@ nsmbw_wm_full_save.cpp: const 800E0484 -> 800E0394 [code]   (code address, not a
 nsmbw_wm_full_save.cpp: const 800E047C -> 800E038C [code]   (code address, not a function start: check)
 nsmbw_wm_full_save.cpp: const 800E0484 -> 800E0394 [code]   (code address, not a function start: check)
 nsmbw_wm_full_save.cpp: const 800E0470 -> 800E0380 [code]
+nsmbw_wm_full_save.cpp: const 8092FD24 -> 8092FD34 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 8092FD40 -> 8092FD50 [code]   (code address, not a function start: check)
+nsmbw_wm_full_save.cpp: const 8092FD60 -> 8092FD70 [code]   (code address, not a function start: check)
 nsmbw_wpad_overrides.cpp: bind 801DFB90 -> 801DFA50
 nsmbw_wpad_overrides.cpp: bind 801F3670 -> 801F3530
 nsmbw_wpad_overrides.cpp: bind 801DFC00 -> 801DFAC0
@@ -766,11 +1061,14 @@ nsmbw_wpad_overrides.cpp: const 801DFB90 -> 801DFA50 [code]
 nsmbw_wpad_overrides.cpp: const 8039E630 -> 8039E330 [data]
 nsmbw_wpad_overrides.cpp: const 8039F660 -> 8039F360 [data]
 nsmbw_wpad_overrides.cpp: const 801DF930 -> 801DF7F0 [code]
+nsmbw_wpad_overrides.cpp: const 8039E630 -> 8039E330 [data]
+nsmbw_wpad_overrides.cpp: const 8039F660 -> 8039F360 [data]
 nsmbw_wpad_overrides.cpp: const 801DF930 -> 801DF7F0 [code]
 nsmbw_wpad_overrides.cpp: const 8016F360 -> 8016F220 [code]
 nsmbw_wpad_overrides.cpp: const 8042A758 -> 8042A478 [data]
 nsmbw_wpad_overrides.cpp: const 8016F780 -> 8016F640 [code]
 nsmbw_wpad_overrides.cpp: const 8016F780 -> 8016F640 [code]
+nsmbw_wpad_overrides.cpp: const 8042A758 -> 8042A478 [data]
 nsmbw_wpad_overrides.cpp: const 801DFC00 -> 801DFAC0 [code]
 nsmbw_wpad_overrides.cpp: const 801DFC10 -> 801DFAD0 [code]
 nsmbw_wpad_overrides.cpp: const 801DFC40 -> 801DFB00 [code]
@@ -791,3 +1089,8 @@ nsmbw_wpad_overrides.cpp: const 8016F710 -> 8016F5D0 [code]
 nsmbw_wpad_overrides.cpp: const 8016F6D0 -> 8016F590 [code]
 nsmbw_wpad_overrides.cpp: const 8042A748 -> 8042A468 [data]
 nsmbw_wpad_overrides.cpp: const 80377F88 -> 80377C88 [data]
+nsmbw_wpad_overrides.cpp: const 8042A748 -> 8042A468 [data]
+nsmbw_wpad_overrides.cpp: const 80377F88 -> 80377C88 [data]
+nsmbw_wpad_overrides.cpp: const 80377F8C -> 80377C8C [data]
+nsmbw_wpad_overrides.cpp: const 80377F90 -> 80377C90 [data]
+nsmbw_wpad_overrides.cpp: const 80377F94 -> 80377C94 [data]

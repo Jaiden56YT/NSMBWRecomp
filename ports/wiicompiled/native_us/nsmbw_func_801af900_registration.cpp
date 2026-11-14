@@ -3,7 +3,7 @@
 //
 // History: a past session found each one forward-declares and calls
 // func_801A9CE0_statefree_v0 (a "state-free ABI" fast-path variant of func_801A9CE0), guarded by
-// `MkwStateFreeAbiEnabled(...) && KnownTranslatedCpuCall<0x801A9CE0u>::kAvailable && ...`. Because
+// `MkwStateFreeAbiEnabled(...) && KnownTranslatedCpuCall<0x801A9BA0u>::kAvailable && ...`. Because
 // func_801A9CE0 is natively overridden (nsmbw_func_801a9ce0.cpp, fixing a translator
 // mistranslation - an infinite self-branch), that guard is compile-time-false and the branch is
 // dead code, but the translator's emit-nsmbw-build-shards pass still excludes every caller of an
@@ -81,12 +81,12 @@ NSMBW_MISSING_STATEFREE_BODY_STUB(801AC980) PPC_NATIVE_OVERRIDE_VOID(801AC840, f
 extern "C" void func_801A9CE0(CpuContext* ctx);
 extern "C" void func_801B8B20_table_walker(CpuContext* ctx)
 {
-    for (uint32_t entry = 0x802EDFC0u;; entry += 4u) {
+    for (uint32_t entry = 0x802EDCC0u;; entry += 4u) {
         const uint32_t fn = ::Memory::Read32(entry);
         if (fn == 0u) break;
         InvokeIndirectCpu(fn, ctx);
     }
-    InvokeIndirectCpu(0x801A9CE0u, ctx);
+    InvokeIndirectCpu(0x801A9BA0u, ctx);
 }
 PPC_NATIVE_OVERRIDE_VOID(801B89E0, func_801B8B20_table_walker, (CpuContext* ctx), (ctx));
 

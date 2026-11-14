@@ -1,44 +1,14 @@
-// Native override for NSMBW's own compiled EXI immediate-transfer start helper (0x801B8B20), the
-// counterpart to 0x801B8F50 (nsmbw_exi_imm_wait.cpp) - together they implement one immediate
-// (non-DMA) EXI transfer: this half queues it and, for a write, clocks the caller's data out; the
-// other half waits for hardware completion and, for a read, clocks the result back in. Fully read
-// and traced end to end (576 lines) - no untraced regions remain, and every loop here is a
-// ctr-decrement loop, which PowerPC's ctr semantics make hardware-guaranteed to terminate.
-// Verified contract:
-//   1. Bail out (return FALSE) if the per-channel RAM state struct (0x8038FD00-1520 +
-//      channel*64, the same struct EXISelect/EXIDeselect/the wait half use) shows a transfer
-//      already pending, or the channel isn't marked selected.
-//   2. Record the requested type in that struct; if non-zero, OR the requested bits into the
-//      channel's CPR register (base 0xCD006800 + channel*0x14 + 0x0) and call func_801B16D0 (an
-//      already-translated, ordinary function - untouched here, only this function's own body is
-//      replaced).
-//   3. Mark the transfer active. If a nonzero length was requested, pack the caller's buffer into
-//      a 32-bit accumulator and write it to the channel's DATA register (offset 0x10) - the write
-//      half of the transfer; a zero length skips straight past this.
-//   4. Record the caller's buffer pointer and clamped length into the RAM state struct (offset
-//      0x14/0x10) so the wait half (0x801B8F50) knows where to unpack a read's result later, build
-//      the CR value (type + length bits), and write it to the CR register (offset 0xC) - the
-//      actual hardware "start transfer" trigger.
-//
-// This is a byte-for-byte structural copy of the translated PPC body (build/nsmbw/functions/
-// func_801B8C60.cpp) - every branch, comparison, sub-call and bit operation is unchanged,
-// including the InvokeDirectCpu<> call into func_801B16D0 (an ordinary, still-translated
-// function). The ONLY edit: the 4 FlatRead32/FlatWrite32 calls that touch EXI's real hardware
-// registers (CPR at +0x0, DATA at +0x10, CR at +0xC, all r-relative to base 0xCD006800 +
-// channel*0x14) are swapped for Memory::Read32/Write32 (the checked path, dispatching to
-// runtime/src/hle/exi.cpp's register-block backing, the same block EXISelect/EXIDeselect/the wait
-// half already use) - see pi.cpp's comment for why FlatRead/FlatWrite against real MMIO always
-// hits an unrecoverable hardware fault on this runtime (the CR write here previously landed on an
-// unguarded page and silently vanished instead of faulting - harmless by accident, since the
-// checked path's zero-initialized CR already produces the same "no transfer in progress" result
-// the wait half's TSTART poll needs, but not something to leave undiagnosed). Every other
-// FlatRead32/FlatRead8/FlatWrite32/FlatWriteRam32/ReadResolved8 call here (stack spill/restore,
-// the per-channel RAM state struct, the caller's own buffer) is genuine RAM access, left
-// untouched.
+// EXIImm (start): native override regenerated for USA Rev 2 (tools/regen_mmio_overrides.py)
+// from the US translated body of 0x801B8B20. Upstream NSMBWiicompiled kept a structural
+// copy of the PAL body with its hardware-register accesses on the checked Memory:: path
+// (flat access faults on MMIO); here all 12 plain flat accesses are checked.
 #include "hle_stubs.h"
 #include "memory.h"
+#include <cstdint>
 #include "ppc_runtime.h"
 #include "abi_bridge.h"
+#include "memory.h"
+#include "recomp_mod_loader.h"
 
 extern "C" void EXIImmStart_NSMBW_801B8C60(CpuContext* MKW_RESTRICT ctx)
 {
@@ -108,9 +78,9 @@ extern "C" void EXIImmStart_NSMBW_801B8C60(CpuContext* MKW_RESTRICT ctx)
     uint32_t ctr = ctx->ctr;
     uint32_t xer = ctx->xer;
 
-    goto loc_801B8C60;
+    goto loc_801B8B20;
 
-loc_801B8C60:
+loc_801B8B20:
 {
     guest_range_1 = MemoryInline::ResolveRangeHost((r1 + -48), 0, 56u, false, true);
     MemoryInline::WriteResolved32(guest_range_1, 0u, (r1 + -48), r1);
@@ -141,7 +111,7 @@ loc_801B8C60:
     r0_rot_0 = PpcRotl32Inline(static_cast<uint32_t>(r3), static_cast<uint32_t>(6));
     r0 = (r0_rot_0 & -64);
     r3 = 0x80390000u;
-    r3 = (r3 + -1520);
+    r3 = (r3 + -2288);
     r31 = (r3 + r0);
     // inline leaf 0x801B1140 (5 guest instruction(s))
     r3 = ctx->msr;
@@ -151,31 +121,31 @@ loc_801B8C60:
     r3 = (r3_rot_0 & 1);
     // end of inlined leaf 0x801B1140
     r30 = r3;
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & 3);
 }
 
-loc_801B8CA8:
+loc_801B8B68:
 {
     if ((static_cast<int32_t>(r0) != static_cast<int32_t>(0))) {
-        goto loc_801B8CB8;
+        goto loc_801B8B78;
     }
 }
 
-loc_801B8CAC:
+loc_801B8B6C:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & 4);
 }
 
-loc_801B8CB4:
+loc_801B8B74:
 {
     if ((static_cast<int32_t>(r0) != static_cast<int32_t>(0))) {
-        goto loc_801B8CC8;
+        goto loc_801B8B88;
     }
 }
 
-loc_801B8CB8:
+loc_801B8B78:
 {
     r3 = r30;
     // inline leaf 0x801B1180 (9 guest instruction(s))
@@ -212,45 +182,45 @@ loc_inl2_0x801B1198:
     r3 = (r3_rot_6 & 1);
 }
 
-loc_inl2_cont_801B12C0:
+loc_inl2_cont_801B1180:
 {
     // end of inlined leaf 0x801B1180
     r3 = 0;
-    goto loc_801B8EC4;
+    goto loc_801B8D84;
 }
 
-loc_801B8CC8:
+loc_801B8B88:
 {
-    MemoryInline::FlatWrite32((r31 + 4), r25);
+    Memory::Write32((r31 + 4), r25);
 }
 
-loc_801B8CD0:
+loc_801B8B90:
 {
     if ((static_cast<int32_t>(r25) == static_cast<int32_t>(0))) {
-        goto loc_801B8D04;
+        goto loc_801B8BC4;
     }
 }
 
-loc_801B8CD4:
+loc_801B8B94:
 {
     r3 = (r26 * 20);
     r0 = -855638016;
     r3 = (r0 + r3);
-    r0 = Memory::Read32(static_cast<uint32_t>(r3 + 26624));
+    r0 = Memory::Read32((r3 + 26624));
     r0 = (r0 & 2037);
     SetCRResident(cr, xer, 0, static_cast<int32_t>(r0), static_cast<int32_t>(0));
 }
 
-loc_801B8CE8:
+loc_801B8BA8:
 {
     r0 = (r0 | 8);
-    Memory::Write32(static_cast<uint32_t>(r3 + 26624), r0);
+    Memory::Write32((r3 + 26624), r0);
     r3 = 2097152;
     r0_rot_1 = PpcRotl32Inline(static_cast<uint32_t>(r26), static_cast<uint32_t>(2));
     r0 = (r0_rot_1 & -4);
     r0 = (r0 - r26);
     r3 = PPC_Srw(static_cast<uint32_t>(r3), static_cast<uint32_t>(r0));
-    ctx->lr = 0x801B8D04u;
+    ctx->lr = 0x801B8BC4u;
     ctx->gpr[0] = r0;
     ctx->gpr[1] = r1;
     ctx->gpr[3] = r3;
@@ -261,7 +231,7 @@ loc_801B8CE8:
     ctx->gpr[31] = r31;
     ctx->cr = cr;
     ctx->xer = xer;
-    InvokeDirectCpu<0x801B16D0u>(ctx);
+    InvokeDirectCpu<0x801B1590u>(ctx);
     r0 = ctx->gpr[0];
     r1 = ctx->gpr[1];
     r3 = ctx->gpr[3];
@@ -273,84 +243,84 @@ loc_801B8CE8:
     cr = ctx->cr;
 }
 
-loc_801B8D04:
+loc_801B8BC4:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 | 2);
-    MemoryInline::FlatWrite32((r31 + 12), r0);
+    Memory::Write32((r31 + 12), r0);
 }
 
-loc_801B8D14:
+loc_801B8BD4:
 {
     if ((static_cast<int32_t>(r29) == static_cast<int32_t>(0))) {
-        goto loc_801B8E78;
+        goto loc_801B8D38;
     }
 }
 
-loc_801B8D18:
+loc_801B8BD8:
 {
     r0 = 0;
     r4 = 0;
     SetCRResident(cr, xer, 1, static_cast<int32_t>(r28), static_cast<int32_t>(0));
 }
 
-loc_801B8D24:
+loc_801B8BE4:
 {
     if (((cr & 0x04000000u) == 0)) {
-        goto loc_801B8E68;
+        goto loc_801B8D28;
     }
 }
 
-loc_801B8D28:
+loc_801B8BE8:
 {
     r6 = (r28 + -8);
 }
 
-loc_801B8D30:
+loc_801B8BF0:
 {
     if ((static_cast<int32_t>(r28) <= static_cast<int32_t>(8))) {
-        goto loc_801B8E34;
+        goto loc_801B8CF4;
     }
 }
 
-loc_801B8D34:
+loc_801B8BF4:
 {
     r5 = 0;
     if (((cr & 0x08000000u) != 0)) {
-        goto loc_801B8D50;
+        goto loc_801B8C10;
     }
 }
 
-loc_801B8D3C:
+loc_801B8BFC:
 {
     r3 = 0x80000000u;
     r3 = (r3 + -2);
 }
 
-loc_801B8D48:
+loc_801B8C08:
 {
     if ((static_cast<int32_t>(r28) > static_cast<int32_t>(r3))) {
-        goto loc_801B8D50;
+        goto loc_801B8C10;
     }
 }
 
-loc_801B8D4C:
+loc_801B8C0C:
 {
     r5 = 1;
 }
 
-loc_801B8D50:
+loc_801B8C10:
 {
 }
 
-loc_801B8D54:
+loc_801B8C14:
 {
     if ((static_cast<int32_t>(r5) == static_cast<int32_t>(0))) {
-        goto loc_801B8E34;
+        goto loc_801B8CF4;
     }
 }
 
-loc_801B8D58:
+loc_801B8C18:
 {
     r3 = r27;
     r5 = (r6 + 7);
@@ -359,14 +329,14 @@ loc_801B8D58:
     ctr = r5;
 }
 
-loc_801B8D6C:
+loc_801B8C2C:
 {
     if ((static_cast<int32_t>(r6) <= static_cast<int32_t>(0))) {
-        goto loc_801B8E34;
+        goto loc_801B8CF4;
     }
 }
 
-loc_801B8D70:
+loc_801B8C30:
 {
     guest_range_0 = MemoryInline::ResolveRangeHost(r3, 0, 8u, true, false);
     r6 = MemoryInline::ReadResolved8(guest_range_0, 0u, r3);
@@ -434,27 +404,27 @@ loc_801B8D70:
     r4 = (r4 + 8);
     ctr = (ctr + -1);
     if ((ctr != 0)) {
-        goto loc_801B8D70;
+        goto loc_801B8C30;
     }
 }
 
-loc_801B8E34:
+loc_801B8CF4:
 {
     r6 = (r27 + r4);
     r3 = (r28 - r4);
     ctr = r3;
 }
 
-loc_801B8E44:
+loc_801B8D04:
 {
     if ((static_cast<int32_t>(r4) >= static_cast<int32_t>(r28))) {
-        goto loc_801B8E68;
+        goto loc_801B8D28;
     }
 }
 
-loc_801B8E48:
+loc_801B8D08:
 {
-    r5 = MemoryInline::FlatRead8(r6);
+    r5 = Memory::Read8(r6);
     r3 = (3 - r4);
     xer = (xer & 0xDFFFFFFFu) | ((static_cast<uint32_t>(3) >= static_cast<uint32_t>(r4) ? 1u : 0u) << 29);
     r3_rot_2 = PpcRotl32Inline(static_cast<uint32_t>(r3), static_cast<uint32_t>(3));
@@ -465,21 +435,21 @@ loc_801B8E48:
     r4 = (r4 + 1);
     ctr = (ctr + -1);
     if ((ctr != 0)) {
-        goto loc_801B8E48;
+        goto loc_801B8D08;
     }
 }
 
-loc_801B8E68:
+loc_801B8D28:
 {
     r4 = -855638016;
     r3 = (r26 * 20);
     r3 = (r4 + r3);
-    Memory::Write32(static_cast<uint32_t>(r3 + 26640), r0);
+    Memory::Write32((r3 + 26640), r0);
 }
 
-loc_801B8E78:
+loc_801B8D38:
 {
-    MemoryInline::FlatWrite32((r31 + 20), r27);
+    Memory::Write32((r31 + 20), r27);
     r3 = (r29 + -1);
     r0 = (1 - r29);
     r0 = (r3 | r0);
@@ -492,7 +462,7 @@ loc_801B8E78:
     }
     r0 = (static_cast<int32_t>(r0) >> 31);
     r0 = (r28 & r0);
-    MemoryInline::FlatWrite32((r31 + 16), r0);
+    Memory::Write32((r31 + 16), r0);
     r0_rot_3 = PpcRotl32Inline(static_cast<uint32_t>(r29), static_cast<uint32_t>(2));
     r0 = (r0_rot_3 & -4);
     r3 = (r0 | 1);
@@ -503,7 +473,7 @@ loc_801B8E78:
     r3 = -855638016;
     r0 = (r26 * 20);
     r3 = (r3 + r0);
-    Memory::Write32(static_cast<uint32_t>(r3 + 26636), r4);
+    Memory::Write32((r3 + 26636), r4);
     r3 = r30;
     // inline leaf 0x801B1180 (9 guest instruction(s))
 }
@@ -539,13 +509,13 @@ loc_inl3_0x801B1198:
     r3 = (r3_rot_5 & 1);
 }
 
-loc_inl3_cont_801B12C0:
+loc_inl3_cont_801B1180:
 {
     // end of inlined leaf 0x801B1180
     r3 = 1;
 }
 
-loc_801B8EC4:
+loc_801B8D84:
 {
     r11 = (r1 + 48);
     // inline leaf 0x802DCDB8 (8 guest instruction(s))
@@ -606,5 +576,8 @@ loc_801B8EC4:
 }
 
 }
+
+// RECOMP_GUEST_ABI gpr_read=0xFE0000FB gpr_write=0xFE00087B gpr_return=0x00000018 fpr_read=0x00000000 fpr_write=0x00000000 fpr_return=0x00000000 cr_read=0x03 cr_write=0x03 xer_read=1 xer_write=1 fence=0
+// RECOMP_REGISTRATION base 0x801B8B20 func_801B8B20 preserves=true fpr_mask=0x00000000
 
 PPC_NATIVE_OVERRIDE_VOID(801B8B20, EXIImmStart_NSMBW_801B8C60, (CpuContext* ctx), (ctx));

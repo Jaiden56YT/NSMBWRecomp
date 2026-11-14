@@ -1,48 +1,19 @@
-// Native override for NSMBW's own compiled EXI immediate-transfer completion helper (0x801B8F50).
-// Fully read and traced end to end (561 lines as translated after the DI_CONFIG fix removed an
-// inlined leaf that used to make this function much larger) - no untraced regions remain. Its
-// verified contract:
-//   1. Poll the channel's CR register (base 0xCD006800 + channel*0x14 + 0xC) for the TSTART bit.
-//      A single poll, not a spin loop of its own - the outer "wait" shape comes from its callers
-//      re-invoking it, not from a loop inside this function.
-//   2. If TSTART is clear (transfer physically done) and the per-channel RAM state struct
-//      (0x8038FD00-1520 + channel*64, the same struct EXISelect/EXIDeselect use) says a read was
-//      pending, unpack the DATA register (offset 0x10) into the caller's buffer - a
-//      ctr-decrement loop, which PowerPC's ctr semantics make hardware-guaranteed to terminate,
-//      not an unbounded retry.
-//   3. Clear the "active" flag, then call the already-fixed DI_CONFIG probe (0x801AB1B0) and
-//      compare its result to the 0xFF sentinel.
-//
-// That last comparison is the reason a full port of this function was previously abandoned as
-// hang-prone: with DI_CONFIG unresolved at the time, whatever guess was in place for it could
-// route into the device-ID-comparison chain below (loc_801B9258 onward - a call into
-// func_801AA020, an SI-status halfword poll, and comparisons against three hardware ID sentinels)
-// - untested, unverified territory. Now that DI_CONFIG faithfully returns 0 (this runtime's
-// genuine "no real DVD interface board revision" default, see hle/di.cpp), that comparison is
-// PROVEN to always take the "not equal to 0xFF" branch (0 != 0xFF), which unconditionally skips
-// the entire device-ID chain. It is ported below verbatim for structural fidelity - the
-// translator's own dead-code elimination would otherwise be doing this same job invisibly - but it
-// is unreachable given the current DI_CONFIG behavior, not a hazard.
-//
-// This is a byte-for-byte structural copy of the translated PPC body (build/nsmbw/functions/
-// func_801B9090.cpp) - every branch, comparison, sub-call and bit operation is unchanged,
-// including the InvokeDirectCpu<> calls into other translated functions (0x801A9EE0) and the
-// native override call (0x801AB1B0). The ONLY edit: the 5 FlatRead32 calls that touch EXI's real
-// hardware registers (CR at +0xC, DATA at +0x10, CPR at +0x0, all r-relative to base 0xCD006800 +
-// channel*0x14) are swapped for Memory::Read32 (the checked path, dispatching to
-// runtime/src/hle/exi.cpp's register-block backing, the same block EXISelect/EXIDeselect already
-// write through) - see pi.cpp's comment for why FlatRead against real MMIO always hits an
-// unrecoverable hardware fault on this runtime. Every other FlatRead32/FlatRead16/FlatWrite32 call
-// here (stack spill/restore, the per-channel RAM state struct, the caller's own buffer) is genuine
-// RAM access, left untouched.
+// EXISync / imm wait: native override regenerated for USA Rev 2 (tools/regen_mmio_overrides.py)
+// from the US translated body of 0x801B8F50. Upstream NSMBWiicompiled kept a structural
+// copy of the PAL body with its hardware-register accesses on the checked Memory:: path
+// (flat access faults on MMIO); here all 23 plain flat accesses are checked.
 #include "hle_stubs.h"
 #include "memory.h"
+#include <cstdint>
 #include "ppc_runtime.h"
 #include "abi_bridge.h"
+#include "memory.h"
+#include "recomp_mod_loader.h"
 
 extern "C" void EXIImmWait_NSMBW_801B9090(CpuContext* MKW_RESTRICT ctx)
 {
     uint32_t cr0_0 = 0;
+    uint32_t cr1_0 = 0;
     uint32_t r0_rot_0 = 0;
     uint32_t r3_rot_0 = 0;
     uint32_t r3_rot_1 = 0;
@@ -102,9 +73,9 @@ extern "C" void EXIImmWait_NSMBW_801B9090(CpuContext* MKW_RESTRICT ctx)
     uint32_t ctr = ctx->ctr;
     uint32_t xer = ctx->xer;
 
-    goto loc_801B9090;
+    goto loc_801B8F50;
 
-loc_801B9090:
+loc_801B8F50:
 {
     MemoryInline::FlatWriteRam32((r1 + -32), r1);
     r1 = (r1 + -32);
@@ -117,29 +88,29 @@ loc_801B9090:
     r0_rot_0 = PpcRotl32Inline(static_cast<uint32_t>(r3), static_cast<uint32_t>(6));
     r0 = (r0_rot_0 & -64);
     r4 = 0x80390000u;
-    r4 = (r4 + -1520);
+    r4 = (r4 + -2288);
     r31 = (r4 + r0);
     r29 = 0;
     r30 = (r3 * 20);
     r0 = -855638016;
     r3 = (r0 + r30);
-    goto loc_801B92DC;
+    goto loc_801B919C;
 }
 
-loc_801B90D0:
+loc_801B8F90:
 {
-    r0 = Memory::Read32(static_cast<uint32_t>(r3 + 26636));
+    r0 = Memory::Read32((r3 + 26636));
     r0 = (r0 & 1);
 }
 
-loc_801B90D8:
+loc_801B8F98:
 {
     if ((static_cast<int32_t>(r0) != static_cast<int32_t>(0))) {
-        goto loc_801B92DC;
+        goto loc_801B919C;
     }
 }
 
-loc_801B90DC:
+loc_801B8F9C:
 {
     // inline leaf 0x801B1140 (5 guest instruction(s))
     r3 = ctx->msr;
@@ -149,118 +120,118 @@ loc_801B90DC:
     r3 = (r3_rot_1 & 1);
     // end of inlined leaf 0x801B1140
     r28 = r3;
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & 4);
 }
 
-loc_801B90EC:
+loc_801B8FAC:
 {
     if ((static_cast<int32_t>(r0) == static_cast<int32_t>(0))) {
-        goto loc_801B92D0;
+        goto loc_801B9190;
     }
 }
 
-loc_801B90F0:
+loc_801B8FB0:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & 3);
 }
 
-loc_801B90F8:
+loc_801B8FB8:
 {
     if ((static_cast<int32_t>(r0) == static_cast<int32_t>(0))) {
-        goto loc_801B924C;
+        goto loc_801B910C;
     }
 }
 
-loc_801B90FC:
+loc_801B8FBC:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & 2);
 }
 
-loc_801B9104:
+loc_801B8FC4:
 {
     if ((static_cast<int32_t>(r0) == static_cast<int32_t>(0))) {
-        goto loc_801B9240;
+        goto loc_801B9100;
     }
 }
 
-loc_801B9108:
+loc_801B8FC8:
 {
-    r5 = MemoryInline::FlatRead32((r31 + 16));
+    r5 = Memory::Read32((r31 + 16));
     SetCRResident(cr, xer, 1, static_cast<int32_t>(r5), static_cast<int32_t>(0));
 }
 
-loc_801B9110:
+loc_801B8FD0:
 {
     if (((cr & 0x02000000u) != 0)) {
-        goto loc_801B9240;
+        goto loc_801B9100;
     }
 }
 
-loc_801B9114:
+loc_801B8FD4:
 {
-    r4 = MemoryInline::FlatRead32((r31 + 20));
+    r4 = Memory::Read32((r31 + 20));
     r0 = -855638016;
     r3 = (r0 + r30);
-    r0 = Memory::Read32(static_cast<uint32_t>(r3 + 26640));
+    r0 = Memory::Read32((r3 + 26640));
     r3 = 0;
     if (((cr & 0x04000000u) == 0)) {
-        goto loc_801B9240;
+        goto loc_801B9100;
     }
 }
 
-loc_801B912C:
+loc_801B8FEC:
 {
     r7 = (r5 + -8);
 }
 
-loc_801B9134:
+loc_801B8FF4:
 {
     if ((static_cast<int32_t>(r5) <= static_cast<int32_t>(8))) {
-        goto loc_801B9214;
+        goto loc_801B90D4;
     }
 }
 
-loc_801B9138:
+loc_801B8FF8:
 {
     r8 = 0;
     if (((cr & 0x08000000u) != 0)) {
-        goto loc_801B9154;
+        goto loc_801B9014;
     }
 }
 
-loc_801B9140:
+loc_801B9000:
 {
     r6 = 0x80000000u;
     r6 = (r6 + -2);
 }
 
-loc_801B914C:
+loc_801B900C:
 {
     if ((static_cast<int32_t>(r5) > static_cast<int32_t>(r6))) {
-        goto loc_801B9154;
+        goto loc_801B9014;
     }
 }
 
-loc_801B9150:
+loc_801B9010:
 {
     r8 = 1;
 }
 
-loc_801B9154:
+loc_801B9014:
 {
 }
 
-loc_801B9158:
+loc_801B9018:
 {
     if ((static_cast<int32_t>(r8) == static_cast<int32_t>(0))) {
-        goto loc_801B9214;
+        goto loc_801B90D4;
     }
 }
 
-loc_801B915C:
+loc_801B901C:
 {
     r6 = (r7 + 7);
     r6_rot_1 = PpcRotl32Inline(static_cast<uint32_t>(r6), static_cast<uint32_t>(29));
@@ -268,14 +239,14 @@ loc_801B915C:
     ctr = r6;
 }
 
-loc_801B916C:
+loc_801B902C:
 {
     if ((static_cast<int32_t>(r7) <= static_cast<int32_t>(0))) {
-        goto loc_801B9214;
+        goto loc_801B90D4;
     }
 }
 
-loc_801B9170:
+loc_801B9030:
 {
     r6 = (3 - r3);
     r6_rot_3 = PpcRotl32Inline(static_cast<uint32_t>(r6), static_cast<uint32_t>(3));
@@ -335,75 +306,73 @@ loc_801B9170:
     r3 = (r3 + 8);
     ctr = (ctr + -1);
     if ((ctr != 0)) {
-        goto loc_801B9170;
+        goto loc_801B9030;
     }
 }
 
-loc_801B9214:
+loc_801B90D4:
 {
     r6 = (r5 - r3);
     ctr = r6;
 }
 
-loc_801B9220:
+loc_801B90E0:
 {
     if ((static_cast<int32_t>(r3) >= static_cast<int32_t>(r5))) {
-        goto loc_801B9240;
+        goto loc_801B9100;
     }
 }
 
-loc_801B9224:
+loc_801B90E4:
 {
     r5 = (3 - r3);
     xer = (xer & 0xDFFFFFFFu) | ((static_cast<uint32_t>(3) >= static_cast<uint32_t>(r3) ? 1u : 0u) << 29);
     r5_rot_2 = PpcRotl32Inline(static_cast<uint32_t>(r5), static_cast<uint32_t>(3));
     r5 = (r5_rot_2 & -8);
     r5 = PPC_Srw(static_cast<uint32_t>(r0), static_cast<uint32_t>(r5));
-    MemoryInline::FlatWrite8(r4, static_cast<uint8_t>(r5));
+    Memory::Write8(r4, static_cast<uint8_t>(r5));
     r4 = (r4 + 1);
     r3 = (r3 + 1);
     ctr = (ctr + -1);
     if ((ctr != 0)) {
-        goto loc_801B9224;
+        goto loc_801B90E4;
     }
 }
 
-loc_801B9240:
+loc_801B9100:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & -4);
-    MemoryInline::FlatWrite32((r31 + 12), r0);
+    Memory::Write32((r31 + 12), r0);
 }
 
-loc_801B924C:
+loc_801B910C:
 {
-    ctx->gpr[0] = r0;
-    ctx->gpr[1] = r1;
-    ctx->gpr[3] = r3;
-    ctx->xer = xer;
-    InvokeDirectCpu<0x801AB2F0u>(ctx);
-    r0 = ctx->gpr[0];
-    r3 = ctx->gpr[3];
+    // inline leaf 0x801AB1B0 (4 guest instruction(s))
+    r3 = -855638016;
+    r0 = Memory::Read32((r3 + 24612));
+    r3 = (r0 & 255);
+    // end of inlined leaf 0x801AB1B0
     SetCRResident(cr, xer, 0, static_cast<uint32_t>(r3), static_cast<uint32_t>(255));
 }
 
-loc_801B9254:
+loc_801B9114:
 {
     if (((cr & 0x20000000u) == 0)) {
-        goto loc_801B92CC;
+        goto loc_801B918C;
     }
 }
 
-loc_801B9258:
+loc_801B9118:
 {
-    ctx->lr = 0x801B925Cu;
+    ctx->lr = 0x801B911Cu;
     ctx->gpr[0] = r0;
     ctx->gpr[1] = r1;
     ctx->gpr[3] = r3;
     ctx->gpr[31] = r31;
     ctx->cr = cr;
     ctx->xer = xer;
-    InvokeDirectCpu<0x801AA020u>(ctx);
+    InvokeDirectCpu<0x801A9EE0u>(ctx);
     r0 = ctx->gpr[0];
     r1 = ctx->gpr[1];
     r3 = ctx->gpr[3];
@@ -413,162 +382,162 @@ loc_801B9258:
     r0 = (r3 + -536870912);
 }
 
-loc_801B9268:
+loc_801B9128:
 {
     if ((static_cast<uint32_t>(r0) == static_cast<uint32_t>(0))) {
-        goto loc_801B92CC;
+        goto loc_801B918C;
     }
 }
 
-loc_801B926C:
+loc_801B912C:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 16));
+    r0 = Memory::Read32((r31 + 16));
 }
 
-loc_801B9274:
+loc_801B9134:
 {
     if ((static_cast<int32_t>(r0) != static_cast<int32_t>(4))) {
-        goto loc_801B92CC;
+        goto loc_801B918C;
     }
 }
 
-loc_801B9278:
+loc_801B9138:
 {
     r0 = -855638016;
     r4 = (r0 + r30);
-    r0 = Memory::Read32(static_cast<uint32_t>(r4 + 26624));
+    r0 = Memory::Read32((r4 + 26624));
     r0 = (r0 & 112);
 }
 
-loc_801B9288:
+loc_801B9148:
 {
     if ((static_cast<int32_t>(r0) != static_cast<int32_t>(0))) {
-        goto loc_801B92CC;
+        goto loc_801B918C;
     }
 }
 
-loc_801B928C:
+loc_801B914C:
 {
-    r3 = Memory::Read32(static_cast<uint32_t>(r4 + 26640));
+    r3 = Memory::Read32((r4 + 26640));
     r0 = (r3 + -16842752);
 }
 
-loc_801B9298:
+loc_801B9158:
 {
     if ((static_cast<uint32_t>(r0) == static_cast<uint32_t>(0))) {
-        goto loc_801B92BC;
+        goto loc_801B917C;
     }
 }
 
-loc_801B929C:
+loc_801B915C:
 {
-    r3 = Memory::Read32(static_cast<uint32_t>(r4 + 26640));
+    r3 = Memory::Read32((r4 + 26640));
     r0 = (r3 + -84344832);
 }
 
-loc_801B92A8:
+loc_801B9168:
 {
     if ((static_cast<uint32_t>(r0) == static_cast<uint32_t>(0))) {
-        goto loc_801B92BC;
+        goto loc_801B917C;
     }
 }
 
-loc_801B92AC:
+loc_801B916C:
 {
-    r3 = Memory::Read32(static_cast<uint32_t>(r4 + 26640));
+    r3 = Memory::Read32((r4 + 26640));
     r0 = (r3 + -69337088);
 }
 
-loc_801B92B8:
+loc_801B9178:
 {
     if ((static_cast<uint32_t>(r0) != static_cast<uint32_t>(1))) {
-        goto loc_801B92CC;
+        goto loc_801B918C;
     }
 }
 
-loc_801B92BC:
+loc_801B917C:
 {
     r3 = 0x80000000u;
-    r0 = MemoryInline::FlatRead16((r3 + 12518));
+    r0 = Memory::Read16((r3 + 12518));
 }
 
-loc_801B92C8:
+loc_801B9188:
 {
     if ((static_cast<uint32_t>(r0) != static_cast<uint32_t>(33280))) {
-        goto loc_801B92D0;
+        goto loc_801B9190;
     }
 }
 
-loc_801B92CC:
+loc_801B918C:
 {
     r29 = 1;
 }
 
-loc_801B92D0:
+loc_801B9190:
 {
     r3 = r28;
     // inline leaf 0x801B1180 (9 guest instruction(s))
 }
 
-loc_inl1_0x801B1180:
+loc_inl2_0x801B1180:
 {
     SetCRResident(cr, xer, 0, static_cast<int32_t>(r3), static_cast<int32_t>(0));
 }
 
-loc_inl1_0x801B1184:
+loc_inl2_0x801B1184:
 {
     r4 = ctx->msr;
     if (((cr & 0x20000000u) != 0)) {
-        goto loc_inl1_0x801B1194;
+        goto loc_inl2_0x801B1194;
     }
 }
 
-loc_inl1_0x801B118C:
+loc_inl2_0x801B118C:
 {
     r5 = (r4 | 32768);
-    goto loc_inl1_0x801B1198;
+    goto loc_inl2_0x801B1198;
 }
 
-loc_inl1_0x801B1194:
+loc_inl2_0x801B1194:
 {
     r5 = (r4 & -32769);
 }
 
-loc_inl1_0x801B1198:
+loc_inl2_0x801B1198:
 {
     ctx->msr = r5;
     r3_rot_2 = PpcRotl32Inline(static_cast<uint32_t>(r4), static_cast<uint32_t>(17));
     r3 = (r3_rot_2 & 1);
 }
 
-loc_inl1_cont_801B12C0:
+loc_inl2_cont_801B1180:
 {
     // end of inlined leaf 0x801B1180
-    goto loc_801B92E8;
+    goto loc_801B91A8;
 }
 
-loc_801B92DC:
+loc_801B919C:
 {
-    r0 = MemoryInline::FlatRead32((r31 + 12));
+    r0 = Memory::Read32((r31 + 12));
     r0 = (r0 & 4);
     SetCRResident(cr, xer, 0, static_cast<int32_t>(r0), static_cast<int32_t>(0));
 }
 
-loc_801B92E4:
+loc_801B91A4:
 {
     if (((cr & 0x20000000u) == 0)) {
-        goto loc_801B90D0;
+        goto loc_801B8F90;
     }
 }
 
-loc_801B92E8:
+loc_801B91A8:
 {
     r3 = r29;
-    r31 = MemoryInline::FlatRead32((r1 + 28));
-    r30 = MemoryInline::FlatRead32((r1 + 24));
-    r29 = MemoryInline::FlatRead32((r1 + 20));
-    r28 = MemoryInline::FlatRead32((r1 + 16));
-    r0 = MemoryInline::FlatRead32((r1 + 36));
+    r31 = Memory::Read32((r1 + 28));
+    r30 = Memory::Read32((r1 + 24));
+    r29 = Memory::Read32((r1 + 20));
+    r28 = Memory::Read32((r1 + 16));
+    r0 = Memory::Read32((r1 + 36));
     ctx->lr = r0;
     r1 = (r1 + 32);
     ctx->gpr[0] = r0;
@@ -590,5 +559,8 @@ loc_801B92E8:
 }
 
 }
+
+// RECOMP_GUEST_ABI gpr_read=0xF00021FB gpr_write=0xF00001FB gpr_return=0x00000018 fpr_read=0x00000000 fpr_write=0x00000000 fpr_return=0x00000000 cr_read=0x03 cr_write=0x03 xer_read=1 xer_write=1 fence=0
+// RECOMP_REGISTRATION base 0x801B8F50 func_801B8F50 preserves=true fpr_mask=0x00000000
 
 PPC_NATIVE_OVERRIDE_VOID(801B8F50, EXIImmWait_NSMBW_801B9090, (CpuContext* ctx), (ctx));

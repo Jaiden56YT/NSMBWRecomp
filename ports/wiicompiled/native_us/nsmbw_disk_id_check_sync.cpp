@@ -37,8 +37,8 @@ extern "C" void nsmbw_disk_id_check_sync_801d2d60(CpuContext* ctx)
     // in-game code path on real data, not a forced branch - but it is only "correct" as long as
     // that table stays zero; if something later populates it, this needs the actual 0x40 bytes
     // that 0x801D2C20's real body would have fetched.
-    ::Memory::Write32(ctx->gpr[13] - 0x4CC8u, 1u);
-    ::Memory::Write32(ctx->gpr[13] - 0x6048u, 1u);
+    ::Memory::Write32(ctx->gpr[13] - 0x4CA8u, 1u);
+    ::Memory::Write32(ctx->gpr[13] - 0x6040u, 1u);
 }
 
 PPC_NATIVE_OVERRIDE_VOID(801D2C20, nsmbw_disk_id_check_sync_801d2d60, (CpuContext* ctx), (ctx));
@@ -61,8 +61,8 @@ extern "C" void nsmbw_async_complete_sync_801d07e0(CpuContext* ctx)
 {
     const uint32_t magic = ctx->gpr[3];
     const uint32_t callback = ctx->gpr[4];
-    ::Memory::Write32(0x80395D40u + 8u, magic);
-    ::Memory::Write32(ctx->gpr[13] - 0x4CE0u, callback);
+    ::Memory::Write32(0x80395A40u + 8u, magic);
+    ::Memory::Write32(ctx->gpr[13] - 0x4CC0u, callback);
     if (callback != 0u) {
         ctx->gpr[3] = 1u;
         InvokeIndirectCpu(callback, ctx);

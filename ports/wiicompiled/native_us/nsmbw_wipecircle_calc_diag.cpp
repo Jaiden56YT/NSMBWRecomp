@@ -106,7 +106,7 @@ constexpr uint32_t kActionIdle = 3u;
 constexpr uint32_t kOpenSetupAddr = 0x8001B8D0u;      // dWipeCircle_c::OpenSetup (mAction==0)
 constexpr uint32_t kAnimeEndCheckAddr = 0x8001B920u;  // dWipeCircle_c::AnimeEndCheck (mAction==1)
 constexpr uint32_t kCloseSetupAddr = 0x8001B9D0u;     // dWipeCircle_c::CloseSetup (mAction==2)
-constexpr uint32_t kAnimePlayAddr = 0x800C9650u;      // LytBase_c::AnimePlay
+constexpr uint32_t kAnimePlayAddr = 0x800C9560u;      // LytBase_c::AnimePlay
 
 void InvokeWithThis(uint32_t targetAddr, uint32_t thisPtr) {
     auto& cpu = GetPersistentCpuContext();

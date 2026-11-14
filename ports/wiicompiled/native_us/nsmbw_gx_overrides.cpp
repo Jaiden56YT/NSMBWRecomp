@@ -132,8 +132,8 @@ PPC_NATIVE_OVERRIDE_VOID(801C6150, GX__CopyDisp_8016fc38, (uint32_t destAddr, ui
 // this build).
 extern "C" void NsmbwCallDisplayList_801C9720(uint32_t listAddr, uint32_t nbytes)
 {
-    constexpr uint32_t kGxDataPtrAddr = 0x80433360u - 0x4EF8u;
-    constexpr uint32_t kSetDirtyStateAddr = 0x801C5430u;
+    constexpr uint32_t kGxDataPtrAddr = 0x80433080u - 0x4EF8u;
+    constexpr uint32_t kSetDirtyStateAddr = 0x801C52F0u;
     uint32_t gd = 0;
     if (Memory::TryRead32(kGxDataPtrAddr, gd) && gd != 0) {
         uint32_t dirty = 0;
@@ -181,7 +181,7 @@ extern "C" void NsmbwSetDither_801C90D0(uint32_t d) {
         const uint32_t lr = c ? static_cast<uint32_t>(c->lr) : 0u;
         if (!(lr >= 0x8000AFA0u && lr < 0x8000D170u)) {
             uint32_t gd = 0;
-            if (Memory::TryRead32(0x8042E468u, gd) && gd != 0) {
+            if (Memory::TryRead32(0x8042E188u, gd) && gd != 0) {
                 uint32_t cmode0 = Memory::Read32(gd + 0x220u);
                 cmode0 = (cmode0 & ~4u) | ((d & 1u) << 2);
                 GX_HLE_FIFO_Write8(0x61);

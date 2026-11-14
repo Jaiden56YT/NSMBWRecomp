@@ -1,0 +1,2175 @@
+diff --git a/generated_nsmbw b/generated_nsmbw
+new file mode 120000
+index 0000000..c634766
+--- /dev/null
++++ b/generated_nsmbw
+@@ -0,0 +1 @@
++../../ports/wiicompiled/generated_nsmbw
+\ No newline at end of file
+diff --git a/projects/nsmbw/native b/projects/nsmbw/native
+new file mode 120000
+index 0000000..7943fb3
+--- /dev/null
++++ b/projects/nsmbw/native
+@@ -0,0 +1 @@
++../../../../ports/wiicompiled/native_us
+\ No newline at end of file
+diff --git a/projects/nsmbw/native/nsmbw_ai_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_ai_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_ai_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_ai_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_ax_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_ax_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_ax_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_ax_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_boot_stubs.cpp b/projects/nsmbw/native_pal/nsmbw_boot_stubs.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_boot_stubs.cpp
+rename to projects/nsmbw/native_pal/nsmbw_boot_stubs.cpp
+diff --git a/projects/nsmbw/native/nsmbw_check_child_create_diag.cpp b/projects/nsmbw/native_pal/nsmbw_check_child_create_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_check_child_create_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_check_child_create_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_commonpack_diag.cpp b/projects/nsmbw/native_pal/nsmbw_commonpack_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_commonpack_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_commonpack_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_create_next_scene_diag.cpp b/projects/nsmbw/native_pal/nsmbw_create_next_scene_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_create_next_scene_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_create_next_scene_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_create_thread_override.cpp b/projects/nsmbw/native_pal/nsmbw_create_thread_override.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_create_thread_override.cpp
+rename to projects/nsmbw/native_pal/nsmbw_create_thread_override.cpp
+diff --git a/projects/nsmbw/native/nsmbw_di_config_probe.cpp b/projects/nsmbw/native_pal/nsmbw_di_config_probe.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_di_config_probe.cpp
+rename to projects/nsmbw/native_pal/nsmbw_di_config_probe.cpp
+diff --git a/projects/nsmbw/native/nsmbw_disk_id_check_sync.cpp b/projects/nsmbw/native_pal/nsmbw_disk_id_check_sync.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_disk_id_check_sync.cpp
+rename to projects/nsmbw/native_pal/nsmbw_disk_id_check_sync.cpp
+diff --git a/projects/nsmbw/native/nsmbw_dsp_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_dsp_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_dsp_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_dsp_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_dvd_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_dvd_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_dvd_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_dvd_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_dylink_heap_reserve.cpp b/projects/nsmbw/native_pal/nsmbw_dylink_heap_reserve.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_dylink_heap_reserve.cpp
+rename to projects/nsmbw/native_pal/nsmbw_dylink_heap_reserve.cpp
+diff --git a/projects/nsmbw/native/nsmbw_exi_deselect.cpp b/projects/nsmbw/native_pal/nsmbw_exi_deselect.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_exi_deselect.cpp
+rename to projects/nsmbw/native_pal/nsmbw_exi_deselect.cpp
+diff --git a/projects/nsmbw/native/nsmbw_exi_imm_start.cpp b/projects/nsmbw/native_pal/nsmbw_exi_imm_start.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_exi_imm_start.cpp
+rename to projects/nsmbw/native_pal/nsmbw_exi_imm_start.cpp
+diff --git a/projects/nsmbw/native/nsmbw_exi_imm_wait.cpp b/projects/nsmbw/native_pal/nsmbw_exi_imm_wait.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_exi_imm_wait.cpp
+rename to projects/nsmbw/native_pal/nsmbw_exi_imm_wait.cpp
+diff --git a/projects/nsmbw/native/nsmbw_exi_init.cpp b/projects/nsmbw/native_pal/nsmbw_exi_init.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_exi_init.cpp
+rename to projects/nsmbw/native_pal/nsmbw_exi_init.cpp
+diff --git a/projects/nsmbw/native/nsmbw_exi_probe.cpp b/projects/nsmbw/native_pal/nsmbw_exi_probe.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_exi_probe.cpp
+rename to projects/nsmbw/native_pal/nsmbw_exi_probe.cpp
+diff --git a/projects/nsmbw/native/nsmbw_exi_select.cpp b/projects/nsmbw/native_pal/nsmbw_exi_select.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_exi_select.cpp
+rename to projects/nsmbw/native_pal/nsmbw_exi_select.cpp
+diff --git a/projects/nsmbw/native/nsmbw_func_801a9ce0.cpp b/projects/nsmbw/native_pal/nsmbw_func_801a9ce0.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_func_801a9ce0.cpp
+rename to projects/nsmbw/native_pal/nsmbw_func_801a9ce0.cpp
+diff --git a/projects/nsmbw/native/nsmbw_func_801af900_registration.cpp b/projects/nsmbw/native_pal/nsmbw_func_801af900_registration.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_func_801af900_registration.cpp
+rename to projects/nsmbw/native_pal/nsmbw_func_801af900_registration.cpp
+diff --git a/projects/nsmbw/native/nsmbw_g3d_camera_diag.cpp b/projects/nsmbw/native_pal/nsmbw_g3d_camera_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_g3d_camera_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_g3d_camera_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_g3d_scnobj_diag.cpp b/projects/nsmbw/native_pal/nsmbw_g3d_scnobj_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_g3d_scnobj_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_g3d_scnobj_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gamesetup_createpack_diag.cpp b/projects/nsmbw/native_pal/nsmbw_gamesetup_createpack_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gamesetup_createpack_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gamesetup_createpack_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gamesetup_executepack_diag.cpp b/projects/nsmbw/native_pal/nsmbw_gamesetup_executepack_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gamesetup_executepack_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gamesetup_executepack_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_guest_ctor_hook.cpp b/projects/nsmbw/native_pal/nsmbw_guest_ctor_hook.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_guest_ctor_hook.cpp
+rename to projects/nsmbw/native_pal/nsmbw_guest_ctor_hook.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gx_displaylist_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_gx_displaylist_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gx_displaylist_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gx_displaylist_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gx_mtxindx_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_gx_mtxindx_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gx_mtxindx_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gx_mtxindx_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gx_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_gx_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gx_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gx_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gx_posmtx_diag.cpp b/projects/nsmbw/native_pal/nsmbw_gx_posmtx_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gx_posmtx_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gx_posmtx_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gx_setters_diag.cpp b/projects/nsmbw/native_pal/nsmbw_gx_setters_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gx_setters_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gx_setters_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_gx_texcopy_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_gx_texcopy_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_gx_texcopy_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_gx_texcopy_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_ios_ipc_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_ios_ipc_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_ios_ipc_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_ios_ipc_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_kpad_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_kpad_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_kpad_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_kpad_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_lastactor_hunt_diag.cpp b/projects/nsmbw/native_pal/nsmbw_lastactor_hunt_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_lastactor_hunt_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_lastactor_hunt_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_m3d_calcview_diag.cpp b/projects/nsmbw/native_pal/nsmbw_m3d_calcview_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_m3d_calcview_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_m3d_calcview_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_m3d_scnleaf_calc_diag.cpp b/projects/nsmbw/native_pal/nsmbw_m3d_scnleaf_calc_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_m3d_scnleaf_calc_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_m3d_scnleaf_calc_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_map_options.cpp b/projects/nsmbw/native_pal/nsmbw_map_options.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_map_options.cpp
+rename to projects/nsmbw/native_pal/nsmbw_map_options.cpp
+diff --git a/projects/nsmbw/native/nsmbw_msg_lookup_diag.cpp b/projects/nsmbw/native_pal/nsmbw_msg_lookup_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_msg_lookup_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_msg_lookup_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_os_init_stm.cpp b/projects/nsmbw/native_pal/nsmbw_os_init_stm.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_os_init_stm.cpp
+rename to projects/nsmbw/native_pal/nsmbw_os_init_stm.cpp
+diff --git a/projects/nsmbw/native/nsmbw_os_interrupt_mask.cpp b/projects/nsmbw/native_pal/nsmbw_os_interrupt_mask.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_os_interrupt_mask.cpp
+rename to projects/nsmbw/native_pal/nsmbw_os_interrupt_mask.cpp
+diff --git a/projects/nsmbw/native/nsmbw_os_lockedcache_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_os_lockedcache_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_os_lockedcache_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_os_lockedcache_overrides.cpp
+diff --git a/projects/nsmbw/native/nsmbw_pause_exit.cpp b/projects/nsmbw/native_pal/nsmbw_pause_exit.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_pause_exit.cpp
+rename to projects/nsmbw/native_pal/nsmbw_pause_exit.cpp
+diff --git a/projects/nsmbw/native/nsmbw_pause_options.cpp b/projects/nsmbw/native_pal/nsmbw_pause_options.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_pause_options.cpp
+rename to projects/nsmbw/native_pal/nsmbw_pause_options.cpp
+diff --git a/projects/nsmbw/native/nsmbw_preseeded_rel_link.cpp b/projects/nsmbw/native_pal/nsmbw_preseeded_rel_link.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_preseeded_rel_link.cpp
+rename to projects/nsmbw/native_pal/nsmbw_preseeded_rel_link.cpp
+diff --git a/projects/nsmbw/native/nsmbw_psmtx_copy_diag.cpp b/projects/nsmbw/native_pal/nsmbw_psmtx_copy_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_psmtx_copy_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_psmtx_copy_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_resume_thread_override.cpp b/projects/nsmbw/native_pal/nsmbw_resume_thread_override.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_resume_thread_override.cpp
+rename to projects/nsmbw/native_pal/nsmbw_resume_thread_override.cpp
+diff --git a/projects/nsmbw/native/nsmbw_runtime_shims.cpp b/projects/nsmbw/native_pal/nsmbw_runtime_shims.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_runtime_shims.cpp
+rename to projects/nsmbw/native_pal/nsmbw_runtime_shims.cpp
+diff --git a/projects/nsmbw/native/nsmbw_sc_aspect_ratio.cpp b/projects/nsmbw/native_pal/nsmbw_sc_aspect_ratio.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_sc_aspect_ratio.cpp
+rename to projects/nsmbw/native_pal/nsmbw_sc_aspect_ratio.cpp
+diff --git a/projects/nsmbw/native/nsmbw_sc_deferred_write_sync.cpp b/projects/nsmbw/native_pal/nsmbw_sc_deferred_write_sync.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_sc_deferred_write_sync.cpp
+rename to projects/nsmbw/native_pal/nsmbw_sc_deferred_write_sync.cpp
+diff --git a/projects/nsmbw/native/nsmbw_scboot_dodelete_diag.cpp b/projects/nsmbw/native_pal/nsmbw_scboot_dodelete_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_scboot_dodelete_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_scboot_dodelete_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_select_thread_override.cpp b/projects/nsmbw/native_pal/nsmbw_select_thread_override.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_select_thread_override.cpp
+rename to projects/nsmbw/native_pal/nsmbw_select_thread_override.cpp
+diff --git a/projects/nsmbw/native/nsmbw_skip_boot_screens.cpp b/projects/nsmbw/native_pal/nsmbw_skip_boot_screens.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_skip_boot_screens.cpp
+rename to projects/nsmbw/native_pal/nsmbw_skip_boot_screens.cpp
+diff --git a/projects/nsmbw/native/nsmbw_sound_volumes.cpp b/projects/nsmbw/native_pal/nsmbw_sound_volumes.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_sound_volumes.cpp
+rename to projects/nsmbw/native_pal/nsmbw_sound_volumes.cpp
+diff --git a/projects/nsmbw/native/nsmbw_state_change_diag.cpp b/projects/nsmbw/native_pal/nsmbw_state_change_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_state_change_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_state_change_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_suspend_thread_override.cpp b/projects/nsmbw/native_pal/nsmbw_suspend_thread_override.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_suspend_thread_override.cpp
+rename to projects/nsmbw/native_pal/nsmbw_suspend_thread_override.cpp
+diff --git a/projects/nsmbw/native/nsmbw_tevcolor_diag.cpp b/projects/nsmbw/native_pal/nsmbw_tevcolor_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_tevcolor_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_tevcolor_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_tick_read_pump.cpp b/projects/nsmbw/native_pal/nsmbw_tick_read_pump.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_tick_read_pump.cpp
+rename to projects/nsmbw/native_pal/nsmbw_tick_read_pump.cpp
+diff --git a/projects/nsmbw/native/nsmbw_vi_wait_for_retrace.cpp b/projects/nsmbw/native_pal/nsmbw_vi_wait_for_retrace.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_vi_wait_for_retrace.cpp
+rename to projects/nsmbw/native_pal/nsmbw_vi_wait_for_retrace.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wiistrap_create_diag.cpp b/projects/nsmbw/native_pal/nsmbw_wiistrap_create_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wiistrap_create_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wiistrap_create_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wiistrap_dismiss.cpp b/projects/nsmbw/native_pal/nsmbw_wiistrap_dismiss.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wiistrap_dismiss.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wiistrap_dismiss.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wiistrap_draw_diag.cpp b/projects/nsmbw/native_pal/nsmbw_wiistrap_draw_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wiistrap_draw_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wiistrap_draw_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wiistrap_execute_diag.cpp b/projects/nsmbw/native_pal/nsmbw_wiistrap_execute_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wiistrap_execute_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wiistrap_execute_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wipecircle_calc_diag.cpp b/projects/nsmbw/native_pal/nsmbw_wipecircle_calc_diag.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wipecircle_calc_diag.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wipecircle_calc_diag.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wm_full_save.cpp b/projects/nsmbw/native_pal/nsmbw_wm_full_save.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wm_full_save.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wm_full_save.cpp
+diff --git a/projects/nsmbw/native/nsmbw_wpad_overrides.cpp b/projects/nsmbw/native_pal/nsmbw_wpad_overrides.cpp
+similarity index 100%
+rename from projects/nsmbw/native/nsmbw_wpad_overrides.cpp
+rename to projects/nsmbw/native_pal/nsmbw_wpad_overrides.cpp
+diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
+index 95734ab..4e2283d 100644
+--- a/runtime/CMakeLists.txt
++++ b/runtime/CMakeLists.txt
+@@ -1,14 +1,19 @@
+-﻿cmake_minimum_required(VERSION 3.16)
++cmake_minimum_required(VERSION 3.16)
+ project(mkw_recompiled)
+ 
+-if((NOT (WIN32 AND MINGW)) AND (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+-    message(FATAL_ERROR "WiiCompiled requires Windows (LLVM-MinGW) or native Linux")
++# Hosts: Windows (LLVM-MinGW) and Linux on x86-64 upstream; this tree also builds for
++# macOS and other ARM64 hosts (x86 SIMD via SIMDe, see include/isa/host_simd.h).
++if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
++    message(FATAL_ERROR "WiiCompiled requires a 64-bit Clang")
+ endif()
+-if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
+-   NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR
+-   NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
+-    message(FATAL_ERROR "WiiCompiled requires 64-bit Clang targeting x86_64")
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
++    set(MKW_HOST_ARCH_FLAGS -march=x86-64-v3)
++elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
++    set(MKW_HOST_ARCH_FLAGS -mcpu=apple-m1)
++else()
++    set(MKW_HOST_ARCH_FLAGS "")
+ endif()
++set(MKW_SIMDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../simde" CACHE PATH "SIMDe checkout (x86 intrinsics on ARM)")
+ if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+     message(FATAL_ERROR "WiiCompiled only supports Release builds")
+ endif()
+@@ -252,12 +257,19 @@ endif()
+ set(MKW_TRANSLATED_SHARD_MANIFEST
+     "${CMAKE_CURRENT_LIST_DIR}/../generated/build_shards/shards.cmake"
+     CACHE FILEPATH "Translator-owned aggregate shard manifest")
+-if(NOT EXISTS "${MKW_TRANSLATED_SHARD_MANIFEST}")
++option(MKW_BUILD_NSMBW "Build the experimental NSMBW recompiled product" OFF)
++set(MKW_NSMBW_ONLY OFF)
++if(MKW_BUILD_NSMBW AND NOT EXISTS "${MKW_TRANSLATED_SHARD_MANIFEST}")
++    # NSMBW-only tree (no Mario Kart Wii translation): skip the MKW products.
++    set(MKW_NSMBW_ONLY ON)
++elseif(NOT EXISTS "${MKW_TRANSLATED_SHARD_MANIFEST}")
+     message(FATAL_ERROR
+         "Missing translator-owned shard manifest: ${MKW_TRANSLATED_SHARD_MANIFEST}. "
+         "Run Translator.Cli emit-build-shards first; see translator/README.md.")
+ endif()
++if(NOT MKW_NSMBW_ONLY)
+ include("${MKW_TRANSLATED_SHARD_MANIFEST}")
++endif()
+ set(MKW_HAVE_RETRO_REWIND ${MKW_HAVE_RETRO_REWIND_SHARDS})
+ message(STATUS
+     "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
+diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
+index ec62546..9c3108e 100644
+--- a/runtime/cmake/NsmbwProduct.cmake
++++ b/runtime/cmake/NsmbwProduct.cmake
+@@ -8,7 +8,6 @@
+ # why WiiCompiled's product model didn't fit before this file existed.
+ #
+ # Off by default so a normal MKW configure/build is completely unaffected.
+-option(MKW_BUILD_NSMBW "Build the experimental NSMBW recompiled product" OFF)
+ 
+ if(MKW_BUILD_NSMBW)
+     set(NSMBW_SHARD_MANIFEST
+@@ -146,7 +145,7 @@ if(MKW_BUILD_NSMBW)
+         target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
+     endif()
+ 
+-    # PublicProducts.cmake applies -march=x86-64-v3 (AVX2/FMA/BMI2) to its own targets in one
++    # PublicProducts.cmake applies ${MKW_HOST_ARCH_FLAGS} (AVX2/FMA/BMI2) to its own targets in one
+     # foreach right at the end of that file - which has already run by the time this file is
+     # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
+     # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
+@@ -154,7 +153,7 @@ if(MKW_BUILD_NSMBW)
+     # was compiled without those target features enabled.
+     foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
+         if(TARGET ${nsmbw_target})
+-            target_compile_options(${nsmbw_target} PRIVATE -march=x86-64-v3)
++            target_compile_options(${nsmbw_target} PRIVATE ${MKW_HOST_ARCH_FLAGS})
+         endif()
+     endforeach()
+ 
+@@ -199,7 +198,7 @@ if(MKW_BUILD_NSMBW)
+         target_link_options(NSMBWCompiled PRIVATE -mwindows)
+     endif()
+     target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
+-    target_compile_options(NSMBWCompiled PRIVATE -march=x86-64-v3 -g)
++    target_compile_options(NSMBWCompiled PRIVATE ${MKW_HOST_ARCH_FLAGS} -g)
+     # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
+     # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
+     # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
+@@ -207,7 +206,11 @@ if(MKW_BUILD_NSMBW)
+     # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
+     # right after clearing several boot blockers that let execution progress further/deeper than
+     # before - raise the reserved stack well past what's been observed so far.
+-    target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
++    if(APPLE)
++        target_link_options(NSMBWCompiled PRIVATE -g -Wl,-stack_size,0x1000000)
++    else()
++        target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
++    endif()
+     target_sources(NSMBWCompiled PRIVATE
+         $<TARGET_OBJECTS:nsmbw_translated>
+         $<TARGET_OBJECTS:nsmbw_native>
+diff --git a/runtime/cmake/PublicProducts.cmake b/runtime/cmake/PublicProducts.cmake
+index d1fff5e..fc0d1dd 100644
+--- a/runtime/cmake/PublicProducts.cmake
++++ b/runtime/cmake/PublicProducts.cmake
+@@ -41,7 +41,8 @@ function(mkw_configure_object_target target)
+         # Workspace root, so translator output is spelled "generated/<x>.h"
+         # instead of a ../ chain whose depth depends on the includer.
+         "${MKW_RUNTIME_SOURCE_DIR}/.."
+-        "${MKW_RUNTIME_SOURCE_DIR}/../aurora-main/include")
++        "${MKW_RUNTIME_SOURCE_DIR}/../aurora-main/include"
++        "${MKW_SIMDE_DIR}")
+     target_compile_definitions(${target} PRIVATE
+         TARGET_PC)
+     set_target_properties(${target} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+@@ -68,6 +69,7 @@ function(mkw_configure_translated_target target)
+     mkw_bound_translated_compiles(${target})
+ endfunction()
+ 
++if(NOT MKW_NSMBW_ONLY)
+ add_library(mkw_runtime_common OBJECT ${SOURCES})
+ mkw_configure_object_target(mkw_runtime_common)
+ target_compile_features(mkw_runtime_common PRIVATE cxx_std_20)
+@@ -111,6 +113,7 @@ foreach(source IN LISTS SOURCES)
+     endif()
+     set_source_files_properties("${source}" PROPERTIES UNITY_GROUP "${runtime_group}")
+ endforeach()
++endif()
+ # These translation units implement guest-visible floating-point bit
+ # semantics.  Keep them out of the fast-math runtime unity groups and apply
+ # the same contraction/rounding policy as translated PPC shards.
+@@ -121,12 +124,14 @@ set_source_files_properties(${MKW_PPC_SEMANTIC_RUNTIME_SOURCES} PROPERTIES
+     SKIP_UNITY_BUILD_INCLUSION ON
+     SKIP_PRECOMPILE_HEADERS ON
+     COMPILE_OPTIONS "${MKW_TRANSLATED_PPC_FP_OPTIONS}")
++if(NOT MKW_NSMBW_ONLY)
+ set_target_properties(mkw_runtime_common PROPERTIES UNITY_BUILD ON UNITY_BUILD_MODE GROUP)
+ target_precompile_headers(mkw_runtime_common PRIVATE "${MKW_RUNTIME_SOURCE_DIR}/include/mkw_pch.h")
+ mkw_apply_common_compile_options(mkw_runtime_common)
++endif()
+ 
+ # Host ISA guard. Everything in MKW_ALL_BUILD_TARGETS below is compiled with
+-# -march=x86-64-v3; this object library deliberately is not, which
++# ${MKW_HOST_ARCH_FLAGS}; this object library deliberately is not, which
+ # is the whole point of keeping it out of mkw_runtime_common. It runs a CPUID
+ # check from a C initializer so an unsupported machine gets a readable error
+ # instead of an illegal-instruction crash. Excluded from the unity build and the
+@@ -136,6 +141,7 @@ target_compile_features(mkw_cpu_baseline PRIVATE cxx_std_17)
+ set_target_properties(mkw_cpu_baseline PROPERTIES UNITY_BUILD OFF)
+ target_compile_options(mkw_cpu_baseline PRIVATE -w)
+ 
++if(NOT MKW_NSMBW_ONLY)
+ if(NOT MKW_BASE_COMMON_SHARDS)
+     message(FATAL_ERROR "Translator build graph contains no shared base shards")
+ endif()
+@@ -181,7 +187,8 @@ function(mkw_configure_product target)
+         # Workspace root, so translator output is spelled "generated/<x>.h"
+         # instead of a ../ chain whose depth depends on the includer.
+         "${MKW_RUNTIME_SOURCE_DIR}/.."
+-        "${MKW_RUNTIME_SOURCE_DIR}/../aurora-main/include")
++        "${MKW_RUNTIME_SOURCE_DIR}/../aurora-main/include"
++        "${MKW_SIMDE_DIR}")
+     target_compile_definitions(${target} PRIVATE
+         SDL_MAIN_HANDLED _DISABLE_STRING_ANNOTATION _DISABLE_VECTOR_ANNOTATION TARGET_PC)
+     target_compile_features(${target} PRIVATE cxx_std_20)
+@@ -303,6 +310,8 @@ set(MKW_ALL_BUILD_TARGETS
+     mkw_retro_rewind_functions WiiCompiled RetroRewind)
+ foreach(target IN LISTS MKW_ALL_BUILD_TARGETS)
+     if(TARGET ${target})
+-        target_compile_options(${target} PRIVATE -march=x86-64-v3)
++        target_compile_options(${target} PRIVATE ${MKW_HOST_ARCH_FLAGS})
+     endif()
+ endforeach()
++
++endif()  # NOT MKW_NSMBW_ONLY
+diff --git a/runtime/include/abi_bridge.h b/runtime/include/abi_bridge.h
+index a654b92..f12f6f5 100644
+--- a/runtime/include/abi_bridge.h
++++ b/runtime/include/abi_bridge.h
+@@ -41,7 +41,12 @@ inline std::array<uint32_t, kCapacity> g_addrs{};
+ // literal InvokeDirectCpu<addr> call site (which doesn't exist for computed/indirect targets).
+ inline std::array<uint32_t, kCapacity> g_lrs{};
+ inline std::atomic<uint32_t> g_next{0};
++inline std::atomic<int> g_traceBudget{0};  // >0: also print that many calls (debugging)
+ inline void Push(uint32_t addr, uint32_t lr) {
++    if (g_traceBudget.load(std::memory_order_relaxed) > 0) {
++        g_traceBudget.fetch_sub(1, std::memory_order_relaxed);
++        std::fprintf(stderr, "[trace] call %08X from %08X\n", addr, lr);
++    }
+     const uint32_t slot = g_next.fetch_add(1, std::memory_order_relaxed) % static_cast<uint32_t>(kCapacity);
+     g_addrs[slot] = addr;
+     g_lrs[slot] = lr;
+diff --git a/runtime/include/isa/host_simd.h b/runtime/include/isa/host_simd.h
+new file mode 100644
+index 0000000..103431e
+--- /dev/null
++++ b/runtime/include/isa/host_simd.h
+@@ -0,0 +1,42 @@
++#pragma once
++// x86 SIMD on every host: the real intrinsics on x86-64, SIMDe (SIMD Everywhere,
++// MIT) with native aliases elsewhere, so the SSE/AVX2/FMA code in the ISA headers
++// and audio kernels compiles unchanged for ARM64 (macOS, Switch).
++//
++// MXCSR is the one thing that is not plain arithmetic. The runtime only uses its
++// FTZ|DAZ bits (guest FPSCR[NI]) and saves/restores the whole register, so on ARM
++// MkwHostGetCsr/MkwHostSetCsr map those bits onto FPCR.FZ (bit 24, which flushes
++// both inputs and outputs like FTZ+DAZ) and keep the rest as a shadow value.
++#include <cstdint>
++
++#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
++#include <immintrin.h>
++inline uint32_t MkwHostGetCsr() noexcept { return _mm_getcsr(); }
++inline void MkwHostSetCsr(uint32_t v) noexcept { _mm_setcsr(v); }
++#else
++#define SIMDE_ENABLE_NATIVE_ALIASES
++#include <simde/x86/avx2.h>
++#include <simde/x86/fma.h>
++#include <simde/x86/sse4.2.h>
++#if defined(__aarch64__)
++inline uint64_t MkwReadFpcr() noexcept { uint64_t v; __asm__ volatile("mrs %0, fpcr" : "=r"(v)); return v; }
++inline void MkwWriteFpcr(uint64_t v) noexcept { __asm__ volatile("msr fpcr, %0" : : "r"(v)); }
++#else
++inline uint64_t MkwReadFpcr() noexcept { return 0; }
++inline void MkwWriteFpcr(uint64_t) noexcept {}
++#endif
++inline thread_local uint32_t g_mkwShadowCsr = 0x1F80u;  // x86 power-on MXCSR: all exceptions masked
++inline uint32_t MkwHostGetCsr() noexcept
++{
++    const bool fz = (MkwReadFpcr() >> 24) & 1u;
++    const uint32_t ftzDaz = (1u << 15) | (1u << 6);
++    return fz ? (g_mkwShadowCsr | ftzDaz) : (g_mkwShadowCsr & ~ftzDaz);
++}
++inline void MkwHostSetCsr(uint32_t v) noexcept
++{
++    g_mkwShadowCsr = v;
++    const uint64_t fpcr = MkwReadFpcr();
++    const uint64_t want = (v & (1u << 15)) ? (fpcr | (1ull << 24)) : (fpcr & ~(1ull << 24));
++    if (want != fpcr) MkwWriteFpcr(want);
++}
++#endif
+diff --git a/runtime/include/isa/ppc_isa_config.h b/runtime/include/isa/ppc_isa_config.h
+index f4c41ea..70d7460 100644
+--- a/runtime/include/isa/ppc_isa_config.h
++++ b/runtime/include/isa/ppc_isa_config.h
+@@ -4,7 +4,7 @@
+ #include <cstdint>
+ 
+ #define MKW_RESTRICT __restrict
+-#include <immintrin.h>
++#include "isa/host_simd.h"
+ 
+ inline constexpr bool MkwStateFreeAbiEnabled(uint32_t) noexcept
+ {
+diff --git a/runtime/include/isa/ppc_isa_context.h b/runtime/include/isa/ppc_isa_context.h
+index 0c9381e..c4c1fd5 100644
+--- a/runtime/include/isa/ppc_isa_context.h
++++ b/runtime/include/isa/ppc_isa_context.h
+@@ -62,7 +62,7 @@ public:
+     {
+         g_currentCpuContext = ctx;
+ 
+-        savedMxcsr_ = _mm_getcsr();
++        savedMxcsr_ = MkwHostGetCsr();
+         if (ctx != nullptr)
+             MkwApplyHostNiMode(ctx->fpscr);
+     }
+diff --git a/runtime/include/isa/ppc_isa_fpenv.h b/runtime/include/isa/ppc_isa_fpenv.h
+index 75a29bc..3a5c319 100644
+--- a/runtime/include/isa/ppc_isa_fpenv.h
++++ b/runtime/include/isa/ppc_isa_fpenv.h
+@@ -24,15 +24,15 @@ inline thread_local double g_mkwNiFlushThreshold = 0.0;
+ 
+ inline void MkwApplyHostNiMode(uint32_t fpscr) noexcept
+ {
+-    const uint32_t csr = _mm_getcsr();
++    const uint32_t csr = MkwHostGetCsr();
+     const bool wantNi = (fpscr & 0x4u) != 0;
+     const uint32_t want = wantNi
+         ? (csr | kMkwMxcsrFlushToZeroBits)
+         : (csr & ~kMkwMxcsrFlushToZeroBits);
+     if (want != csr)
+-        _mm_setcsr(want);
++        MkwHostSetCsr(want);
+     // `want` has both bits set or both clear, so this is exactly
+-    // `(_mm_getcsr() & kMkwMxcsrFlushToZeroBits) != 0` after the write - the
++    // `(MkwHostGetCsr() & kMkwMxcsrFlushToZeroBits) != 0` after the write - the
+     // mirror cannot disagree with the register even if the incoming CSR held
+     // only one of the two bits.
+     g_mkwHostNiActive = wantNi;
+@@ -46,7 +46,7 @@ inline void MkwApplyHostNiMode(uint32_t fpscr) noexcept
+ /// </summary>
+ inline void MkwRestoreHostMxcsr(uint32_t csr) noexcept
+ {
+-    _mm_setcsr(csr);
++    MkwHostSetCsr(csr);
+     const bool niActive = (csr & kMkwMxcsrFlushToZeroBits) != 0;
+     g_mkwHostNiActive = niActive;
+     g_mkwNiFlushThreshold = niActive ? kMkwNiFlushThreshold : 0.0;
+diff --git a/runtime/src/dynamic_aspect.cpp b/runtime/src/dynamic_aspect.cpp
+index 5c1601c..5ea0b16 100644
+--- a/runtime/src/dynamic_aspect.cpp
++++ b/runtime/src/dynamic_aspect.cpp
+@@ -19,18 +19,18 @@ uint32_t g_lastEggWidth169 = 0;
+ 
+ // EGG::Screen's static canvas records (PAL). See gx_dynamic_aspect.h for the
+ // record layout and the anamorphic presentation model.
+-constexpr uint32_t kEggScreenRecord43 = 0x802A3EE8u;
+-constexpr uint32_t kEggScreenRecord169 = 0x802A3EF4u;
+-constexpr uint32_t kEggActiveScreenPtr = 0x80386F14u;
++constexpr uint32_t kEggScreenRecord43 = 0x802A3DA8u;
++constexpr uint32_t kEggScreenRecord169 = 0x802A3DB4u;
++constexpr uint32_t kEggActiveScreenPtr = 0x80386C14u;
+ 
+-constexpr uint32_t kEggScreenProjScaleX = 0x80386F20u;
+-constexpr uint32_t kEggScreenProjScaleY = 0x80386F24u;
++constexpr uint32_t kEggScreenProjScaleX = 0x80386C20u;
++constexpr uint32_t kEggScreenProjScaleY = 0x80386C24u;
+ 
+-constexpr uint32_t kEggScreenAspectHandler = 0x8023E53Cu;
++constexpr uint32_t kEggScreenAspectHandler = 0x8023E3FCu;
+ 
+ constexpr uint32_t kMkwUpdateAllScreens = 0x805653D0u;
+ constexpr uint32_t kMkwGfxDrawList = 0x809C1830u;
+-constexpr uint32_t kSystemManagerInstance = 0x80386000u;
++constexpr uint32_t kSystemManagerInstance = 0x80385D00u;
+ 
+ // The draw list is an nw4r::ut::List: +0x00 head, +0x04 tail, +0x08 u16 count,
+ // +0x0A u16 link offset, with next = *(node + linkOffset + 4) (List_GetNext,
+@@ -40,7 +40,7 @@ constexpr uint32_t kMkwGfxDrawListLinkOffset = 0x0Au;
+ constexpr uint32_t kMkwGfxOffscreenList = 0x809C183Cu;
+ constexpr uint32_t kMkwGfxOffscreenNodeScreenSlot = 0x10u;
+ constexpr uint32_t kEggScreenVTableOffset = 0x38u;
+-constexpr uint32_t kEggScreenVTable = 0x802A3F0Cu;
++constexpr uint32_t kEggScreenVTable = 0x802A3DCCu;
+ constexpr uint32_t kMkwScreenVTable = 0x808B4C20u;
+ constexpr uint32_t kEggScreenFlagsOffset = 0x34u;
+ constexpr uint16_t kEggScreenFlagFramebufferCanvas = 0x0008u;
+diff --git a/runtime/src/fiber_manager.cpp b/runtime/src/fiber_manager.cpp
+index 8e15c1a..1586d0a 100644
+--- a/runtime/src/fiber_manager.cpp
++++ b/runtime/src/fiber_manager.cpp
+@@ -71,10 +71,10 @@ std::atomic<uint32_t> g_viRetracePendingCount{0};
+ namespace {
+ constexpr uint32_t kOSCurrentContextAddr = 0x800000d4u;
+ constexpr uint32_t kOSRunningContextAddr = 0x800000e4u;  // OSGetCurrentThread reads this
+-constexpr uint32_t kThreadQueueArrayAddr = 0x803477b0u;
+-constexpr uint32_t kSchedulerPendingFlagAddr = 0x80386920u;
+-constexpr uint32_t kSchedulerReschedCounterAddr = 0x8038691cu;
+-constexpr uint32_t kSchedulerIdleFlagAddr = 0x80386918u;
++constexpr uint32_t kThreadQueueArrayAddr = 0x80347470u;
++constexpr uint32_t kSchedulerPendingFlagAddr = 0x80386620u;
++constexpr uint32_t kSchedulerReschedCounterAddr = 0x8038661Cu;
++constexpr uint32_t kSchedulerIdleFlagAddr = 0x80386618u;
+ 
+ // OSThread structure offsets
+ constexpr uint32_t kThreadStateOffset = 0x2C8u;
+@@ -684,7 +684,7 @@ void GuestFiberManager::FiberProc(void* param)
+     CpuContextScope scope(cpu);
+     
+     int startDeferAttempts = 0;
+-    while (entryPoint == 0x8024373c) { // EGG::Thread::start
++    while (entryPoint == 0x802435FC) { // EGG::Thread::start
+         uint32_t vtable = 0;
+         uint32_t startFn = 0;
+         try {
+diff --git a/runtime/src/guest_flat_memory.cpp b/runtime/src/guest_flat_memory.cpp
+index 43f8b7b..aaff0cd 100644
+--- a/runtime/src/guest_flat_memory.cpp
++++ b/runtime/src/guest_flat_memory.cpp
+@@ -1,3 +1,10 @@
++#if !defined(_WIN32)
++#include <execinfo.h>
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <unistd.h>
++#include <cstdio>
++#endif
+ #include "guest_flat_memory.h"
+ 
+ #include <algorithm>
+@@ -450,9 +457,13 @@ void ReportFatalGuestFault(const char* category, uint32_t guestAddress, bool isW
+     // which can be stale), to pin down exactly which translated PPC function is executing.
+     {
+         void* frames[32]{};
++#if defined(_WIN32)
+         const USHORT n = CaptureStackBackTrace(0, static_cast<DWORD>(std::size(frames)), frames, nullptr);
++#else
++        const int n = backtrace(frames, static_cast<int>(std::size(frames)));
++#endif
+         std::cerr << "  host stack trace (" << n << " frames):" << std::endl;
+-        for (USHORT i = 0; i < n; ++i) {
++        for (int i = 0; i < static_cast<int>(n); ++i) {
+             const auto addr = reinterpret_cast<uintptr_t>(frames[i]);
+             if (auto info = TranslatedFunctionRegistry::FindByHostAddress(addr)) {
+                 std::cerr << "    [" << i << "] " << info->name << " (PPC:0x" << std::hex
+@@ -569,7 +580,19 @@ void Initialize(const std::vector<RegionRequest>& regions) {
+         // twice below (once here as the always-accessible host view, once per-region as the
+         // guest view whose protection the fault handler controls), the same "one backing store,
+         // two VA aliases" trick CreateFileMapping/MapViewOfFile(3) gives Windows.
++#if defined(__APPLE__)
++        {
++            // macOS has no memfd_create: an immediately-unlinked POSIX shm object gives the
++            // same anonymous, mmap-able backing store.
++            char shmName[64];
++            static int shmCounter = 0;
++            std::snprintf(shmName, sizeof(shmName), "/wiicompiled-%d-%d", static_cast<int>(getpid()), shmCounter++);
++            section.fd = shm_open(shmName, O_RDWR | O_CREAT | O_EXCL, 0600);
++            if (section.fd >= 0) shm_unlink(shmName);
++        }
++#else
+         section.fd = memfd_create("wiicompiled-guest-ram", MFD_CLOEXEC);
++#endif
+         if (section.fd < 0) {
+             throw std::runtime_error(LastErrorText("memfd_create for guest RAM"));
+         }
+diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
+index 421ca42..f40eb08 100644
+--- a/runtime/src/hle/audio/audio.cpp
++++ b/runtime/src/hle/audio/audio.cpp
+@@ -30,15 +30,15 @@ constexpr uint32_t kBytesPerSample = 2u;
+ // The relative layout matches MKW's (initialized/busy adjacent, stack-switch/dma-callback
+ // adjacent), which is the cross-check that these are the same four variables.
+ #ifdef MKW_RUNTIME_PRODUCT_NSMBW
+-constexpr uint32_t kAIInitializedAddr = 0x8042A798u;
+-constexpr uint32_t kAICallbackBusyAddr = 0x8042A79Cu;
+-constexpr uint32_t kAICallbackStackSwitchAddr = 0x8042A7CCu;
+-constexpr uint32_t kAIDmaCallbackAddr = 0x8042A7D0u;
++constexpr uint32_t kAIInitializedAddr = 0x8042A4B8u;  // US (PAL 8042A798)
++constexpr uint32_t kAICallbackBusyAddr = 0x8042A4BCu;  // US (PAL 8042A79C)
++constexpr uint32_t kAICallbackStackSwitchAddr = 0x8042A4ECu;  // US (PAL 8042A7CC)
++constexpr uint32_t kAIDmaCallbackAddr = 0x8042A4F0u;  // US (PAL 8042A7D0)
+ #else
+-constexpr uint32_t kAIInitializedAddr = 0x80386448u;
+-constexpr uint32_t kAICallbackBusyAddr = 0x8038644Cu;
+-constexpr uint32_t kAICallbackStackSwitchAddr = 0x8038647Cu;
+-constexpr uint32_t kAIDmaCallbackAddr = 0x80386480u;
++constexpr uint32_t kAIInitializedAddr = 0x80386148u;
++constexpr uint32_t kAICallbackBusyAddr = 0x8038614Cu;
++constexpr uint32_t kAICallbackStackSwitchAddr = 0x8038617Cu;
++constexpr uint32_t kAIDmaCallbackAddr = 0x80386180u;
+ #endif
+ 
+ // Max completed 3 ms DMA blocks delivered per tick. Draining several at once catches up
+@@ -198,7 +198,9 @@ extern "C" void AIInit_801240b0(uint32_t callback_stack_switch)
+     }
+ }
+ 
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE_VOID(801240b0, AIInit_801240b0, (uint32_t callback_stack_switch), (callback_stack_switch));
++#endif
+ 
+ extern "C" uint32_t AICheckInit_80124094()
+ {
+@@ -206,7 +208,7 @@ extern "C" uint32_t AICheckInit_80124094()
+     Memory::TryRead32(kAIInitializedAddr, initialized);
+     return initialized;
+ }
+-REGISTER_NATIVE_FUNCTION(0x80124094, AICheckInit_80124094);
++REGISTER_NATIVE_FUNCTION(0x80123F54, AICheckInit_80124094);
+ 
+ 
+ 
+@@ -222,13 +224,13 @@ extern "C" uint32_t DSPCheckInit_8015d504()
+ {
+     return AxDspHle::CheckInit();
+ }
+-REGISTER_NATIVE_FUNCTION(0x8015D504, DSPCheckInit_8015d504);
++REGISTER_NATIVE_FUNCTION(0x8015D3C4, DSPCheckInit_8015d504);
+ 
+ extern "C" uint32_t DSPAddTask_8015d50c(uint32_t task_ptr)
+ {
+     return AxDspHle::AddTask(task_ptr);
+ }
+-REGISTER_NATIVE_FUNCTION(0x8015D50C, DSPAddTask_8015d50c);
++REGISTER_NATIVE_FUNCTION(0x8015D3CC, DSPAddTask_8015d50c);
+ 
+ extern "C" void __DSP_boot_task_8015dc60(uint32_t task_ptr)
+ {
+@@ -362,13 +364,13 @@ extern "C" uint32_t DSPCheckMailFromDSP_8015d40c()
+ {
+     return AxDspHle::CheckMailFromDSP();
+ }
+-REGISTER_NATIVE_FUNCTION(0x8015D40C, DSPCheckMailFromDSP_8015d40c);
++REGISTER_NATIVE_FUNCTION(0x8015D2CC, DSPCheckMailFromDSP_8015d40c);
+ 
+ extern "C" uint32_t DSPReadMailFromDSP_8015d41c()
+ {
+     return AxDspHle::ReadMailFromDSP();
+ }
+-REGISTER_NATIVE_FUNCTION(0x8015D41C, DSPReadMailFromDSP_8015d41c);
++REGISTER_NATIVE_FUNCTION(0x8015D2DC, DSPReadMailFromDSP_8015d41c);
+ 
+ extern "C" uint32_t DSPAssertTask_8015d57c(uint32_t taskPtr)
+ {
+diff --git a/runtime/src/hle/audio/ax_effects.cpp b/runtime/src/hle/audio/ax_effects.cpp
+index a30a4ac..1e2b70c 100644
+--- a/runtime/src/hle/audio/ax_effects.cpp
++++ b/runtime/src/hle/audio/ax_effects.cpp
+@@ -24,8 +24,8 @@ constexpr uint32_t kSamplesPerFrame = 96;
+ constexpr uint32_t kChannels = 3;
+ 
+ // .sdata2 constants the guest function loads through r2.
+-constexpr uint32_t kOneConstantAddr = 0x80388588u;   // 1.0f
+-constexpr uint32_t kScaleConstantAddr = 0x8038858Cu; // 0.6f send pre-scale
++constexpr uint32_t kOneConstantAddr = 0x80388288u;   // 1.0f
++constexpr uint32_t kScaleConstantAddr = 0x8038828Cu; // 0.6f send pre-scale
+ 
+ // AXFX_REVERBSTD_EXP field offsets (byte offsets into the struct in r4).
+ constexpr uint32_t kFieldPreDelayCoef = 0x18;
+@@ -371,5 +371,5 @@ extern "C" void AXFXReverbStdExpCallback_8012b830(CpuContext* ctx) {
+     ReverbStd::Render(stateAddr, frame);
+ }
+ 
+-REGISTER_NATIVE_FUNCTION_AS(0x8012B830, AXFXReverbStdExpCallback_8012b830,
++REGISTER_NATIVE_FUNCTION_AS(0x8012B6F0, AXFXReverbStdExpCallback_8012b830,
+                             "AXFXReverbStdExpCallback_8012b830");
+diff --git a/runtime/src/hle/audio/ax_internal.h b/runtime/src/hle/audio/ax_internal.h
+index 385aaad..5dcd9cd 100644
+--- a/runtime/src/hle/audio/ax_internal.h
++++ b/runtime/src/hle/audio/ax_internal.h
+@@ -41,21 +41,21 @@ constexpr uint32_t kAxSamplesPerFrame = 96u;
+ // kAxDramLength and kAxDramDspAddr are immediates in both builds and agree exactly: NSMBW's
+ // __AXOutInitDSP loads `li r10, 0x40` and `li r9, 0xcd2` into task+0x1C and task+0x20.
+ #ifdef MKW_RUNTIME_PRODUCT_NSMBW
+-constexpr uint32_t kAxDspTaskAddr = 0x8037D000u;
+-constexpr uint32_t kDspInitializedAddr = 0x8042ACF8u;
+-constexpr uint32_t kDspAssertPendingAddr = 0x8042AD00u;
+-constexpr uint32_t kDspAssertTaskAddr = 0x8042AD04u;
+-constexpr uint32_t kDspCurrentTaskAddr = 0x8042AD0Cu;
+-constexpr uint32_t kDspFirstTaskAddr = 0x8042AD10u;
+-constexpr uint32_t kDspRunningTaskAddr = 0x8042AD14u;
+-constexpr uint32_t kAxIramMmemAddr = 0x8032F740u;
+-constexpr uint32_t kAxDramMmemAddr = 0x8037D060u;
++constexpr uint32_t kAxDspTaskAddr = 0x8037CD00u;  // US (PAL 8037D000)
++constexpr uint32_t kDspInitializedAddr = 0x8042AA18u;  // US (PAL 8042ACF8)
++constexpr uint32_t kDspAssertPendingAddr = 0x8042AA20u;  // US (PAL 8042AD00)
++constexpr uint32_t kDspAssertTaskAddr = 0x8042AA24u;  // US (PAL 8042AD04)
++constexpr uint32_t kDspCurrentTaskAddr = 0x8042AA2Cu;  // US (PAL 8042AD0C)
++constexpr uint32_t kDspFirstTaskAddr = 0x8042AA30u;  // US (PAL 8042AD10)
++constexpr uint32_t kDspRunningTaskAddr = 0x8042AA34u;  // US (PAL 8042AD14)
++constexpr uint32_t kAxIramMmemAddr = 0x8032F400u;  // US (PAL 8032F740)
++constexpr uint32_t kAxDramMmemAddr = 0x8037CD60u;  // US (PAL 8037D060)
+ constexpr uint32_t kAxDramLength = 64u;
+ constexpr uint32_t kAxDramDspAddr = 3282u;
+-constexpr uint32_t kAxInitCallback = 0x801A1D90u;
+-constexpr uint32_t kAxResumeCallback = 0x801A1DA0u;
+-constexpr uint32_t kAxDoneCallback = 0x801A1E00u;
+-constexpr uint32_t kAxRequestCallback = 0x801A1E10u;
++constexpr uint32_t kAxInitCallback = 0x801A1C50u;  // US (PAL 801A1D90)
++constexpr uint32_t kAxResumeCallback = 0x801A1C60u;  // US (PAL 801A1DA0)
++constexpr uint32_t kAxDoneCallback = 0x801A1CC0u;  // US (PAL 801A1E00)
++constexpr uint32_t kAxRequestCallback = 0x801A1CD0u;  // US (PAL 801A1E10)
+ // r13-relative fields __AXOutInitDSP itself reads/writes: the two u16 sample-rate style fields
+ // it copies into task+0x24/+0x26, the u16 it copies into task+0x10, and the "DSP task is live"
+ // flag pair the guest spins on immediately after DSPAddTask returns.
+@@ -65,21 +65,21 @@ constexpr uint32_t kAxTaskField26Sda = 0x61CEu;
+ constexpr uint32_t kAxDspLiveFlagSda = 0x5100u;
+ constexpr uint32_t kAxDspLiveAuxSda = 0x5104u;
+ #else
+-constexpr uint32_t kAxDspTaskAddr = 0x802F81A0u;
+-constexpr uint32_t kDspInitializedAddr = 0x80386608u;
+-constexpr uint32_t kDspAssertPendingAddr = 0x80386610u;
+-constexpr uint32_t kDspAssertTaskAddr = 0x80386614u;
+-constexpr uint32_t kDspCurrentTaskAddr = 0x8038661Cu;
+-constexpr uint32_t kDspFirstTaskAddr = 0x80386620u;
+-constexpr uint32_t kDspRunningTaskAddr = 0x80386624u;
+-constexpr uint32_t kAxIramMmemAddr = 0x8027F820u;
+-constexpr uint32_t kAxDramMmemAddr = 0x802F8200u;
++constexpr uint32_t kAxDspTaskAddr = 0x802F7EA0u;
++constexpr uint32_t kDspInitializedAddr = 0x80386308u;
++constexpr uint32_t kDspAssertPendingAddr = 0x80386310u;
++constexpr uint32_t kDspAssertTaskAddr = 0x80386314u;
++constexpr uint32_t kDspCurrentTaskAddr = 0x8038631Cu;
++constexpr uint32_t kDspFirstTaskAddr = 0x80386320u;
++constexpr uint32_t kDspRunningTaskAddr = 0x80386324u;
++constexpr uint32_t kAxIramMmemAddr = 0x8027F6E0u;
++constexpr uint32_t kAxDramMmemAddr = 0x802F7F00u;
+ constexpr uint32_t kAxDramLength = 64u;
+ constexpr uint32_t kAxDramDspAddr = 3282u;
+-constexpr uint32_t kAxInitCallback = 0x80126948u;
+-constexpr uint32_t kAxResumeCallback = 0x80126954u;
+-constexpr uint32_t kAxDoneCallback = 0x801269A8u;
+-constexpr uint32_t kAxRequestCallback = 0x801269B8u;
++constexpr uint32_t kAxInitCallback = 0x80126808u;
++constexpr uint32_t kAxResumeCallback = 0x80126814u;
++constexpr uint32_t kAxDoneCallback = 0x80126868u;
++constexpr uint32_t kAxRequestCallback = 0x80126878u;
+ constexpr uint32_t kAxTaskField10Sda = 0x73FCu;
+ constexpr uint32_t kAxTaskField24Sda = 0x7400u;
+ constexpr uint32_t kAxTaskField26Sda = 0x73FEu;
+diff --git a/runtime/src/hle/audio/ax_memory.cpp b/runtime/src/hle/audio/ax_memory.cpp
+index 588e525..193e327 100644
+--- a/runtime/src/hle/audio/ax_memory.cpp
++++ b/runtime/src/hle/audio/ax_memory.cpp
+@@ -68,7 +68,7 @@ void MarkDspInitialized() {
+ void ResetDspTaskGlobals() {
+     Memory::TryWrite32(kDspAssertPendingAddr, 0);
+     Memory::TryWrite32(kDspAssertTaskAddr, 0);
+-    Memory::TryWrite32(0x80386618u, 0);
++    Memory::TryWrite32(0x80386318u, 0);
+     Memory::TryWrite32(kDspCurrentTaskAddr, 0);
+     Memory::TryWrite32(kDspFirstTaskAddr, 0);
+     Memory::TryWrite32(kDspRunningTaskAddr, 0);
+diff --git a/runtime/src/hle/audio/ax_mix_kernels.h b/runtime/src/hle/audio/ax_mix_kernels.h
+index 687d6ba..51b66fb 100644
+--- a/runtime/src/hle/audio/ax_mix_kernels.h
++++ b/runtime/src/hle/audio/ax_mix_kernels.h
+@@ -10,7 +10,7 @@
+ #include <cstring>
+ 
+ #if defined(__AVX2__)
+-#include <immintrin.h>
++#include "isa/host_simd.h"
+ #define MKW_AX_MIX_AVX2 1
+ #else
+ #define MKW_AX_MIX_AVX2 0
+diff --git a/runtime/src/hle/gx/gx_egg.cpp b/runtime/src/hle/gx/gx_egg.cpp
+index 8a9fd75..8bb0a3f 100644
+--- a/runtime/src/hle/gx/gx_egg.cpp
++++ b/runtime/src/hle/gx/gx_egg.cpp
+@@ -22,8 +22,8 @@ static void EGG__DrawGX__SetVtxState_HLE(uint32_t state) {
+     case 0:
+         setFmt(GX_VA_POS, GX_POS_XYZ, GX_S16, 0xE);
+         setFmt(GX_VA_NRM, GX_NRM_XYZ, GX_S16, 0xE);
+-        setArray(GX_VA_POS, 0x802574a0u, 6);
+-        setArray(GX_VA_NRM, 0x802574e0u, 6);
++        setArray(GX_VA_POS, 0x80257360u, 6);
++        setArray(GX_VA_NRM, 0x802573A0u, 6);
+         setDesc(GX_VA_POS, GX_INDEX8);
+         setDesc(GX_VA_NRM, GX_INDEX8);
+         break;
+@@ -45,22 +45,22 @@ static void EGG__DrawGX__SetVtxState_HLE(uint32_t state) {
+         if (state == 7) setDesc(GX_VA_TEX0, GX_DIRECT);
+         setFmt(GX_VA_POS, GX_POS_XY, GX_S16, 0xE); setFmt(GX_VA_NRM, GX_NRM_XYZ, GX_S16, 0xE);
+         if (state == 7) setFmt(GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+-        setArray(GX_VA_POS, 0x80257520u, 4); setArray(GX_VA_NRM, 0x80388b80u, 6);
++        setArray(GX_VA_POS, 0x802573E0u, 4); setArray(GX_VA_NRM, 0x80388880u, 6);
+         break;
+     case 9:
+         setDesc(GX_VA_POS, GX_INDEX8); setDesc(GX_VA_NRM, GX_INDEX8); setDesc(GX_VA_TEX0, GX_DIRECT);
+         setFmt(GX_VA_POS, GX_POS_XYZ, GX_S16, 0xE); setFmt(GX_VA_NRM, GX_NRM_XYZ, GX_S16, 0xE);
+         setFmt(GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+-        setArray(GX_VA_POS, 0x80257540u, 6); setArray(GX_VA_NRM, 0x80388ba0u, 6);
++        setArray(GX_VA_POS, 0x80257400u, 6); setArray(GX_VA_NRM, 0x803888A0u, 6);
+         break;
+     case 10: case 11: case 12: case 13: {
+         const bool useAltPos = (state == 11 || state == 13);
+         const bool useTex = (state == 10 || state == 11);
+         setDesc(GX_VA_POS, GX_INDEX8);
+         if (useTex) setDesc(GX_VA_TEX0, GX_INDEX8);
+-        const uint32_t posBase = useAltPos ? 0x80388be0u : 0x80388bc0u;
++        const uint32_t posBase = useAltPos ? 0x803888E0u : 0x803888C0u;
+         setArray(GX_VA_POS, posBase, 2);
+-        if (useTex) setArray(GX_VA_TEX0, 0x80388be0u, 2);
++        if (useTex) setArray(GX_VA_TEX0, 0x803888E0u, 2);
+         setFmt(GX_VA_POS, GX_POS_XY, GX_U8, 0);
+         if (useTex) setFmt(GX_VA_TEX0, GX_TEX_ST, GX_U8, 0);
+         break;
+@@ -115,8 +115,8 @@ PPC_NATIVE_OVERRIDE_VOID(8022e2bc, EGG__LightTexture__SetupTevFinish_HLE_8022e2b
+ // ============================================================================
+ 
+ extern "C" void EGG__AsyncDisplay__endRender_HLE_8020ff9c(CpuContext* ctx) {
+-    uint32_t p = ctx->gpr[3]; ctx->gpr[3] = p; ctx->lr = 0x8020FF9C;
+-    InvokeIndirectCpu(0x80219FB4u, ctx);
+-    InvokeIndirectCpu(0x8016ED50u, ctx);
++    uint32_t p = ctx->gpr[3]; ctx->gpr[3] = p; ctx->lr = 0x8020FE5C;
++    InvokeIndirectCpu(0x80219E74u, ctx);
++    InvokeIndirectCpu(0x8016EC10u, ctx);
+ }
+ PPC_NATIVE_OVERRIDE_VOID(8020FF9C, EGG__AsyncDisplay__endRender_HLE_8020ff9c, (CpuContext* ctx), (ctx));
+diff --git a/runtime/src/hle/gx/gx_fatal_stubs.cpp b/runtime/src/hle/gx/gx_fatal_stubs.cpp
+index 8b27db1..913b6a3 100644
+--- a/runtime/src/hle/gx/gx_fatal_stubs.cpp
++++ b/runtime/src/hle/gx/gx_fatal_stubs.cpp
+@@ -31,7 +31,9 @@ namespace {
+     extern "C" void gx_stub_##addr(CpuContext* ctx) { (void)ctx; HaltGX(0x##addr, sym); }
+ 
+ GX_FATAL_STUB(8016b49c, "__GX__DefaultTexRegionCallback_8016b49c") PPC_NATIVE_OVERRIDE_VOID(8016b49c, gx_stub_8016b49c, (CpuContext* ctx), (ctx));
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ GX_FATAL_STUB(8016b590, "__GX__DefaultTlutRegionCallback_8016b590") PPC_NATIVE_OVERRIDE_VOID(8016b590, gx_stub_8016b590, (CpuContext* ctx), (ctx));
++#endif
+ GX_FATAL_STUB(8016b5b4, "__GX__Shutdown_8016b5b4") PPC_NATIVE_OVERRIDE_VOID(8016b5b4, gx_stub_8016b5b4, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016c668, "GX__CPInterruptHandler_8016c668") PPC_NATIVE_OVERRIDE_VOID(8016c668, gx_stub_8016c668, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016d054, "GX__SetBreakPtCallback_8016d054") PPC_NATIVE_OVERRIDE_VOID(8016d054, gx_stub_8016d054, (CpuContext* ctx), (ctx));
+@@ -91,12 +93,18 @@ GX_FATAL_STUB(8016da20, "GX__GetVtxDesc_caseD_1_8016da20") PPC_NATIVE_OVERRIDE_V
+ #endif
+ GX_FATAL_STUB(8016da30, "GX__GetVtxDesc_caseD_2_8016da30") PPC_NATIVE_OVERRIDE_VOID(8016da30, gx_stub_8016da30, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016da40, "GX__GetVtxDesc_caseD_3_8016da40") PPC_NATIVE_OVERRIDE_VOID(8016da40, gx_stub_8016da40, (CpuContext* ctx), (ctx));
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ GX_FATAL_STUB(8016da50, "GX__GetVtxDesc_caseD_4_8016da50") PPC_NATIVE_OVERRIDE_VOID(8016da50, gx_stub_8016da50, (CpuContext* ctx), (ctx));
++#endif
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ GX_FATAL_STUB(8016da60, "GX__GetVtxDesc_caseD_5_8016da60") PPC_NATIVE_OVERRIDE_VOID(8016da60, gx_stub_8016da60, (CpuContext* ctx), (ctx));
++#endif
+ GX_FATAL_STUB(8016da70, "GX__GetVtxDesc_caseD_6_8016da70") PPC_NATIVE_OVERRIDE_VOID(8016da70, gx_stub_8016da70, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016da80, "GX__GetVtxDesc_caseD_7_8016da80") PPC_NATIVE_OVERRIDE_VOID(8016da80, gx_stub_8016da80, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016da90, "GX__GetVtxDesc_caseD_8_8016da90") PPC_NATIVE_OVERRIDE_VOID(8016da90, gx_stub_8016da90, (CpuContext* ctx), (ctx));
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ GX_FATAL_STUB(8016daa0, "GX__GetVtxDesc_caseD_9_8016daa0") PPC_NATIVE_OVERRIDE_VOID(8016daa0, gx_stub_8016daa0, (CpuContext* ctx), (ctx));
++#endif
+ GX_FATAL_STUB(8016dab0, "GX__GetVtxDesc_caseD_a_8016dab0") PPC_NATIVE_OVERRIDE_VOID(8016dab0, gx_stub_8016dab0, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016dad4, "GX__GetVtxDesc_caseD_19_8016dad4") PPC_NATIVE_OVERRIDE_VOID(8016dad4, gx_stub_8016dad4, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(8016daf8, "GX__GetVtxDesc_caseD_b_8016daf8") PPC_NATIVE_OVERRIDE_VOID(8016daf8, gx_stub_8016daf8, (CpuContext* ctx), (ctx));
+@@ -217,7 +225,9 @@ GX_FATAL_STUB(801738b0, "GX__SetGPMetric_caseD_d_801738b0") PPC_NATIVE_OVERRIDE_
+ GX_FATAL_STUB(801738cc, "GX__SetGPMetric_caseD_e_801738cc") PPC_NATIVE_OVERRIDE_VOID(801738cc, gx_stub_801738cc, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(801738e8, "GX__SetGPMetric_caseD_f_801738e8") PPC_NATIVE_OVERRIDE_VOID(801738e8, gx_stub_801738e8, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(80173904, "GX__SetGPMetric_caseD_10_80173904") PPC_NATIVE_OVERRIDE_VOID(80173904, gx_stub_80173904, (CpuContext* ctx), (ctx));
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ GX_FATAL_STUB(80173920, "GX__SetGPMetric_caseD_11_80173920") PPC_NATIVE_OVERRIDE_VOID(80173920, gx_stub_80173920, (CpuContext* ctx), (ctx));
++#endif
+ GX_FATAL_STUB(8017393c, "GX__SetGPMetric_caseD_12_8017393c") PPC_NATIVE_OVERRIDE_VOID(8017393c, gx_stub_8017393c, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(80173958, "GX__SetGPMetric_caseD_13_80173958") PPC_NATIVE_OVERRIDE_VOID(80173958, gx_stub_80173958, (CpuContext* ctx), (ctx));
+ GX_FATAL_STUB(80173974, "GX__SetGPMetric_caseD_14_80173974") PPC_NATIVE_OVERRIDE_VOID(80173974, gx_stub_80173974, (CpuContext* ctx), (ctx));
+diff --git a/runtime/src/hle/gx/gx_fifo.cpp b/runtime/src/hle/gx/gx_fifo.cpp
+index 1c518b9..af78f38 100644
+--- a/runtime/src/hle/gx/gx_fifo.cpp
++++ b/runtime/src/hle/gx/gx_fifo.cpp
+@@ -108,7 +108,7 @@ void FifoDesyncRecordDraw(uint8_t cmd, uint16_t count, uint32_t rawVertexSize, b
+         rec.pc = static_cast<uint32_t>(cc->pc);
+     }
+     const uint32_t fmt = cmd & GX_VAT_MASK_CMD;
+-    constexpr uint32_t kGxDataPtrAddr = 0x80433360u - 0x4EF8u; // *(r2 - 0x4EF8) = __gx (NSMBW)
++    constexpr uint32_t kGxDataPtrAddr = 0x80433080u - 0x4EF8u; // *(r2 - 0x4EF8) = __gx (NSMBW USA; PAL r2 was 0x80433360)
+     uint32_t gd = 0;
+     if (Memory::TryRead32(kGxDataPtrAddr, gd) && gd != 0) {
+         Memory::TryRead32(gd + 0x14u, rec.guestVcdLo);
+diff --git a/runtime/src/hle/gx/gx_init.cpp b/runtime/src/hle/gx/gx_init.cpp
+index d3edcab..e37e293 100644
+--- a/runtime/src/hle/gx/gx_init.cpp
++++ b/runtime/src/hle/gx/gx_init.cpp
+@@ -37,8 +37,8 @@ extern "C" uint32_t GX__Init_8016b850(uint32_t fifoBase, uint32_t fifoSize)
+         ++gxInitCalls;
+         RT_LOGF(RT_TAG_GX, "NSMBW_GXINIT call#%d fifoBase=0x%08X fifoSize=0x%08X\n", gxInitCalls, fifoBase, fifoSize);
+     }
+-    constexpr uint32_t kFifoObjAddr = 0x80343740u;
+-    constexpr uint32_t kGXDataAddr = 0x803437C0u;
++    constexpr uint32_t kFifoObjAddr = 0x80343400u;
++    constexpr uint32_t kGXDataAddr = 0x80343480u;
+     constexpr uint32_t kGXDataSize = 0x600u;
+ 
+     GXInit(GuestToHostPtr(fifoBase, fifoSize), fifoSize);
+@@ -120,14 +120,14 @@ extern "C" void __GX__FifoInit_8016d180()
+ {
+     constexpr uint32_t kCpInterruptId = 0x11u;
+     constexpr uint32_t kCpInterruptMask = 0x4000u;
+-    constexpr uint32_t kCpInterruptHandlerAddr = 0x8016c668u;
+-    constexpr uint32_t kGxCurrentThreadPtrAddr = 0x803867c4u;
+-    constexpr uint32_t kGxThreadQueueAddr = 0x803867c0u;
+-    constexpr uint32_t kCpuFifoObjAddr = 0x80343de4u;
+-    constexpr uint32_t kGpFifoObjAddr = 0x80343dc0u;
++    constexpr uint32_t kCpInterruptHandlerAddr = 0x8016C528u;
++    constexpr uint32_t kGxCurrentThreadPtrAddr = 0x803864C4u;
++    constexpr uint32_t kGxThreadQueueAddr = 0x803864C0u;
++    constexpr uint32_t kCpuFifoObjAddr = 0x80343AA4u;
++    constexpr uint32_t kGpFifoObjAddr = 0x80343A80u;
+     constexpr size_t kFifoObjSize = 0x24u;
+-    constexpr uint32_t kFifoWrapFlagAddr = 0x803867b0u;
+-    constexpr uint32_t kFifoWrapFlag2Addr = 0x803867b1u;
++    constexpr uint32_t kFifoWrapFlagAddr = 0x803864B0u;
++    constexpr uint32_t kFifoWrapFlag2Addr = 0x803864B1u;
+ 
+     __OSSetInterruptHandler_801a65f8_hle(kCpInterruptId, kCpInterruptHandlerAddr);
+     __OSUnmaskInterrupts_801a69bc_hle(kCpInterruptMask);
+@@ -154,9 +154,9 @@ extern "C" void __GX__PEInit_8016ee14()
+     constexpr uint32_t kPeFinishInterruptId = 0x13u;
+     constexpr uint32_t kPeTokenInterruptMask = 0x1000u;
+     constexpr uint32_t kPeFinishInterruptMask = 0x2000u;
+-    constexpr uint32_t kPeTokenHandlerAddr = 0x8016eccc;
+-    constexpr uint32_t kPeFinishHandlerAddr = 0x8016ed94;
+-    constexpr uint32_t kPeThreadQueueAddr = 0x803867d0u;
++    constexpr uint32_t kPeTokenHandlerAddr = 0x8016EB8C;
++    constexpr uint32_t kPeFinishHandlerAddr = 0x8016EC54;
++    constexpr uint32_t kPeThreadQueueAddr = 0x803864D0u;
+ 
+     __OSSetInterruptHandler_801a65f8_hle(kPeTokenInterruptId, kPeTokenHandlerAddr);
+     __OSSetInterruptHandler_801a65f8_hle(kPeFinishInterruptId, kPeFinishHandlerAddr);
+@@ -183,30 +183,32 @@ extern "C" void GX__BeginDisplayList_80172e00(uint32_t la, uint32_t s) {
+         uint32_t gd = Memory::Read32(kGXDataPtrAddr);
+         if (!gd) return;
+         if (Memory::Read32(gd + 0x5FCu)) GX__SetDirtyState_8016ee78();
+-        if (Memory::Read8(gd + 0x5F9u)) std::memcpy(Memory::GetPointer(0x80344110, 0x600), Memory::GetPointer(gd, 0x600), 0x600);
+-        Memory::Write32(0x80344094, la + s - 4u);
+-        Memory::Write32(0x803440AC, 0);
+-        Memory::Write32(0x80344090, la);
+-        Memory::Write32(0x80344098, s);
+-        Memory::Write32(0x803440A4, la);
+-        Memory::Write32(0x803440A8, la);
++        if (Memory::Read8(gd + 0x5F9u)) std::memcpy(Memory::GetPointer(0x80343DD0, 0x600), Memory::GetPointer(gd, 0x600), 0x600);
++        Memory::Write32(0x80343D54, la + s - 4u);
++        Memory::Write32(0x80343D6C, 0);
++        Memory::Write32(0x80343D50, la);
++        Memory::Write32(0x80343D58, s);
++        Memory::Write32(0x80343D64, la);
++        Memory::Write32(0x80343D68, la);
+         Memory::Write8(gd + 0x5F8u, 1u);
+         // Mirror the guest fifo-object fields the FIFO write path consumes so
+         // HleFifoWrite never has to read them back out of guest memory.
+         BeginDisplayListRecording(la, s);
+         GXFlush();
+-        GX__GetCPUFifo_8016cf10(0x80344710);
+-        GX__SetCPUFifo_8016c94c(0x80344090);
++        GX__GetCPUFifo_8016cf10(0x803443D0);
++        GX__SetCPUFifo_8016c94c(0x80343D50);
+     } catch (...) {}
+ }
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE_VOID(80172e00, GX__BeginDisplayList_80172e00, (uint32_t la, uint32_t s), (la, s));
++#endif
+ 
+ extern "C" uint32_t GX__EndDisplayList_80172eb4() {
+     try {
+         GXFlush();
+-        GX__GetCPUFifo_8016cf10(0x80344090);
++        GX__GetCPUFifo_8016cf10(0x80343D50);
+         const uint8_t wrapped = Memory::Read8(kDlFifoAddr + kDlWrapFlagOffset);
+-        GX__SetCPUFifo_8016c94c(0x80344710);
++        GX__SetCPUFifo_8016c94c(0x803443D0);
+ 
+         const uint32_t gd = Memory::Read32(kGXDataPtrAddr);
+         if (gd) {
+@@ -214,7 +216,7 @@ extern "C" uint32_t GX__EndDisplayList_80172eb4() {
+                 const int32_t interruptLevel = OS__DisableInterrupts_801a65ac();
+                 const uint32_t savedWord8 = Memory::Read32(gd + 0x08u);
+                 std::memcpy(Memory::GetPointer(gd, 0x600),
+-                            Memory::GetPointer(0x80344110, 0x600),
++                            Memory::GetPointer(0x80343DD0, 0x600),
+                             0x600);
+                 Memory::Write32(gd + 0x08u, savedWord8);
+                 OS__RestoreInterrupts_801a65d4(interruptLevel);
+diff --git a/runtime/src/hle/gx/gx_internal.h b/runtime/src/hle/gx/gx_internal.h
+index 89c5465..f970c48 100644
+--- a/runtime/src/hle/gx/gx_internal.h
++++ b/runtime/src/hle/gx/gx_internal.h
+@@ -60,13 +60,13 @@ bool is_offscreen() noexcept;
+ // an initialized data section and holds 0x8038FF00, which is where NSMBW's GXData actually
+ // lives - so the slot is verified by its contents, not just by the addressing mode.
+ #ifdef MKW_RUNTIME_PRODUCT_NSMBW
+-constexpr uint32_t kGXDataPtrAddr = 0x8042E468;
++constexpr uint32_t kGXDataPtrAddr = 0x8042E188;  // US (PAL 8042E468)
+ #else
+-constexpr uint32_t kGXDataPtrAddr = 0x803886C8;
++constexpr uint32_t kGXDataPtrAddr = 0x803883C8;
+ #endif
+-constexpr uint32_t kDlFifoAddr = 0x80344090;
+-constexpr uint32_t kDlWritePtrAddr = 0x803440A4;
+-constexpr uint32_t kDlCountAddr = 0x803440AC;
++constexpr uint32_t kDlFifoAddr = 0x80343D50;
++constexpr uint32_t kDlWritePtrAddr = 0x80343D64;
++constexpr uint32_t kDlCountAddr = 0x80343D6C;
+ constexpr uint32_t kDlWrapFlagOffset = 0x20;
+ constexpr uint32_t kMaxTluts = 20;
+ // The byte GXDrawDone spins on. NSMBW's own GXDrawDone clears it at 0x801C5058
+@@ -74,9 +74,9 @@ constexpr uint32_t kMaxTluts = 20;
+ // at 0x801C536C. r13 is 0x8042F980 for NSMBW, giving 0x8042ABC0. Those three sites are the
+ // only references to that address in the whole DOL.
+ #ifdef MKW_RUNTIME_PRODUCT_NSMBW
+-constexpr uint32_t kGxDrawDoneFlagAddr = 0x8042ABC0;
++constexpr uint32_t kGxDrawDoneFlagAddr = 0x8042A8E0;  // US (PAL 8042ABC0)
+ #else
+-constexpr uint32_t kGxDrawDoneFlagAddr = 0x803867d8;
++constexpr uint32_t kGxDrawDoneFlagAddr = 0x803864D8;
+ #endif
+ 
+ // --- External Declarations ---
+diff --git a/runtime/src/hle/gx/gx_tev.cpp b/runtime/src/hle/gx/gx_tev.cpp
+index d09fe64..74558a1 100644
+--- a/runtime/src/hle/gx/gx_tev.cpp
++++ b/runtime/src/hle/gx/gx_tev.cpp
+@@ -131,7 +131,9 @@ extern "C" void GX__SetTevColor_80171e10(uint32_t id, uint32_t cp) {
+ // auto-generated func_801C8570) because this file lives in the shared runtime/src/hle tree,
+ // which the NSMBW shard generator does not scan for override exclusions (unlike
+ // projects/nsmbw/native/*.cpp) - see the identical note above GXSetTevColorIn.
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE_VOID(80171e10, GX__SetTevColor_80171e10, (uint32_t id, uint32_t cp), (id, cp));
++#endif
+ 
+ extern "C" void GX__SetTevColorS10_80171e70(uint32_t id, uint32_t cp) {
+     if (!TevRegOk(id)) return;
+@@ -175,4 +177,6 @@ extern "C" void GX__SetTevSwapMode_80171fd0(uint32_t s, uint32_t rs, uint32_t ts
+     if (!TevStageOk(s) || !TevSwapOk(rs) || !TevSwapOk(ts)) return;
+     GXSetTevSwapMode((GXTevStageID)s, (GXTevSwapSel)rs, (GXTevSwapSel)ts);
+ }
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE_VOID(80171fd0, GX__SetTevSwapMode_80171fd0, (uint32_t s, uint32_t rs, uint32_t ts), (s, rs, ts));
++#endif
+diff --git a/runtime/src/hle/gx/gx_texture.cpp b/runtime/src/hle/gx/gx_texture.cpp
+index f951fd0..34921ad 100644
+--- a/runtime/src/hle/gx/gx_texture.cpp
++++ b/runtime/src/hle/gx/gx_texture.cpp
+@@ -1111,7 +1111,7 @@ extern "C" void GX__LoadTexObj_80170f2c(uint32_t oa, uint32_t tid) {
+             // (tImage0[id] / tMode0[id]) for __GXSetSUTexRegs, which derives the SU_TS0/1
+             // texture-size registers (BP 0x30/0x31) from them at the next dirty-state flush.
+             // MKW HLEs __GXSetSUTexRegs natively so it never reads these; NSMBW runs the guest's
+-            // own (0x801C7A10 -> __SetSURegs 0x801C7980, which reads __gx+0x564+4*idx and
++            // own (0x801C78D0 -> __SetSURegs 0x801C7840, which reads __gx+0x564+4*idx and
+             // __gx+0x584+4*idx and writes __gx+0x108/+0x128). With this override replacing the
+             // SDK body those words stayed zero, every 2D layout draw ran with SU scale 1x1
+             // (NSMBW_LOG_DRAW_TEXGEN: "suScale=1/1" against 628x96 textures), and aurora - which
+diff --git a/runtime/src/hle/gx/gx_transform.cpp b/runtime/src/hle/gx/gx_transform.cpp
+index d7f1bc8..e1c11e1 100644
+--- a/runtime/src/hle/gx/gx_transform.cpp
++++ b/runtime/src/hle/gx/gx_transform.cpp
+@@ -87,7 +87,9 @@ extern "C" void GX__SetScissorBoxOffset_801734e0(int32_t xo, int32_t yo) {
+         if (gd) Memory::Write16(gd + 2, 0);
+     } catch (...) {}
+ }
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE_VOID(801734e0, GX__SetScissorBoxOffset_801734e0, (int32_t xo, int32_t yo), (xo, yo));
++#endif
+ 
+ // ============================================================================
+ // Scissor
+diff --git a/runtime/src/hle/net/network_config.cpp b/runtime/src/hle/net/network_config.cpp
+index 78802c0..ed51129 100644
+--- a/runtime/src/hle/net/network_config.cpp
++++ b/runtime/src/hle/net/network_config.cpp
+@@ -63,7 +63,7 @@ extern "C" void NHTTPStartup_Reentrant_HLE_801d8d30(CpuContext* ctx) {
+     }
+ }
+ 
+-REGISTER_NATIVE_FUNCTION_AS(0x801D8D30, NHTTPStartup_Reentrant_HLE_801d8d30, "NHTTPStartup_Reentrant_HLE_801d8d30");
++REGISTER_NATIVE_FUNCTION_AS(0x801D8BF0, NHTTPStartup_Reentrant_HLE_801d8d30, "NHTTPStartup_Reentrant_HLE_801d8d30");
+ 
+ static void WriteNcdConfig(uint32_t addr, uint32_t len) {
+     if (!addr || len == 0) {
+diff --git a/runtime/src/hle/net/network_deferred.cpp b/runtime/src/hle/net/network_deferred.cpp
+index 8ed5e0e..786708d 100644
+--- a/runtime/src/hle/net/network_deferred.cpp
++++ b/runtime/src/hle/net/network_deferred.cpp
+@@ -627,7 +627,7 @@ static bool InitializeDeferredSyncRoute(DeferredNetworkRoute& route, uint32_t wa
+     // early scheduler setup. Capture its identity before yielding so a late
+     // resolver result cannot wake a stale/reused stack queue after cancellation.
+     constexpr uint32_t kOSRunningContextAddr = 0x800000E4u;
+-    constexpr uint32_t kDefaultThreadContextAddr = 0x80347498u;
++    constexpr uint32_t kDefaultThreadContextAddr = 0x80347158u;
+     uint32_t expectedThread = Memory::Read32(kOSRunningContextAddr);
+     if (expectedThread == 0) {
+         expectedThread = kDefaultThreadContextAddr;
+diff --git a/runtime/src/hle/os/os_alarm.cpp b/runtime/src/hle/os/os_alarm.cpp
+index bf4c33b..716aacd 100644
+--- a/runtime/src/hle/os/os_alarm.cpp
++++ b/runtime/src/hle/os/os_alarm.cpp
+@@ -487,7 +487,7 @@ extern "C" uint32_t RFLiIsWorking_HLE_800bd860()
+     ProcessAlarmQueue(cpu, 32);
+ 
+     // Now return the actual "working" status
+-    constexpr uint32_t kRflManagerPtrAddr = 0x80386298u;
++    constexpr uint32_t kRflManagerPtrAddr = 0x80385F98u;
+     constexpr uint32_t kWorkingFlagOffset = 0x1b34u;
+ 
+     try {
+diff --git a/runtime/src/hle/os/os_context.cpp b/runtime/src/hle/os/os_context.cpp
+index 4b17875..ed6d109 100644
+--- a/runtime/src/hle/os/os_context.cpp
++++ b/runtime/src/hle/os/os_context.cpp
+@@ -79,7 +79,7 @@ extern "C" void OS__SetCurrentContext_801a1e70(uint32_t contextAddr)
+ 
+ PPC_NATIVE_OVERRIDE_VOID(801A2098, OS__ClearContext_801a2098, (uint32_t contextAddr), (contextAddr));
+ PPC_NATIVE_OVERRIDE_VOID(801A1E70, OS__SetCurrentContext_801a1e70, (uint32_t contextAddr), (contextAddr));
+-REGISTER_NATIVE_FUNCTION(0x801A98B0, OS__GetCurrentThread_801a98b0_hle);
++REGISTER_NATIVE_FUNCTION(0x801A9770, OS__GetCurrentThread_801a98b0_hle);
+ 
+ // OSLoadContext (0x801A1F58): restores CPU state from a guest OSContext and jumps to SRR0 by hand,
+ // since the real function's privileged mtspr/rfi can't be translated.
+diff --git a/runtime/src/hle/os/os_init.cpp b/runtime/src/hle/os/os_init.cpp
+index 08472a8..c3bfdb2 100644
+--- a/runtime/src/hle/os/os_init.cpp
++++ b/runtime/src/hle/os/os_init.cpp
+@@ -25,7 +25,7 @@ extern "C" void OSInitAlarm_RecompModLateInit_801a961c(CpuContext* ctx) {
+     func_801A961C(ctx);
+ }
+ 
+-REGISTER_NATIVE_FUNCTION_AS(0x801A961C, OSInitAlarm_RecompModLateInit_801a961c, "OSInitAlarm_RecompModLateInit_801a961c");
++REGISTER_NATIVE_FUNCTION_AS(0x801A94DC, OSInitAlarm_RecompModLateInit_801a961c, "OSInitAlarm_RecompModLateInit_801a961c");
+ 
+ extern "C" void StaticRProlog_RecompModInit_8055531c(CpuContext* ctx) {
+     RecompMod::RunMemoryInitializers();
+@@ -78,7 +78,7 @@ extern "C" void OSFatal_HLE_801a4ec4(CpuContext* ctx) {
+     std::exit(EXIT_FAILURE);
+ }
+ 
+-REGISTER_NATIVE_FUNCTION_AS(0x801A4EC4, OSFatal_HLE_801a4ec4, "OSFatal_HLE_801a4ec4");
++REGISTER_NATIVE_FUNCTION_AS(0x801A4D84, OSFatal_HLE_801a4ec4, "OSFatal_HLE_801a4ec4");
+ 
+ extern "C" void GKI_delay_HLE_801301b4(CpuContext* ctx)
+ {
+@@ -91,7 +91,7 @@ extern "C" uint32_t BTM_IsDeviceUp_HLE_8013a300(CpuContext* ctx)
+ {
+     // Force Bluetooth stack to "up" to avoid endless polling loops while we lack
+     // real hardware bring-up.
+-    constexpr uint32_t kBtmCbBase = 0x80336278u;
++    constexpr uint32_t kBtmCbBase = 0x80335F38u;
+     constexpr uint32_t kDevStateOffset = 0x64Eu;
+     try {
+         ::Memory::Write8(kBtmCbBase + kDevStateOffset, 5u);
+@@ -133,7 +133,7 @@ extern "C" uint32_t HLE_VIGetTvFormat_801bacd8()
+     return 1;
+ }
+ 
+-REGISTER_NATIVE_FUNCTION(0x801B2DE0, SIInit_801b2de0);
++REGISTER_NATIVE_FUNCTION(0x801B2CA0, SIInit_801b2de0);
+ PPC_NATIVE_OVERRIDE_VOID(801B3ACC, HLE_SISetSamplingRate_801b3acc, (uint32_t msec), (msec));
+ 
+ // OS____InitMemoryProtection (0x801A7DFC): real version touches MMU/MMIO we don't emulate;
+@@ -311,7 +311,7 @@ extern "C" void PPCMfhid2_HLE_8012e630(CpuContext* ctx)
+ {
+     ctx->gpr[3] = PPCMfhid2_8012e630_impl();
+ }
+-REGISTER_TRANSLATED_FUNCTION(0x8012e630, PPCMfhid2_HLE_8012e630);
++REGISTER_TRANSLATED_FUNCTION(0x8012E4F0, PPCMfhid2_HLE_8012e630);
+ 
+ extern "C" void PPCMthid2_8012e638(CpuContext* ctx)
+ {
+diff --git a/runtime/src/hle/os/os_internal.h b/runtime/src/hle/os/os_internal.h
+index 7e2b8a0..e762516 100644
+--- a/runtime/src/hle/os/os_internal.h
++++ b/runtime/src/hle/os/os_internal.h
+@@ -24,7 +24,7 @@ extern std::atomic<bool> g_interrupts_enabled;
+ // observable state, not just bookkeeping.
+ extern std::atomic<uint32_t> g_interrupt_mask;
+ 
+-constexpr uint32_t kInterruptHandlerTablePtrAddr = 0x803868f8u;
++constexpr uint32_t kInterruptHandlerTablePtrAddr = 0x803865F8u;
+ constexpr uint32_t kInterruptHandlerTableAddr = 0x80003040u;
+ constexpr size_t kInterruptHandlerTableBytes = 0x80u;
+ constexpr uint32_t kInterruptMaskLoAddr = 0x800000c4u;
+@@ -36,8 +36,8 @@ constexpr uint32_t kThreadListHeadAddr = 0x800000dcu;    // First thread in thre
+ constexpr uint32_t kThreadListTailAddr = 0x800000e0u;    // Last added thread (tail of thread list)
+ constexpr uint32_t kOSRunningContextAddr = 0x800000e4u;  // Currently running thread context
+ 
+-constexpr uint32_t kDefaultThreadContextAddr = 0x80347498u;
+-constexpr uint32_t kIdleThreadContextAddr = 0x803478b0u;
++constexpr uint32_t kDefaultThreadContextAddr = 0x80347158u;
++constexpr uint32_t kIdleThreadContextAddr = 0x80347570u;
+ // kThreadQueueArrayAddr / kSwitchThreadCallbackPtrAddr / kSchedulerReschedCounterAddr /
+ // kSchedulerPendingFlagAddr / kSchedulerIdleFlagAddr were NSMBW-wrong (this file is shared
+ // with the mkwii project and these five were never re-derived for NSMBW's own link layout).
+@@ -48,14 +48,14 @@ constexpr uint32_t kIdleThreadContextAddr = 0x803478b0u;
+ // never touched, while this override's own idle loop (which does poll VI/Audio/Alarm)
+ // wrote a completely different, dead address. Corrected by disassembling 0x801B4FE0 (main.dol)
+ // and reading off the real lis/addi/lwz immediates it uses for each of these fields.
+-constexpr uint32_t kThreadQueueArrayAddr = 0x8038EF50u;
++constexpr uint32_t kThreadQueueArrayAddr = 0x8038EC50u;
+ constexpr size_t kThreadQueueArrayBytes = 0x100u;
+-constexpr uint32_t kSwitchThreadCallbackPtrAddr = 0x80429828u;
+-constexpr uint32_t kSchedulerReschedCounterAddr = 0x8042A9E4u;
+-constexpr uint32_t kSchedulerPendingFlagAddr = 0x8042A9E8u;
++constexpr uint32_t kSwitchThreadCallbackPtrAddr = 0x80429530u;
++constexpr uint32_t kSchedulerReschedCounterAddr = 0x8042A704u;
++constexpr uint32_t kSchedulerPendingFlagAddr = 0x8042A708u;
+ // RVL OS uses this as the OSDisableScheduler/OSEnableScheduler nesting count.
+ // SelectThread exits early while the count is non-zero.
+-constexpr uint32_t kSchedulerIdleFlagAddr = 0x8042A9E0u;
++constexpr uint32_t kSchedulerIdleFlagAddr = 0x8042A700u;
+ constexpr uint32_t kAlarmQueueOffsetFromR13 = 0x6360u;
+ 
+ // The OSAlarm HLE is not bound for NSMBW. Two independent facts:
+diff --git a/runtime/src/hle/os/os_interrupt.cpp b/runtime/src/hle/os/os_interrupt.cpp
+index 532f2c0..44ebc92 100644
+--- a/runtime/src/hle/os/os_interrupt.cpp
++++ b/runtime/src/hle/os/os_interrupt.cpp
+@@ -250,10 +250,12 @@ PPC_NATIVE_OVERRIDE(801A65C0, OS__EnableInterrupts_801a65c0, int32_t, (), ());
+ PPC_NATIVE_OVERRIDE(801A65D4, OS__RestoreInterrupts_801a65d4, int32_t, (int32_t level), (level));
+ PPC_NATIVE_OVERRIDE(801A661C, OS____InterruptInit_801a661c, uint32_t, (uint32_t r3, uint32_t r4, uint32_t r5, uint32_t r6, uint32_t r7, uint32_t r8), (r3, r4, r5, r6, r7, r8));
+ PPC_NATIVE_OVERRIDE(801A66E0, SetInterruptMask_801a66e0, uint32_t, (uint32_t mask, uint32_t enable), (mask, enable));
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE(801A00E0, OS__ExceptionInit_801a00e0, uint32_t, (uint32_t r3, uint32_t r4, uint32_t r5, uint32_t r6, uint32_t r7, uint32_t r8, uint32_t r20), (r3, r4, r5, r6, r7, r8, r20));
++#endif
+ PPC_NATIVE_OVERRIDE(80168FA0, EXIInit_80168fa0, uint32_t, (), ());
+-REGISTER_NATIVE_FUNCTION(0x801A65F8, __OSSetInterruptHandler_801a65f8_hle);
+-REGISTER_NATIVE_FUNCTION(0x801A69BC, __OSUnmaskInterrupts_801a69bc_hle);
++REGISTER_NATIVE_FUNCTION(0x801A64B8, __OSSetInterruptHandler_801a65f8_hle);
++REGISTER_NATIVE_FUNCTION(0x801A687C, __OSUnmaskInterrupts_801a69bc_hle);
+ 
+ // OS____MaskInterrupts (0x801a693c): stubbed out because its verification loop reads MMIO
+ // registers we don't emulate, which would spin forever.
+@@ -406,7 +408,7 @@ extern "C" uint32_t OSSetPowerCallback_801ab75c(CpuContext* ctx)
+     const uint32_t r13 = cpu->gpr[13];
+ 
+     // Assembly defines the default callback address as (0x801b0000 - 0x43f4)
+-    constexpr uint32_t kDefaultCallbackAddr = 0x801b0000u - 0x43f4u; // 0x801abc0c
++    constexpr uint32_t kDefaultCallbackAddr = 0x801AFEC0u - 0x43f4u; // 0x801ABACC
+ 
+     // Offsets from R13 (SDA2)
+     const uint32_t kCallbackPtrAddr = r13 - 0x62b8u;
+@@ -501,10 +503,10 @@ extern "C" int32_t IPCCltInit_80193478(CpuContext* ctx)
+     RT_LOG(RT_TAG_OS) << "IPCCltInit_80193478 called: calling IPCInit for buffer setup" << std::endl;
+     
+     // Sets 0x803867EC/F0/E8 (IPC buffer lo/hi + init flag) from __OSGetIPCBufferLo/Hi.
+-    InvokeIndirectCpu(0x80192F7Cu, ctx);
++    InvokeIndirectCpu(0x80192E3Cu, ctx);
+ 
+     // Advance the buffer lo pointer by 0x1000 (iosHeap size), matching real IPCCltInit.
+-    uint32_t bufferLo = Memory::Read32(ctx->gpr[13] + -25620); // 0x803867EC at r13-0x6414
++    uint32_t bufferLo = Memory::Read32(ctx->gpr[13] + -25620); // 0x803864EC at r13-0x6414
+     uint32_t newBufLo = bufferLo + 0x1000; // Advance by 4KB for iosHeap
+     Memory::Write32(ctx->gpr[13] + -25620, newBufLo);
+     
+diff --git a/runtime/src/hle/os/os_message.cpp b/runtime/src/hle/os/os_message.cpp
+index 94b0fe0..79ec9b3 100644
+--- a/runtime/src/hle/os/os_message.cpp
++++ b/runtime/src/hle/os/os_message.cpp
+@@ -39,7 +39,7 @@ extern "C" void OS__InitMessageQueue_HLE_801a72fc(CpuContext* ctx)
+         LogMemoryError(RT_TAG_OS, "OS__InitMessageQueue", e);
+     }
+ }
+-REGISTER_NATIVE_FUNCTION(0x801A72FC, OS__InitMessageQueue_HLE_801a72fc);
++REGISTER_NATIVE_FUNCTION(0x801A71BC, OS__InitMessageQueue_HLE_801a72fc);
+ 
+ static bool MsgQueueIsFull(uint32_t queuePtr)
+ {
+@@ -165,7 +165,7 @@ extern "C" int32_t OS__SendMessage_HLE_801a735c(CpuContext* ctx)
+         [msg](uint32_t queue) { MsgQueueEnqueue(queue, msg); },
+         kMsgQueueRecvOffset, kMsgQueueSendOffset);
+ }
+-REGISTER_NATIVE_FUNCTION(0x801A735C, OS__SendMessage_HLE_801a735c);
++REGISTER_NATIVE_FUNCTION(0x801A721C, OS__SendMessage_HLE_801a735c);
+ 
+ extern "C" int32_t OS__ReceiveMessage_HLE_801a7424(CpuContext* ctx)
+ {
+@@ -193,7 +193,7 @@ extern "C" int32_t OS__ReceiveMessage_HLE_801a7424(CpuContext* ctx)
+         },
+         kMsgQueueSendOffset, kMsgQueueRecvOffset);
+ }
+-REGISTER_NATIVE_FUNCTION(0x801A7424, OS__ReceiveMessage_HLE_801a7424);
++REGISTER_NATIVE_FUNCTION(0x801A72E4, OS__ReceiveMessage_HLE_801a7424);
+ 
+ extern "C" int32_t OS__JamMessage_HLE_801a7500(CpuContext* ctx)
+ {
+@@ -215,4 +215,4 @@ extern "C" int32_t OS__JamMessage_HLE_801a7500(CpuContext* ctx)
+         [msg](uint32_t queue) { MsgQueueJam(queue, msg); },
+         kMsgQueueRecvOffset, kMsgQueueSendOffset);
+ }
+-REGISTER_NATIVE_FUNCTION(0x801A7500, OS__JamMessage_HLE_801a7500);
++REGISTER_NATIVE_FUNCTION(0x801A73C0, OS__JamMessage_HLE_801a7500);
+diff --git a/runtime/src/hle/os/os_reset.cpp b/runtime/src/hle/os/os_reset.cpp
+index e36af5e..7e35e92 100644
+--- a/runtime/src/hle/os/os_reset.cpp
++++ b/runtime/src/hle/os/os_reset.cpp
+@@ -136,7 +136,7 @@ PPC_NATIVE_OVERRIDE(801A8A80, OSResetSystem, uint32_t, (), ());
+ // 0x801AE58C -> exit(int status)
+ extern "C" uint32_t Exit_801AE58C(int status)
+ {
+-    RT_LOGF(RT_TAG_OS, "exit(status=%d) called via 0x801AE58C\n", status);
++    RT_LOGF(RT_TAG_OS, "exit(status=%d) called via 0x801AE44C\n", status);
+     std::fflush(stderr);
+     if (status != 0) {
+         const std::string details =
+diff --git a/runtime/src/hle/os/os_sleep.cpp b/runtime/src/hle/os/os_sleep.cpp
+index f167b2d..93965d6 100644
+--- a/runtime/src/hle/os/os_sleep.cpp
++++ b/runtime/src/hle/os/os_sleep.cpp
+@@ -334,7 +334,7 @@ extern "C" void OS__SleepTicks_HLE_801aaca8(CpuContext* ctx)
+ 
+     OS__RestoreInterrupts_801a65d4(irqState);
+ }
+-REGISTER_NATIVE_FUNCTION(0x801AACA8, OS__SleepTicks_HLE_801aaca8);
++REGISTER_NATIVE_FUNCTION(0x801AAB68, OS__SleepTicks_HLE_801aaca8);
+ 
+ namespace {
+ // OSSleepThread must reach SelectThread with the scheduler-disable count at zero, or the thread
+diff --git a/runtime/src/hle/os/os_thread.cpp b/runtime/src/hle/os/os_thread.cpp
+index 6cb9906..d8a32cd 100644
+--- a/runtime/src/hle/os/os_thread.cpp
++++ b/runtime/src/hle/os/os_thread.cpp
+@@ -218,7 +218,7 @@ void UnlockAllThreadMutexes(CpuContext* cpu, uint32_t threadPtr)
+     }
+     CpuContextScope scope(cpu);
+     cpu->gpr[3] = threadPtr;
+-    InvokeIndirectCpu(0x801A8088u, cpu); // __OSUnlockAllMutex
++    InvokeIndirectCpu(0x801A7F48u, cpu); // __OSUnlockAllMutex
+ }
+ 
+ // Shared tail of OSExitThread/OSCancelThread: clears context, delists if detached, marks
+@@ -342,7 +342,7 @@ extern "C" void OSCreateThread_HLE_801b5270(CpuContext* ctx)
+             // then it zeroes the remaining GPR slots. 0x801A20BC is mid-function code (it starts
+             // on a `bl`, with no prologue), so the created thread's context - including its stack
+             // pointer - was never initialized, and the game thread began executing with r1 = 0.
+-            InvokeIndirectCpu(0x801AD0F0u, cpu);
++            InvokeIndirectCpu(0x801ACFB0u, cpu);  // US (PAL 0x801AD0F0) OSInitContext
+         }
+ 
+         if (IsThpVideoDecoderEntry(entryFunc)) {
+@@ -356,7 +356,7 @@ extern "C" void OSCreateThread_HLE_801b5270(CpuContext* ctx)
+ 
+         }
+ 
+-        ::Memory::Write32(threadPtr + 0x84u, 0x801AA0F0u); // LR = OSExitThread
++        ::Memory::Write32(threadPtr + 0x84u, 0x801B53A0u); // US (PAL n/a) LR = OSExitThread (US; read from the US OSCreateThread body)
+         ::Memory::Write32(threadPtr + 0x0Cu, entryArg);    // r3 = argument
+ 
+         // Stack info
+@@ -372,8 +372,8 @@ extern "C" void OSCreateThread_HLE_801b5270(CpuContext* ctx)
+         // Match the original OSCreateThread slow-path initialization that runs
+         // once scheduler globals are live. THP worker threads depend on these
+         // queue/list blocks being fully zeroed.
+-        constexpr uint32_t kSchedulerInitFlagAddr = 0x80347130u;
+-        constexpr uint32_t kThreadAttrSourceAddr = 0x80385AA8u;
++        constexpr uint32_t kSchedulerInitFlagAddr = 0x80346DF0u;
++        constexpr uint32_t kThreadAttrSourceAddr = 0x803857A8u;
+         if (Memory::Contains(kSchedulerInitFlagAddr, 4) &&
+             ::Memory::Read32(kSchedulerInitFlagAddr) != 0) {
+             uint32_t srr1 = ::Memory::Read32(threadPtr + 0x19Cu);
+diff --git a/runtime/src/hle/sc.cpp b/runtime/src/hle/sc.cpp
+index 62c4411..365fa9c 100644
+--- a/runtime/src/hle/sc.cpp
++++ b/runtime/src/hle/sc.cpp
+@@ -67,7 +67,7 @@ PPC_NATIVE_OVERRIDE(801B23A0, SCGetProductArea_HLE, uint32_t, (), ());
+ extern "C" uint32_t SCGetProductCode_HLE()
+ {
+     // Original PAL SC storage for the six-byte CODE value.
+-    constexpr uint32_t kProductCodeAddress = 0x803869E0u;
++    constexpr uint32_t kProductCodeAddress = 0x803866E0u;
+     static constexpr char kProductCode[] = "LEH";
+     if (!Memory::Contains(kProductCodeAddress, sizeof(kProductCode))) {
+         return 0;
+diff --git a/runtime/src/hle/storage/dvd.cpp b/runtime/src/hle/storage/dvd.cpp
+index 5ea4232..4b4cd18 100644
+--- a/runtime/src/hle/storage/dvd.cpp
++++ b/runtime/src/hle/storage/dvd.cpp
+@@ -788,7 +788,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
+ 
+ static void InitDvdWaitingQueues()
+ {
+-    constexpr uint32_t kQueueBase = 0x80343230;
++    constexpr uint32_t kQueueBase = 0x80342EF0;
+     for (uint32_t i = 0; i < 4; ++i) {
+         const uint32_t queue = kQueueBase + (i * 8);
+         Memory::Write32(queue + 0, queue);
+@@ -802,12 +802,12 @@ static void CompleteDvdCancelState()
+ 
+     // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
+     // The actual drive work is HLE'd, so complete pending cancel/reset waits.
+-    Memory::Write32(0x80386664, 0); // Canceling
+-    Memory::Write32(0x80386668, 0); // ResumeFromHere
+-    Memory::Write32(0x80386670, 0); // PausingFlag
+-    Memory::Write32(0x8038667C, 1); // CancelAllSync complete
+-    Memory::Write32(0x803866A8, 1); // PrepareReset complete
+-    Memory::Write32(0x803866F0, 0); // executing command block
++    Memory::Write32(0x80386364, 0); // Canceling
++    Memory::Write32(0x80386368, 0); // ResumeFromHere
++    Memory::Write32(0x80386370, 0); // PausingFlag
++    Memory::Write32(0x8038637C, 1); // CancelAllSync complete
++    Memory::Write32(0x803863A8, 1); // PrepareReset complete
++    Memory::Write32(0x803863F0, 0); // executing command block
+ }
+ 
+ // 0x8015EA1C -> DVDInit
+@@ -824,14 +824,14 @@ extern "C" void DVDInit_8015EA1C()
+ 
+     // 1. Initialize Global Flags (Emulate OS state)
+     // These addresses are standard OS globals for DVD context
+-    Memory::Write8(0x80386724, 1);   // Contexts initialized
+-    Memory::Write8(0x80386725, 1);   // LowInit called
+-    Memory::Write32(0x80386720, 0);  // Current context index
+-    Memory::Write8(0x803866a0, 1);   // DVDInit called flag
++    Memory::Write8(0x80386424, 1);   // Contexts initialized
++    Memory::Write8(0x80386425, 1);   // LowInit called
++    Memory::Write32(0x80386420, 0);  // Current context index
++    Memory::Write8(0x803863A0, 1);   // DVDInit called flag
+     CompleteDvdCancelState();
+ 
+     // 2. Initialize DVD Context structures (prevent crashes in callbacks)
+-    constexpr uint32_t kContextBase = 0x803434e0;
++    constexpr uint32_t kContextBase = 0x803431A0;
+     constexpr uint32_t kMagicValue = 0xFEEBDAED;
+     for (int i = 0; i < 4; i++) {
+         uint32_t ctx = kContextBase + i * 0x20;
+@@ -883,7 +883,7 @@ extern "C" void DVDInit_8015EA1C()
+     BuildAndPublishRuntimeFst();
+ 
+     // Initialize the translated DVD filesystem so it can use the published FST.
+-    constexpr uint32_t kDvdFsInitAddress = 0x8015DF1C;
++    constexpr uint32_t kDvdFsInitAddress = 0x8015DDDC;
+     if (TranslatedFunctionRegistry::FindByAddressPtr(kDvdFsInitAddress)) {
+         InvokeIndirectCpu(kDvdFsInitAddress, &GetPersistentCpuContext());
+     }
+@@ -1196,7 +1196,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
+     CopyToGuestAsDma(buffer, tempBuf.data(), tempBuf.size());
+     return finish(true);
+ }
++#ifndef MKW_RUNTIME_PRODUCT_NSMBW  // MKW address; a real function on US NSMBW
+ PPC_NATIVE_OVERRIDE(80166330, DVDLowRead_80166330, int32_t, (uint32_t b, uint32_t l, uint32_t o, uint32_t c), (b, l, o, c));
++#endif
+ 
+ // UnencryptedRead has the same completion and failure contract as DVDLowRead.
+ extern "C" int32_t DVDLowUnencryptedRead_80165708(uint32_t b, uint32_t l, uint32_t o, uint32_t c) {
+diff --git a/runtime/src/hle/storage/nand_api.cpp b/runtime/src/hle/storage/nand_api.cpp
+index 723569c..b3676e0 100644
+--- a/runtime/src/hle/storage/nand_api.cpp
++++ b/runtime/src/hle/storage/nand_api.cpp
+@@ -49,10 +49,10 @@ extern "C" int32_t NANDInit_HLE(void) {
+     ISFS_OpenLib_Initialize(&GetPersistentCpuContext());
+ 
+     // NANDHomeDir is at 0x80346D20 (from ESP_GetDataDir output)
+-    WriteGuestNandPath(0x80346D20, CurrentNandDataDir());
++    WriteGuestNandPath(0x803469E0, CurrentNandDataDir());
+ 
+     // Mark NAND as initialized (0x80386848 = 2)
+-    Memory::Write32(0x80386848, 2);
++    Memory::Write32(0x80386548, 2);
+ 
+     return NAND_RESULT_OK;
+ }
+diff --git a/runtime/src/hle/storage/nand_isfs.cpp b/runtime/src/hle/storage/nand_isfs.cpp
+index dd3cc1a..e831c28 100644
+--- a/runtime/src/hle/storage/nand_isfs.cpp
++++ b/runtime/src/hle/storage/nand_isfs.cpp
+@@ -409,7 +409,7 @@ extern "C" void NAND_IOS_OpenBody_HLE_801938FC(CpuContext* ctx) {
+     ctx->gpr[3] = static_cast<uint32_t>(result);
+     ctx->gpr[1] = ctx->gpr[1] + 32u;
+ }
+-REGISTER_NATIVE_FUNCTION_AS(0x801938FC, NAND_IOS_OpenBody_HLE_801938FC, "NAND_IOS_OpenBody_HLE_801938FC");
++REGISTER_NATIVE_FUNCTION_AS(0x801937BC, NAND_IOS_OpenBody_HLE_801938FC, "NAND_IOS_OpenBody_HLE_801938FC");
+ 
+ extern "C" int32_t NAND_IOS_Close_HLE(uint32_t fd) {
+     if (NandTraceEnabled()) RT_LOGF(RT_TAG_NAND, "trace IOS_Close(fd=%d)\n", fd);
+@@ -910,13 +910,13 @@ int32_t ISFS_OpenLib_Initialize(CpuContext* ctx) {
+ 
+             ctx->gpr[3] = heapBase;
+             ctx->gpr[4] = heapSize;
+-            ctx->lr = 0x80169BCCu;
+-            InvokeDirectCpu<0x801949B8u>(ctx);
++            ctx->lr = 0x80169A8Cu;
++            InvokeDirectCpu<0x80194878u>(ctx);
+             const uint32_t heapHandle = ctx->gpr[3];
+ 
+             ctx->gpr[3] = heapBase + heapSize;
+-            ctx->lr = 0x80169BCCu;
+-            InvokeDirectCpu<0x80193040u>(ctx);
++            ctx->lr = 0x80169A8Cu;
++            InvokeDirectCpu<0x80192F00u>(ctx);
+ 
+             ctx->gpr[3] = savedR3;
+             ctx->gpr[4] = savedR4;
+@@ -935,7 +935,7 @@ extern "C" void ISFS_OpenLib_HLE_80169BCC(CpuContext* ctx) {
+     ctx->gpr[3] = static_cast<uint32_t>(ISFS_OpenLib_Initialize(ctx));
+ }
+ 
+-REGISTER_NATIVE_FUNCTION_AS(0x80169BCC, ISFS_OpenLib_HLE_80169BCC, "ISFS_OpenLib_HLE_80169BCC");
++REGISTER_NATIVE_FUNCTION_AS(0x80169A8C, ISFS_OpenLib_HLE_80169BCC, "ISFS_OpenLib_HLE_80169BCC");
+ 
+ // ============================================================================
+ // IOS_Ioctlv HLE - Vector Ioctl for complex ISFS operations
+diff --git a/runtime/src/hle/task_thread.cpp b/runtime/src/hle/task_thread.cpp
+index dc4810d..f73edb7 100644
+--- a/runtime/src/hle/task_thread.cpp
++++ b/runtime/src/hle/task_thread.cpp
+@@ -162,7 +162,7 @@ extern "C" void TaskThread_run_HLE_80242d7c(CpuContext* ctx) {
+             cpu->gpr[3] = taskThread + kTaskMessageQueueOffset;
+             cpu->gpr[4] = outMsgPtr;
+             cpu->gpr[5] = 1; // OS_MESSAGE_BLOCK
+-            InvokeIndirectCpu(0x801A7424u, cpu); // OSReceiveMessage
++            InvokeIndirectCpu(0x801A72E4u, cpu); // OSReceiveMessage
+         }
+ 
+         const uint32_t job = Memory::Read32(outMsgPtr);
+@@ -198,7 +198,7 @@ extern "C" void TaskThread_run_HLE_80242d7c(CpuContext* ctx) {
+                     cpu->gpr[3] = doneQueue;
+                     cpu->gpr[4] = token;
+                     cpu->gpr[5] = 0; // OS_MESSAGE_NOBLOCK
+-                    InvokeIndirectCpu(0x801A735Cu, cpu); // OSSendMessage
++                    InvokeIndirectCpu(0x801A721Cu, cpu); // OSSendMessage
+                 }
+             }
+         }
+diff --git a/runtime/src/hle/vi.cpp b/runtime/src/hle/vi.cpp
+index 6eca8f7..65628a5 100644
+--- a/runtime/src/hle/vi.cpp
++++ b/runtime/src/hle/vi.cpp
+@@ -136,12 +136,12 @@ ViState g_vi;
+ 
+ 
+ // Guest-side state addresses used by the SDK's VI globals.
+-constexpr uint32_t kViInitializedFlagAddr   = 0x80386b38;
+-constexpr uint32_t kViTvFormatAddr          = 0x80386ba8;
+-constexpr uint32_t kViRenderWidthAddr       = 0x80350864;
+-constexpr uint32_t kViRenderHeightAddr      = 0x80350866;
+-constexpr uint32_t kViXfbWidthAddr          = 0x80350872;
+-constexpr uint32_t kViXfbHeightAddr         = 0x8035087c;
++constexpr uint32_t kViInitializedFlagAddr   = 0x80386838;
++constexpr uint32_t kViTvFormatAddr          = 0x803868A8;
++constexpr uint32_t kViRenderWidthAddr       = 0x80350524;
++constexpr uint32_t kViRenderHeightAddr      = 0x80350526;
++constexpr uint32_t kViXfbWidthAddr          = 0x80350532;
++constexpr uint32_t kViXfbHeightAddr         = 0x8035053C;
+ // Verified against this build's actual VIWaitForRetrace (0x801BCE30) disassembly: it polls
+ // lwz r30, -0x4e34(r13), and this project's manifest (nsmbw.yml) pins sda_base to 0x8042f980,
+ // so the guest-visible counter is 0x8042f980 - 0x4e34 = 0x8042ab4c, not the address below - the
+@@ -150,8 +150,8 @@ constexpr uint32_t kViXfbHeightAddr         = 0x8035087c;
+ // it was actually looking. Confirmed the fix's target address independently against the same
+ // function's second SDA-relative operand (r13-0x4e58, the retrace thread queue) landing on the
+ // same +0xa3f68 correction, before touching only the address actually proven to block execution.
+-constexpr uint32_t kViRetraceCountAddr      = 0x8042ab4c;
+-constexpr uint32_t kViTimingGuardAddr       = 0x80386b44;
++constexpr uint32_t kViRetraceCountAddr      = 0x8042A86C;
++constexpr uint32_t kViTimingGuardAddr       = 0x80386844;
+ // NSMBW's pre/post retrace callback slots, read off its own VISetPreRetraceCallback
+ // (0x801BC520) and VISetPostRetraceCallback (0x801BC570): each loads the old value, calls
+ // OSDisableInterrupts, stores the new one, restores, and returns the old. They swap
+@@ -159,14 +159,14 @@ constexpr uint32_t kViTimingGuardAddr       = 0x80386b44;
+ // bytes above the post slot in both titles, and the two setters appear in the same order,
+ // which is the cross-check that they have not been transposed.
+ #ifdef MKW_RUNTIME_PRODUCT_NSMBW
+-constexpr uint32_t kViPreRetraceCallback    = 0x8042AB20;
+-constexpr uint32_t kViPostRetraceCallback   = 0x8042AB1C;
++constexpr uint32_t kViPreRetraceCallback    = 0x8042A840;  // US (PAL 8042AB20)
++constexpr uint32_t kViPostRetraceCallback   = 0x8042A83C;  // US (PAL 8042AB1C)
+ #else
+-constexpr uint32_t kViPreRetraceCallback    = 0x80386bb8;
+-constexpr uint32_t kViPostRetraceCallback   = 0x80386bb4;
++constexpr uint32_t kViPreRetraceCallback    = 0x803868B8;
++constexpr uint32_t kViPostRetraceCallback   = 0x803868B4;
+ #endif
+-constexpr uint32_t kViNextFrameBufferAddr   = 0x80386ba0;
+-constexpr uint32_t kViNextFrameBufferHwAddr = 0x80350890;
++constexpr uint32_t kViNextFrameBufferAddr   = 0x803868A0;
++constexpr uint32_t kViNextFrameBufferHwAddr = 0x80350550;
+ // BISECT D1: temporarily reverted to 0x80386bc0 to find which post-GXInitTexObj change moved the
+ // stall earlier. (Candidate correct value is 0x8042ab28 - r13-0x4E58 via func_801B5DD0.)
+ // Thread queue for VIWaitForRetrace. NSMBW's is the queue its own VIWaitForRetrace
+@@ -174,13 +174,13 @@ constexpr uint32_t kViNextFrameBufferHwAddr = 0x80350890;
+ // same function polls the retrace counter at r13-0x4E34 = 0x8042AB4C, which matches
+ // kViRetraceCountAddr above and confirms the pair came from the same title.
+ #ifdef MKW_RUNTIME_PRODUCT_NSMBW
+-constexpr uint32_t kViRetraceQueueAddr      = 0x8042AB28;
++constexpr uint32_t kViRetraceQueueAddr      = 0x8042A848;  // US (PAL 8042AB28)
+ #else
+-constexpr uint32_t kViRetraceQueueAddr      = 0x80386bc0;
++constexpr uint32_t kViRetraceQueueAddr      = 0x803868C0;
+ #endif
+ 
+ // EGG::BaseSystem::sSystem pointer - must be non-null before post-retrace callback is valid
+-constexpr uint32_t kEggSSystemAddr = 0x80386F60;
++constexpr uint32_t kEggSSystemAddr = 0x80386C60;
+ 
+ std::chrono::microseconds IntervalForFormat(uint32_t tvFormat) {
+     // NTSC-ish defaults to 60 Hz; PAL uses 50 Hz.
+diff --git a/runtime/src/host_cpu_baseline.cpp b/runtime/src/host_cpu_baseline.cpp
+index 9d8157e..ed34dff 100644
+--- a/runtime/src/host_cpu_baseline.cpp
++++ b/runtime/src/host_cpu_baseline.cpp
+@@ -1,3 +1,4 @@
++#if defined(__x86_64__) || defined(_M_X64)
+ // Host ISA guard. Every other product target builds with -march=x86-64-v3, so a pre-Haswell
+ // Intel or pre-Excavator AMD machine would otherwise die on an illegal-instruction fault with no
+ // explanation. This TU alone skips that flag (own CMake object library, excluded from unity
+@@ -214,3 +215,5 @@ extern "C" int MkwHostCpuBaselineInit() {
+ __attribute__((constructor(101))) static void MkwHostCpuBaselineCtor() {
+     MkwHostCpuBaselineInit();
+ }
++
++#endif  // x86-64 only: other hosts have no ISA level to check
+diff --git a/runtime/src/product/nsmbw_controls.cpp b/runtime/src/product/nsmbw_controls.cpp
+index d0b2e6f..1d3a58a 100644
+--- a/runtime/src/product/nsmbw_controls.cpp
++++ b/runtime/src/product/nsmbw_controls.cpp
+@@ -15,9 +15,9 @@
+ //               isGameStop, GAME_STOP_PAUSE | GAME_STOP_OTASUKE_PAUSE).
+ //   Map       - WORLD_MAP scene (profile 3).
+ //   Gameplay  - STAGE scene (profile 5) in any other game mode.
+-// Addresses: m_startGameInfo = 0x80315E90 (NSMBW-Decomp syms.txt), mGameMode at +8 (u32, 4 x u8
++// Addresses: m_startGameInfo = 0x80315B90 (NSMBW-Decomp syms.txt), mGameMode at +8 (u32, 4 x u8
+ // before it; d_info.hpp). The game-stop word is read by isGameStop (func_800B3B50) as
+-// [r13 - 22360] with r13 = SDA base 0x8042F980 (nsmbw.yml) -> 0x8042A228.
++// [r13 - 22360] with r13 = SDA base 0x8042F6A0 (nsmbw.yml) -> 0x80429F48.
+ //
+ // A binding is one control or a combination of up to three joined with '+' ("back+start",
+ // "left_shoulder+right_shoulder"), which is down while every part is. A control that is part of a
+@@ -89,9 +89,9 @@ constexpr uint32_t kScreenRight = kWpadDown;
+ constexpr uint32_t kScreenUp = kWpadRight;
+ constexpr uint32_t kScreenDown = kWpadLeft;
+ 
+-constexpr uint32_t kGameStopAddr = 0x8042A228u;
++constexpr uint32_t kGameStopAddr = 0x80429F48u;
+ constexpr uint32_t kGameStopPauseMask = 0x1u | 0x4u; // GAME_STOP_PAUSE | GAME_STOP_OTASUKE_PAUSE
+-constexpr uint32_t kGameModeAddr = 0x80315E90u + 8u;
++constexpr uint32_t kGameModeAddr = 0x80315B90u + 8u;
+ constexpr uint32_t kGameModeTitle = 2, kGameModeTitleReplay = 3;
+ constexpr uint32_t kProfileWorldMap = 3, kProfileStage = 5;
+ 
+@@ -620,10 +620,10 @@ const char* ContextName(Context context) noexcept {
+ namespace {
+ // Whether a game object (fBase_c) of this profile is alive, from fManager_c's execute list: every
+ // created base is on it, also while the F10 menu stops its updates. The list is a cLineMg_c at
+-// 0x80377D34 (fManager_c's lists start at 0x80377D10, read by mainLoop 0x80162F50; execute is the
++// 0x80377A34 (fManager_c's lists start at 0x80377A10, read by mainLoop 0x80162E10; execute is the
+ // one at +36): {first, last}. Each node is a fLiNdBaPr_c {prev, next, owner, order}; the owner's
+ // fBase_c::mProfName is the u16 at +8 (f_base.hpp: mUniqueID, mParam, mProfName). Read-only.
+-constexpr uint32_t kExecuteListAddr = 0x80377D34u;
++constexpr uint32_t kExecuteListAddr = 0x80377A34u;
+ uint32_t FindProfile(uint16_t profile) {
+     uint32_t node = 0;
+     Memory::TryRead32(kExecuteListAddr, node);
+@@ -664,12 +664,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
+ 
+ // Any scene: it is a course (scene 5), not the world map as first assumed.
+ // The manager exists for the whole hint course, so "open" is its state machine leaving the idle
+-// state: its current state ID (+0x88) is 0x809930B8 from the course start until the block is hit,
+-// then 0x809930F8 (opening), 0x80993138 / 0x80993478 (waiting / cursor moving), 0x80993538
+-// (closing), and 0x809930B8 again once the list is gone (NSMBW_DUMP_HINT_LIST run with screenshots,
++// state: its current state ID (+0x88) is 0x809930F8 from the course start until the block is hit,
++// then 0x80993138 (opening), 0x80993178 / 0x809934B8 (waiting / cursor moving), 0x80993578
++// (closing), and 0x809930F8 again once the list is gone (NSMBW_DUMP_HINT_LIST run with screenshots,
+ // 2026-11-07). The state IDs are d_basesNP statics; the REL is linked at a fixed address
+-// (0x8076D680, nsmbw-d_basesNP.yml), so the idle one's address doesn't move.
+-constexpr uint32_t kHintListIdleState = 0x809930B8u;
++// (0x8076D6C0, nsmbw-d_basesNP.yml), so the idle one's address doesn't move.
++constexpr uint32_t kHintListIdleState = 0x809930F8u;
+ bool HintListOpen() {
+     static const bool off = std::getenv("NSMBW_NO_HINT_LIST_CONTEXT") != nullptr; // diagnostic A/B
+     if (off) return false;
+@@ -722,7 +722,7 @@ std::string AliveMenuProfiles() {
+ 
+ // The hint movie list confirms with A, not 2: it opens from a block inside a small course (scene
+ // 5), where the Gameplay bindings applied and the developer found B (bubble = A) confirmed and Y
+-// (run = 1) went back (2026-11-07). Its back check is 0x800B53F0, which asks mPad's core remote for
++// (run = 1) went back (2026-11-07). Its back check is 0x800B53A0, which asks mPad's core remote for
+ // 1 (0x200; 1 | B with a Nunchuk). So while it is open the Menu actions are used, with 2 and A
+ // swapped: confirm (normally 2) is sent as A, "A button" as 2; back stays 1. ListBit applies the
+ // swap to what is sent; the prompt glyphs use the same swap (it is its own inverse) to find the
+diff --git a/runtime/src/product/nsmbw_movie_skip.cpp b/runtime/src/product/nsmbw_movie_skip.cpp
+index bb5a62f..e9b177c 100644
+--- a/runtime/src/product/nsmbw_movie_skip.cpp
++++ b/runtime/src/product/nsmbw_movie_skip.cpp
+@@ -9,14 +9,14 @@
+ // the game while a skippable scene runs.
+ //
+ // When a scene counts as skippable (Skippable), read from guest memory every frame:
+-//   - only while the game-stop word 0x8042A228 is 0: not under the game's pause menu, a warning,
++//   - only while the game-stop word 0x80429F48 is 0: not under the game's pause menu, a warning,
+ //     or the F10 options menu (which sets HOME_MENU / OTASUKE_PAUSE there).
+-//   - Opening: scene profile 8 (MOVIE) with dScMovie_c::m_instance (0x8042A498) set, its mMovieId
++//   - Opening: scene profile 8 (MOVIE) with dScMovie_c::m_instance (0x8042A1B8) set, its mMovieId
+ //     (+0x198) 0 and mState (+0x164) 1 - the "playing" state of dScMovie_c's execute
+-//     (0x80922910, d_basesNP; the switch on mState at 0x809229F0).
+-//   - Hint movie: scene profile 5 (STAGE) with dInfo_c::m_startGameInfo.mGameMode (0x80315E98)
++//     (0x80922920, d_basesNP; the switch on mState at 0x80922A00).
++//   - Hint movie: scene profile 5 (STAGE) with dInfo_c::m_startGameInfo.mGameMode (0x80315B98)
+ //     4 (GAME_MODE_HINT_MOVIE, d_info.hpp) and player 1's replay object (dScStage_c::play walks
+-//     the four at 0x803744D0) present, so the replay has actually started.
++//     the four at 0x803741D0) present, so the replay has actually started.
+ // What the skip does is in nsmbw_kpad_overrides.cpp (RunMovieSkip).
+ 
+ #include "nsmbw_movie_skip.h"
+@@ -44,11 +44,11 @@ namespace {
+ namespace draw = nsmbw_menu_draw;
+ 
+ constexpr uint32_t kWpadMinus = 1u << 12;
+-constexpr uint32_t kGameStopAddr = 0x8042A228u;
+-constexpr uint32_t kMovieInstanceAddr = 0x8042A498u; // dScMovie_c::m_instance
++constexpr uint32_t kGameStopAddr = 0x80429F48u;
++constexpr uint32_t kMovieInstanceAddr = 0x8042A1B8u; // dScMovie_c::m_instance
+ constexpr uint32_t kMovieStateOffset = 0x164u, kMovieIdOffset = 0x198u;
+-constexpr uint32_t kGameModeAddr = 0x80315E90u + 8u;
+-constexpr uint32_t kReplayObjectsAddr = 0x803744D0u;
++constexpr uint32_t kGameModeAddr = 0x80315B90u + 8u;
++constexpr uint32_t kReplayObjectsAddr = 0x803741D0u;
+ constexpr uint32_t kProfileStage = 5, kProfileMovie = 8;
+ constexpr uint32_t kGameModeHintMovie = 4;
+ constexpr double kPromptSeconds = 4.0;
+@@ -100,7 +100,7 @@ uint32_t g_profile = 0xFFFFFFFFu;
+ std::array<bool, 4> g_minusHeld{};
+ 
+ // NSMBW_LOG_REPLAY=1: every 30 frames, the stop word and the words of player 1's replay object
+-// (the first of dScStage_c::play's four at 0x803744D0) that changed since the last dump - a replay
++// (the first of dScStage_c::play's four at 0x803741D0) that changed since the last dump - a replay
+ // that is advancing changes its position words, a held one doesn't. Written for the F10 / replay
+ // desync (2026-11-07).
+ void LogReplay() {
+diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
+index 8c96414..d23031f 100644
+--- a/runtime/src/product/nsmbw_options_menu.cpp
++++ b/runtime/src/product/nsmbw_options_menu.cpp
+@@ -156,23 +156,23 @@ std::vector<Row> BuildRows(int tab) {
+ }
+ 
+ // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
+-// r13 = 0x8042F980; see nsmbw_controls.cpp) and its GAME_STOP_HOME_MENU bit (d_game_com.hpp,
++// r13 = 0x8042F6A0; see nsmbw_controls.cpp) and its GAME_STOP_HOME_MENU bit (d_game_com.hpp,
+ // BIT_FLAG(3)): what the Wii HOME Menu set. While any bit is set, dActor_c / dMdActor_c / world-map
+ // actors and the score manager skip their update (d_actor.cpp:108, d_md_actor.cpp:34, d_wm_actor.cpp:34,
+ // d_SmallScoreManager.cpp:71) and the frozen scene keeps drawing, which is exactly the pause wanted
+ // under this menu. Written on the game thread (the overlay runs inside the VI retrace), so it can't
+ // race the game's own updates of the word.
+-constexpr uint32_t kGameStopAddr = 0x8042A228u;
++constexpr uint32_t kGameStopAddr = 0x80429F48u;
+ constexpr uint32_t kGameStopHomeMenu = 0x8u;
+ // GAME_STOP_OTASUKE_PAUSE (BIT_FLAG(2)) as well, for the replays (hint movies, Super Guide, the
+-// title screen's demo): dScStage_c::play (0x80102250) steps each player's replay from
++// title screen's demo): dScStage_c::play (0x80102140) steps each player's replay from
+ // dSys_c::execute, outside fManager_c::mainLoop, so the process stop below doesn't reach it. Its
+-// step (0x800DDD40) holds the replay only while PAUSE, OTASUKE_PAUSE or WARNING is set (or the
++// step (0x800DDC50) holds the replay only while PAUSE, OTASUKE_PAUSE or WARNING is set (or the
+ // real HOME Menu is up), not for HOME_MENU. With HOME_MENU alone the actors froze but the recorded
+ // input kept advancing one frame per frame, and every player was out of sync after the menu closed
+ // (developer report, 2026-11-07). OTASUKE_PAUSE is the bit the game itself sets for its pause
+ // during a hint movie. Every other reader of the word tests any bit (isGameStop(-1)) except
+-// 0x800D0DA0 / 0x800D1350, which mask out PAUSE / OTASUKE_PAUSE and still see HOME_MENU.
++// 0x800D0CB0 / 0x800D1260, which mask out PAUSE / OTASUKE_PAUSE and still see HOME_MENU.
+ constexpr uint32_t kGameStopOtasukePause = 0x4u;
+ uint32_t g_stopBitsAdded = 0; // only the bits this menu set
+ 
+@@ -186,14 +186,14 @@ bool g_soundPaused = false;
+ 
+ // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
+ // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
+-// fManager_c::mainLoop (0x80162F50, f_manager.cpp) skips each of its phases whose bit is set in the
+-// static fManager_c::m_StopProcInf - read at [r13 - 21232] = 0x8042A690. Setting the execute bit
++// fManager_c::mainLoop (0x80162E10, f_manager.cpp) skips each of its phases whose bit is set in the
++// static fManager_c::m_StopProcInf - read at [r13 - 21232] = 0x8042A3B0. Setting the execute bit
+ // stops every process's update while the draw phase keeps registering, so the frozen frame keeps
+ // drawing; create and delete stop too, so nothing spawns, disappears or changes scene meanwhile.
+ // Bits: CONNECT 0x1, CREATE 0x2, EXECUTE 0x4, DELETE 0x8, DRAW 0x10 (GET_PROC_FLAG(LOOP_PROC_e)).
+ // (The real HOME Menu skips mainLoop entirely, d_system.cpp, but it also skips drawing and shows
+ // its own picture; skipping mainLoop here would leave nothing drawn behind this menu.)
+-constexpr uint32_t kStopProcInfAddr = 0x8042A690u;
++constexpr uint32_t kStopProcInfAddr = 0x8042A3B0u;
+ constexpr uint32_t kProcStopBits = 0x2u | 0x4u | 0x8u;
+ uint32_t g_procBitsAdded = 0; // only the bits this menu set, so the game's own are never cleared
+ 
+@@ -234,7 +234,7 @@ void SetGameStopped(bool stopped) {
+ 
+ // ---- Sounds ---------------------------------------------------------------------------------------
+ // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
+-// the immediate Pausewindow_c::executeState_PauseDisp passes to startSystemSe at 0x8015B118).
++// the immediate Pausewindow_c::executeState_PauseDisp passes to startSystemSe at 0x8015AFD8).
+ // They have to start on the game thread, so they wait here until the KPAD override takes them
+ // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
+ enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
+diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
+index a63636b..f0b5957 100644
+--- a/runtime/src/product/nsmbw_product.cpp
++++ b/runtime/src/product/nsmbw_product.cpp
+@@ -84,12 +84,12 @@ namespace {
+ //     retail disc image header (New Super Mario Bros. Wii (Europe) (Rev 1).rvz, offset 0x58 in
+ //     the RVZ container - "SMNP" + "01" + disc 0 + version 1), not guessed or copied from MKW.
+ //   - MEM1 arena lo: derived from wiimj2d.dol's own BSS end (its header's bss_addr+bss_size =
+-//     0x80351980+0xDE59C = 0x8042FF1C, 0x20-aligned up), since the arena conventionally starts
++//     0x80351680+0xDE59C = 0x8042FC3C, 0x20-aligned up), since the arena conventionally starts
+ //     right after a game's static data - this is a reasoned derivation from NSMBW's own data, not
+ //     verified against real hardware, so treat it as a good-faith estimate, not a fact.
+ //   - Deliberately NOT seeded: IOS version/date stamps (MKW hardcodes IOS36; nothing in this
+ //     project confirms what IOS NSMBW actually boots under) and a precisely-tuned MEM1 arena hi
+-//     (reuses the same 0x817F0000 ceiling used for the stack pointer elsewhere in this file,
++//     (reuses the same 0x817F0040 ceiling used for the stack pointer elsewhere in this file,
+ //     which is conservative but not derived from NSMBW's own arena-init code).
+ void SeedLowMemDefaults() {
+     struct SeedEntry { uint32_t address; uint32_t value; const char* label; };
+@@ -97,13 +97,13 @@ void SeedLowMemDefaults() {
+     const uint32_t mem2Size = static_cast<uint32_t>(Memory::kMem2Size);
+     const uint32_t mem1End = Memory::kMem1CachedBase + mem1Size;
+     // _stack_addr, read from __init_registers (0x80004234-0x80004238: lis r1,-0x7fbd;
+-    // ori r1,r1,0xff20), the same instruction pair that sets r13 = 0x8042F980. The stack
+-    // sits above .bss (which ends at 0x8042FF1C) and grows down from here, so the arena
++    // ori r1,r1,0xff20), the same instruction pair that sets r13 = 0x8042F6A0. The stack
++    // sits above .bss (which ends at 0x8042FC3C) and grows down from here, so the arena
+     // cannot start until its top. Previously this was the BSS end, which put the whole
+     // stack inside the arena; OSInit's DCZeroRange(arenaLo, arenaHi - arenaLo) then wiped
+     // the live stack it was running on.
+-    const uint32_t mem1ArenaLo = 0x8043FF20u;
+-    const uint32_t mem1ArenaHi = 0x817F0000u; // ARENA_HI, NSMBW-Decomp system_constants.h
++    const uint32_t mem1ArenaLo = 0x8043FC40u;
++    const uint32_t mem1ArenaHi = 0x817F0040u; // ARENA_HI, NSMBW-Decomp system_constants.h
+     const uint32_t physicalMem2End = Memory::kMem2CachedBase + mem2Size;
+     constexpr uint32_t kIosReservedSize = 0x20000u;
+     constexpr uint32_t kIPCArenaSize = 0x20000u;
+@@ -117,8 +117,8 @@ void SeedLowMemDefaults() {
+     constexpr uint32_t kDvdFstReserveSize = 0x200000u;
+     g_dvdFstReservedSize = kDvdFstReserveSize;
+     g_dvdFstReservedBase = ipcBufLo - kDvdFstReserveSize;
+-    constexpr uint32_t kGameCode = 0x534D4E50u;       // "SMNP", read from the real disc header
+-    constexpr uint32_t kMakerDiscVersion = 0x30310001u; // "01" maker, disc 0, version 1 (Rev 1)
++    constexpr uint32_t kGameCode = 0x534D4E45u;       // "SMNE": USA disc (port of the PAL "SMNP")
++    constexpr uint32_t kMakerDiscVersion = 0x30310002u; // "01" maker, disc 0, version 2 (USA Rev 2)
+     // Same retail-vs-NDEV test as OS__GetConsoleType_8019f33c (os_init.cpp) - kept in sync so a
+     // guest read of this field and a guest call to OSGetConsoleType() never disagree.
+     constexpr uint32_t kRetailMem2Size = 64u * 1024u * 1024u;
+@@ -137,10 +137,10 @@ void SeedLowMemDefaults() {
+         // func_801AA940 itself gets a chance to run, so without this the cache is seen as NULL and
+         // that read permanently fails - the actual root cause of the OSSleepThread hang traced this
+         // session. This isn't a guess: it's the exact value func_801AA940 would itself store here.
+-        // 0x8042F980 = SDA1_BASE (r13), from generated_nsmbw/generated/RuntimeConfig.h -
++        // 0x8042F6A0 = SDA1_BASE (r13), from generated_nsmbw/generated/RuntimeConfig.h -
+         // NSMBWCompiled's own target doesn't have that header on its include path (only
+         // nsmbw_runtime_common does), so this is the literal value, not a re-derivation.
+-        {0x8042F980u - 20528u, 0x80000000u, "cached OSBootInfo* (func_801AA940 pre-seed)"},
++        {0x8042F6A0u - 20528u, 0x80000000u, "cached OSBootInfo* (func_801AA940 pre-seed)"},
+         {0x80003180u, kGameCode, "OS app game code"},
+         {0x80003194u, kGameCode, "OS app gamename"},
+         {0x800000F8u, static_cast<uint32_t>(TimeBaseContract::kBusClockHz), "__OSBusClock"},
+@@ -179,23 +179,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
+ 
+ // Mirrors main.cpp's SeedCpuContext(): r1 is the initial stack pointer. NSMBW's manifest
+ // (projects/nsmbw/nsmbw.yml) declares memory.base=0x80000000, memory.size=0x01800000, so guest
+-// RAM runs up to 0x81800000; 0x817F0000 leaves headroom below that top for whatever the game's
+-// own boot code further reserves, the same way MKW's own 0x81700000 sits below its RAM ceiling.
++// RAM runs up to 0x81800040; 0x817F0040 leaves headroom below that top for whatever the game's
++// own boot code further reserves, the same way MKW's own 0x81700040 sits below its RAM ceiling.
+ void SeedCpuContext(CpuContext& cpu) {
+-    cpu.gpr[1] = 0x817F0000u;
++    cpu.gpr[1] = 0x817F0040u;
+ }
+ 
+ // One real Wii address that must run before any other guest code touches its module: main.dol's
+ // own .ctors table (confirmed against the runtime's own load log: "_ctors (736 bytes) @
+-// 0x802EDCE0", immediately followed by "_dtors ... @ 0x802EDFC0"), and each REL's own load
++// 0x802ED9E0", immediately followed by "_dtors ... @ 0x802EDCC0"), and each REL's own load
+ // address, which is not just a translation seed - it's the exact address of that REL's real,
+ // decompiled _prolog() function (source/runtime/rel_init.cpp: `void _prolog() {
+ // ModuleConstructorsX(_ctors); finalizeProlog(); }`). On a real Wii, main.dol's ctors run before
+ // main() and OSLink() calls _prolog() for each module right after relocating it; we don't
+ // implement real OSLink (every REL's relocated image is embedded statically instead), so this is
+ // what stands in for both steps.
+-constexpr uint32_t kDolCtorStart = 0x802EDCE0u;
+-constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
++constexpr uint32_t kDolCtorStart = 0x802ED9E0u;
++constexpr uint32_t kDolCtorEnd = 0x802EDCC0u;
+ // d_en_bossNP was excluded for two stacked reasons this session, both now fixed:
+ //   1. RelFile.cs's ApplyRelocations mis-resolved cross-module relocations (reusing the
+ //      currently-relocating module's own baseAddress/Sections instead of the target module's),
+@@ -206,8 +206,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+ //      Decomp's real loader (DynamicModuleControl::do_link, source/dol/cLib/c_dylink.cpp) reads
+ //      the whole file, links it, then shrinks the heap block to fixSize+bssSize - discarding that
+ //      tail. Using the full file length as "resident size" inflated every REL's footprint enough
+-//      that d_en_bossNP's range [0x80B1CA10, 0x80BB502C) landed entirely inside d_enemiesNP's
+-//      [0x809A2D90, 0x80BB7FF0). Fixed in RelFile.cs (ComputeMaxSectionExtent): BSS - and so the
++//      that d_en_bossNP's range [0x80B1CA50, 0x80BB506C) landed entirely inside d_enemiesNP's
++//      [0x809A2DD0, 0x80BB8030). Fixed in RelFile.cs (ComputeMaxSectionExtent): BSS - and so the
+ //      total resident size - is now placed right after the last real section, matching
+ //      do_link()'s actual behavior. With that fix, all four RELs' real footprints are
+ //      non-overlapping and pack contiguously (small gaps of a few hundred bytes between them,
+@@ -222,14 +222,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+ // the retail .rel headers: prologSection is 1 and prologOffset is 0 for all four, and section 1
+ // starts at file offset 0xF0 (0xE0 for d_profileNP), just past each header and section table.
+ // Cross-checked against the translated bodies: func_80768680 is d_profileNP's real _prolog (it
+-// loads its own _ctors at 0x8076A678 and returns to 0x80768698); func_807685A0 is header bytes,
++// loads its own _ctors at 0x8076A6B8 and returns to 0x807686D8); func_807685A0 is header bytes,
+ // which the translator still decoded into a function, so the old addresses called something that
+ // looked callable and no REL constructor ever ran.
+ constexpr uint32_t kRelPrologAddresses[] = {
+-    0x8076D770u, // d_basesNP    _prolog (file base 0x8076D680 + section 1 at 0xF0, prolog offset 0)
+-    0x80B1CA10u, // d_en_bossNP  _prolog (file base 0x80B1C920 + section 1 at 0xF0, prolog offset 0)
+-    0x809A2D90u, // d_enemiesNP  _prolog (file base 0x809A2CA0 + section 1 at 0xF0, prolog offset 0)
+-    0x807685A0u, // d_profileNP  _prolog (file base 0x807684C0 + section 1 at 0xE0, prolog offset 0)
++    0x8076D7B0u, // d_basesNP    _prolog (file base 0x8076D6C0 + section 1 at 0xF0, prolog offset 0)
++    0x80B1CA50u, // d_en_bossNP  _prolog (file base 0x80B1C960 + section 1 at 0xF0, prolog offset 0)
++    0x809A2DD0u, // d_enemiesNP  _prolog (file base 0x809A2CE0 + section 1 at 0xF0, prolog offset 0)
++    0x807685E0u, // d_profileNP  _prolog (file base 0x807684C0 + section 1 at 0xE0, prolog offset 0)
+ };
+ 
+ // A bad guest constructor must not take down the whole boot sequence - matches
+@@ -239,7 +239,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
+     MkwJmpBuf jumpBuf;
+     g_sehJumpTarget = &jumpBuf;
+     if (MKW_SETJMP(jumpBuf) == 0) {
+-        cpu.gpr[1] = 0x817F0000u;
++        cpu.gpr[1] = 0x817F0040u;
+         InvokeIndirectCpu(address, &cpu);
+     } else {
+         std::fprintf(stderr,
+@@ -271,6 +271,12 @@ void RunGuestConstructors(CpuContext& cpu) {
+ 
+     std::printf("[nsmbw] Running REL _prolog (static constructors) for each of the 4 RELs...\n");
+     for (uint32_t prolog : kRelPrologAddresses) {
++        uint32_t c0 = 0, c1 = 0;
++        Memory::TryRead32(0x8076A598u, c0);
++        Memory::TryRead32(0x8076A59Cu, c1);
++        std::printf("[nsmbw]   REL _prolog 0x%08X... (profile ctors table: %08X %08X)\n", prolog, c0, c1);
++        std::fflush(stdout);
++        if (prolog == 0x807685E0u && std::getenv("NSMBW_TRACE_PROFILE")) DiagRecentCalls::g_traceBudget = 300;
+         InvokeGuestCallGuarded(prolog, cpu, "REL _prolog");
+     }
+ 
+@@ -733,7 +739,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+     }
+     std::error_code ec;
+ 
+-    const auto saveDir = RuntimeConfigFile::ApplicationDataDirectory() / "NAND" / "title" / "00010004" / "534d4e50";
++    const auto saveDir = RuntimeConfigFile::ApplicationDataDirectory() / "NAND" / "title" / "00010004" / "534d4e45";
+     if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
+         const auto removed = std::filesystem::remove_all(saveDir, ec);
+         std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
+@@ -863,7 +869,7 @@ int main() {
+     SeedLowMemDefaults();
+     // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
+     NsmbwEnsureDiscFolder();
+-    // Must precede the guest entry point. NSMBW's own DVDInit (0x801CAE70) inlines
++    // Must precede the guest entry point. NSMBW's own DVDInit (0x801CAD30) inlines
+     // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
+     // zero - so the FST has to be published before the guest starts, or every disc path lookup
+     // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
+@@ -1068,11 +1074,11 @@ int main() {
+     // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
+     // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
+     // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
+-    // before main ever saw it. Proven with a watchpoint on fProfListMg_c::m_data_p (0x8042A698):
+-    // d_profileNP's _prolog set it to 0x8076A828, then func_80004600 zeroed it, and fBase_make
++    // before main ever saw it. Proven with a watchpoint on fProfListMg_c::m_data_p (0x8042A3B8):
++    // d_profileNP's _prolog set it to 0x8076A868, then func_80004600 zeroed it, and fBase_make
+     // later virtual-called through the null list. They now run from the 0x80004040 hook in
+     // projects/nsmbw/native/nsmbw_guest_ctor_hook.cpp, which sits after __init_data and
+-    // immediately before __start calls main (0x800CA080).
++    // immediately before __start calls main (0x800C9F90).
+ 
+     std::printf("[nsmbw] Invoking entry point 0x%08X...\n", kNsmbwEntryAddress);
+     // FatalMissingGuestTarget (an unimplemented HLE call) already exits cleanly on its own - this
+diff --git a/runtime/src/recomp_mod_loader.cpp b/runtime/src/recomp_mod_loader.cpp
+index 104ff0d..d99697d 100644
+--- a/runtime/src/recomp_mod_loader.cpp
++++ b/runtime/src/recomp_mod_loader.cpp
+@@ -199,7 +199,7 @@ bool IsKnownBaseRelLoaderWrite(const ExecutableRange& range) {
+     // The game copies and relocates REL sections before executing them. Those
+     // writes are normal loading/linking, not runtime code patches.
+     return (cpu->lr >= 0x8000A000u && cpu->lr < 0x8000A400u) ||
+-           (cpu->lr >= 0x801A6000u && cpu->lr < 0x801A7000u);
++           (cpu->lr >= 0x801A5EC0u && cpu->lr < 0x801A6EC0u);
+ }
+ 
+ } // namespace
+diff --git a/runtime/src/system_bridge.cpp b/runtime/src/system_bridge.cpp
+index 8b07d12..1e14a7f 100644
+--- a/runtime/src/system_bridge.cpp
++++ b/runtime/src/system_bridge.cpp
+@@ -334,8 +334,8 @@ void SystemBridge::Initialize() {
+     // These set up vtables and other critical infrastructure
+     RT_LOG(RT_TAG_RUNTIME) << "Running static constructors for main DOL..." << std::endl;
+ 
+-    const uint32_t dolCtorStart = 0x80244DE0;
+-    const uint32_t dolCtorEnd = 0x80244EA0;
++    const uint32_t dolCtorStart = 0x80244CA0;
++    const uint32_t dolCtorEnd = 0x80244D60;
+ 
+     int dolCount = 0;
+     for (uint32_t addr = dolCtorStart; addr < dolCtorEnd; addr += 4) {
+@@ -484,7 +484,7 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
+     };
+ 
+     std::vector<SeedEntry> entries;
+-    constexpr uint32_t kMem1ArenaLoDefault = 0x80399180u;
++    constexpr uint32_t kMem1ArenaLoDefault = 0x80398E80u;
+     uint32_t mem1ArenaHiDefault = 0x817f0520u;
+     constexpr uint32_t kBusClockHz =
+         static_cast<uint32_t>(TimeBaseContract::kBusClockHz);
+diff --git a/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs b/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs
+index 3a295f0..60c5df9 100644
+--- a/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs
++++ b/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs
+@@ -27,9 +27,23 @@ internal static class AssemblyBlobWriter
+         // allocatable-only flag plus an explicit @progbits type. The build always targets
+         // whichever platform the translator itself runs on (there is no cross-compilation
+         // support), so that's what this picks the section syntax from.
+-        assembly.AppendLine(OperatingSystem.IsWindows()
+-            ? ".section .rdata,\"dr\""
+-            : ".section .rodata,\"a\",@progbits");
++        if (OperatingSystem.IsWindows())
++        {
++            assembly.AppendLine(".section .rdata,\"dr\"");
++            assembly.AppendLine("#define MKW_BLOB_SYM(x) x");
++        }
++        else
++        {
++            // .S files are preprocessed, so one file serves ELF and Mach-O (macOS: C symbols
++            // carry a leading underscore and read-only data lives in __TEXT,__const).
++            assembly.AppendLine("#if defined(__APPLE__)");
++            assembly.AppendLine(".section __TEXT,__const");
++            assembly.AppendLine("#define MKW_BLOB_SYM(x) _##x");
++            assembly.AppendLine("#else");
++            assembly.AppendLine(".section .rodata,\"a\",@progbits");
++            assembly.AppendLine("#define MKW_BLOB_SYM(x) x");
++            assembly.AppendLine("#endif");
++        }
+         assembly.AppendLine();
+ 
+         foreach (var blob in blobs)
+@@ -40,8 +54,8 @@ internal static class AssemblyBlobWriter
+             var hash = ChecksumUtilities.Sha256Hex(blob.Data.Span);
+             assembly.AppendLine($"// {blob.Comment}; sha256={hash}");
+             assembly.AppendLine(".p2align 4");
+-            assembly.AppendLine($".globl {blob.Symbol}");
+-            assembly.AppendLine($"{blob.Symbol}:");
++            assembly.AppendLine($".globl MKW_BLOB_SYM({blob.Symbol})");
++            assembly.AppendLine($"MKW_BLOB_SYM({blob.Symbol}):");
+             var referencePath = Path.Combine(blobReferenceDirectory, blob.FileName);
+             assembly.AppendLine($".incbin \"{SanitizeAssemblyPath(referencePath)}\"");
+             assembly.AppendLine();
+@@ -59,7 +73,9 @@ internal static class AssemblyBlobWriter
+             // object linked into the binary already does (the norm on modern toolchains, just not
+             // producible without an explicit section since this file is hand-assembled, not
+             // compiler-emitted).
++            assembly.AppendLine("#if !defined(__APPLE__)");
+             assembly.AppendLine(".section .note.GNU-stack,\"\",@progbits");
++            assembly.AppendLine("#endif");
+         }
+         FileOutput.WriteTextIfChanged(assemblyPath, assembly.ToString());
+     }
