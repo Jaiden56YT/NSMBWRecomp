@@ -187,4 +187,8 @@ Same host code as the Mac: SDL2 + Mesa desktop GL 4.3 core (function pointers lo
 `SDL_GL_GetProcAddress`, `host/gl.h`/`gl.c`), the emulator on a 32 MB-stack thread, files next to the
 .nro (`sdmc:/switch/nsmbw/`), log in `nsmbw.log` there. Joy-Con/Pro buttons by position:
 B = 2 (jump), Y = 1 (run), A = A, X = shake, + / − as on the remote.
-Not yet run on hardware.
+Over USB (DBI in MTP mode) the files go up with SwitchDrop's `switchsend`
+(`/Applications/SwitchDrop.app/Contents/MacOS/switchsend send "1: SD Card" switch/nsmbw <files>`).
+It skips files whose name already exists, so a new build goes up as `switch/nsmbw-v2/nsmbw-v2.nro`
+(it falls back to the data in `switch/nsmbw/`, and writes `switch/nsmbw/nsmbw.log`).
+Uploaded 2026-11-14; not yet run on hardware.
