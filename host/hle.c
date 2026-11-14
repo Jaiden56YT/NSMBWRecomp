@@ -134,23 +134,6 @@ int hle_dispatch(CPUState* cpu) {
         }
         return 0;
     }
-    case 0x80196600u: {  /* CheckIfPlayingSound(mgr, id): WORKAROUND, see below */
-        /* NW4R keeps some sequence sounds "playing" forever here (the voices
-           have ended; the cause is still unknown), which blocks waits such as
-           dScGameSetup_c::StateID_VoiceEndWait. Run the real check, but if the
-           same sound has been reported playing for 4 s straight, say it ended. */
-        static u32 watch_id; static u64 since;
-        u32 id = cpu->gpr[4];
-        if (id != watch_id) { watch_id = id; since = cpu->timebase; }
-        if (cpu->timebase - since > 4u * 60750000u) {
-            static int logged;
-            if (logged++ < 5) LOG("hle: sound %u still 'playing' after 4 s; reporting it finished (workaround)\n", id);
-            cpu->gpr[3] = 0;
-            cpu->pc = cpu->lr;
-            return 1;
-        }
-        return 0;
-    }
     case 0x801E1060u: {  /* WPADSetConnectCallback(chan, cb): report remote 1 as connected */
         void host_queue_guest_call(u32 fn, u32 r3, u32 r4);
         if (cpu->gpr[3] == 0 && cpu->gpr[4]) {

@@ -130,8 +130,11 @@ was transformed by zero matrices.
   counts calls; `-m ADDR` dumps memory at exit; `-ra SECS` skips rendering until a guest time.
 - WPAD: `WPADGetInfoAsync` is replaced (battery info + callback); `WPADSetConnectCallback` gets a
   "connected" event for remote 1. Guest callbacks run like interrupts (`host_queue_guest_call`).
-- Workaround: `CheckIfPlayingSound` reports a sound finished after 4 s. Some NW4R sequence sounds never
-  leave the playing list even though their voices ended; this blocked `dScGameSetup_c::StateID_VoiceEndWait`.
+- Fixed (was a 4 s workaround): NW4R sequence sounds never finished. NW4R gives one-shot voices a loop
+  address inside its zero buffer and treats a voice as done once the DSP position lands there
+  (`AxVoice::IsPlayFinished`, read in the CC0 Wii Sports decomp `doldecomp/ogws`). The DSP always jumps to
+  the loop address at the end of a sample; the loop flag only decides whether it keeps running. `ax.c`
+  now does the same.
 
 Reached: file select → player select → opening cutscene → World 1 map → **World 1-1, playable**
 (Mario runs, jumps, collects; Goombas kill him when the scripted test input runs into them).
@@ -163,7 +166,6 @@ What changed:
 
 ## Next
 1. More headroom for the Switch: move the vertex transform to a vertex shader, cut GL state changes.
-2. Root-cause the stuck NW4R sequence sounds (remove the workaround).
 3. Garbled icons in the item menu (a texture format decoding bug).
 2. Not yet in the renderer: indirect textures, fog, z-textures, culling, EFB copies back to RAM, upscaling.
 3. Audio (AX mixing), real-time pacing, then the Switch build.

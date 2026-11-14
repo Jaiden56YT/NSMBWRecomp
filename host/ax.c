@@ -82,8 +82,13 @@ static s16 next_sample(Voice* vc) {
         return 0;
     }
     if (vc->cur > vc->end) {
+        /* The accelerator always jumps to the loop address at the end; the loop
+           flag only says whether the voice keeps running. NW4R relies on this:
+           one-shot voices get a loop address inside its zero buffer, and a sound
+           counts as finished once the position lands there
+           (nw4r::snd::detail::AxVoice::IsPlayFinished, see doldecomp/ogws). */
+        vc->cur = vc->loop;
         if (vc->loopflag) {
-            vc->cur = vc->loop;
             if (vc->format == 0 && !vc->stream) {
                 vc->ps = r16(vc->pb + PB_LOOP_PS);
                 vc->yn1 = (s16)r16(vc->pb + PB_LOOP_YN1);
