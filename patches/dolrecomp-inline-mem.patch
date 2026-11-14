@@ -11,7 +11,7 @@ index 27297aa..6d23071 100644
  #include <stdio.h>
  #include <stdlib.h>
 diff --git a/src/cpu/cpu.h b/src/cpu/cpu.h
-index 29510f8..fd3d7a5 100644
+index 29510f8..f458edf 100644
 --- a/src/cpu/cpu.h
 +++ b/src/cpu/cpu.h
 @@ -228,4 +228,52 @@ void ppc_lswx(CPUState* cpu, u8 rD, u8 rA, u8 rB, u32 cia);
@@ -25,7 +25,7 @@ index 29510f8..fd3d7a5 100644
 +   out-of-line path. cpu.c defines DOLRECOMP_CPU_IMPL to get the real ones. */
 +#if !defined(DOLRECOMP_CPU_IMPL) && !defined(DOLRECOMP_NO_INLINE_MEM)
 +#include <string.h>
-+static inline u8* dr_fast_host(CPUState* cpu, u32 addr, u32 size) {
++static inline __attribute__((always_inline)) u8* dr_fast_host(CPUState* cpu, u32 addr, u32 size) {
 +    if (addr & 0x80000000u) {
 +        u32 off = addr & 0x3FFFFFFFu;  /* 0x8/0xC -> MEM1 offset, 0x9/0xD -> 0x1xxxxxxx */
 +        if (off + size <= cpu->ram_size) return cpu->ram + off;
@@ -34,15 +34,15 @@ index 29510f8..fd3d7a5 100644
 +    }
 +    return 0;
 +}
-+static inline int dr_fast_store_ok(CPUState* cpu) { return !cpu->reserve_valid && !g_mem_write_journal; }
++static inline __attribute__((always_inline)) int dr_fast_store_ok(CPUState* cpu) { return !cpu->reserve_valid && !g_mem_write_journal; }
 +#define DR_FAST_READ(T, N, SWAP)                                              \
-+    static inline T mem_read##N##_inl(CPUState* cpu, u32 addr) {              \
++    static inline __attribute__((always_inline)) T mem_read##N##_inl(CPUState* cpu, u32 addr) {              \
 +        u8* p = dr_fast_host(cpu, addr, N / 8);                               \
 +        if (__builtin_expect(p != 0, 1)) { T v; memcpy(&v, p, sizeof v); return SWAP(v); } \
 +        return mem_read##N(cpu, addr);                                        \
 +    }
 +#define DR_FAST_WRITE(T, N, SWAP)                                             \
-+    static inline void mem_write##N##_inl(CPUState* cpu, u32 addr, T value) { \
++    static inline __attribute__((always_inline)) void mem_write##N##_inl(CPUState* cpu, u32 addr, T value) { \
 +        u8* p = dr_fast_host(cpu, addr, N / 8);                               \
 +        if (__builtin_expect(p != 0 && dr_fast_store_ok(cpu), 1)) { T v = SWAP(value); memcpy(p, &v, sizeof v); return; } \
 +        mem_write##N(cpu, addr, value);                                       \

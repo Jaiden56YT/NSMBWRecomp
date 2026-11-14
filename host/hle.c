@@ -108,6 +108,18 @@ static void guest_printf(CPUState* cpu, u32 fmt_addr, int first_gpr, char* out, 
     out[n] = 0;
 }
 
+/* Quick pre-check for the dispatch loop: one bit per (pc >> 2) & 0xFFFF,
+   set for every address hle_dispatch handles. Keep in step with the cases. */
+u8 g_hle_filter[0x10000 / 8];
+void hle_init(void) {
+    static const u32 hooked[] = {LINK_RETURN_MAGIC, 0x801ED3A0u, 0x801ED3B0u, 0x8015FC10u, 0x801E1060u,
+                                 0x801E12C0u, 0x801E0F40u, ADDR_OSLINK, ADDR_OSLINKFIXED, ADDR_OSREPORT};
+    for (unsigned i = 0; i < sizeof(hooked) / sizeof(hooked[0]); i++) {
+        u32 k = (hooked[i] >> 2) & 0xFFFF;
+        g_hle_filter[k >> 3] |= (u8)(1u << (k & 7));
+    }
+}
+
 /* Returns 1 if the call at cpu->pc was handled (and returned to lr). */
 int hle_dispatch(CPUState* cpu) {
     switch (cpu->pc) {

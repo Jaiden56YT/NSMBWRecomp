@@ -304,10 +304,13 @@ void gx_start_render_thread(void) {
     }
 }
 
-/* End of a batch of FIFO data: hand it to the renderer. */
+/* End of a batch of FIFO data: hand it to the renderer, in chunks of at
+   least 64 KB (waking the render thread costs a system call) or at once
+   when a frame or a draw-done/token sync point went by. */
+static int rq_sync_point;
 static void rq_flush(void) {
-    if (rq_threaded) rq_publish();
-    else { rq_publish(); rq_replay(); }
+    if (!rq_threaded) { rq_publish(); rq_replay(); return; }
+    if (rq_sync_point || rq_wr - atomic_load(&rq_head) >= 65536) { rq_publish(); rq_sync_point = 0; }
 }
 
 
@@ -337,6 +340,7 @@ static void bp_write(u32 cmd) {
     switch (reg) {
     case 0x45:  /* PE_DONE: draw done */
         g_pe_done++;
+        rq_sync_point = 1;
         { static int n; if (n++ < 5) LOG("gx: draw done (PE_CTRL %04X)\n", mmio_get16(PE_CTRL)); }
         mmio_set16(PE_CTRL, (u16)(mmio_get16(PE_CTRL) | 0x8));
         pe_update_pi();
@@ -350,6 +354,7 @@ static void bp_write(u32 cmd) {
         pe_update_pi();
         break;
     case 0x52:  /* EFB copy execute */
+        rq_sync_point = 1;
         if (val & 0x4000) {  /* copy to XFB: a frame ends */
             g_gx_frames++;
             if (rq_threaded) {
@@ -479,7 +484,10 @@ static u8* phys_ptr(u32 phys) {
     return NULL;
 }
 
-static u8 gp_buf[1 << 17];
+/* Bytes from the GPU FIFO not yet parsed (an unfinished command), starting
+   at FIFO address pend_rp. New data is appended rather than re-gathered. */
+static u8 gp_buf[1 << 18];
+static u32 pend_len, pend_rp = ~0u;
 
 /* Runs the GPU over everything between its read and write pointers. */
 static void gp_process(void) {
@@ -490,19 +498,38 @@ static void gp_process(void) {
     u32 wp = cp_reg32(0xCC000034u) & 0x3FFFFFFFu;
     u32 rp = cp_reg32(0xCC000038u) & 0x3FFFFFFFu;
     if (!base || end <= base || rp == wp) return;
-    /* Gather rp..wp (possibly wrapping) into a linear buffer. */
-    u32 n = 0, p = rp;
-    while (p != wp && n < sizeof(gp_buf)) {
-        u8* h = phys_ptr(p);
-        gp_buf[n++] = h ? *h : 0;
-        p += 1;
-        if (p >= end) p = (p + 31) & ~31u;
-        if (p >= ((end + 31) & ~31u)) p = base;  /* bursts wrap once past end */
+    u32 wrap = (end + 31) & ~31u;  /* bursts wrap once past end */
+    if (rp != pend_rp) pend_len = 0;  /* the game moved the FIFO: start over */
+    /* Next byte to fetch: rp + pend_len, with wrapping. */
+    u32 p = rp;
+    for (u32 left = pend_len; left;) {
+        u32 step = wrap - p < left ? wrap - p : left;
+        p += step; left -= step;
+        if (p >= wrap) p = base;
     }
-    u32 used = gx_run(gp_buf, n, 0);
+    while (p != wp && pend_len < sizeof(gp_buf)) {
+        u32 stop = wp > p ? wp : wrap;  /* contiguous run */
+        u32 n = stop - p;
+        if (n > sizeof(gp_buf) - pend_len) n = (u32)sizeof(gp_buf) - pend_len;
+        u8* h = phys_ptr(p);
+        if (h) memcpy(gp_buf + pend_len, h, n); else memset(gp_buf + pend_len, 0, n);
+        pend_len += n;
+        p += n;
+        if (p >= wrap) p = base;
+    }
+    u32 used = gx_run(gp_buf, pend_len, 0);
     rq_flush();
-    for (u32 i = 0; i < used; i++) { rp += 1; if (rp >= ((end + 31) & ~31u)) rp = base; }
-    cp_set32(0xCC000038u, rp);
+    if (used) {
+        memmove(gp_buf, gp_buf + used, pend_len - used);
+        pend_len -= used;
+        for (u32 left = used; left;) {
+            u32 step = wrap - rp < left ? wrap - rp : left;
+            rp += step; left -= step;
+            if (rp >= wrap) rp = base;
+        }
+        cp_set32(0xCC000038u, rp);
+    }
+    pend_rp = rp;
 }
 
 /* The write-gather pipe collects 32 bytes, then writes them as one burst

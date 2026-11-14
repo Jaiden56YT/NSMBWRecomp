@@ -68,16 +68,23 @@ static const char* g_press;
 extern u32 g_input_script_hold;
 
 static void scripted_input(CPUState* cpu) {
+    static double* at; static u32* btn; static int n = -1;
     if (!g_press) return;
+    if (n < 0) {  /* parse once */
+        n = 0;
+        for (const char* p = g_press; *p; p++) if (*p == ',') n++;
+        at = calloc((size_t)n + 1, sizeof(*at)); btn = calloc((size_t)n + 1, sizeof(*btn));
+        n = 0;
+        for (const char* p = g_press; p && *p; n++) {
+            at[n] = strtod(p, (char**)&p);
+            if (*p == ':') p++;
+            btn[n] = (u32)strtoul(p, (char**)&p, 16);
+            if (*p == ',') p++;
+        }
+    }
     double t = cpu->timebase / 60750000.0;
     u32 hold = 0;
-    for (const char* p = g_press; p && *p;) {
-        double at = strtod(p, (char**)&p);
-        if (*p == ':') p++;
-        u32 btn = (u32)strtoul(p, (char**)&p, 16);
-        if (t >= at && t < at + 0.2) hold |= btn;
-        if (*p == ',') p++;
-    }
+    for (int i = 0; i < n; i++) if (t >= at[i] && t < at[i] + 0.2) hold |= btn[i];
     g_input_script_hold = hold;
 }
 
@@ -344,6 +351,7 @@ int main(int argc, char** argv) {
     boot_setup_lowmem(&cpu);
     ios_init(&cpu);
     gx_init(&cpu);
+    { void hle_init(void); hle_init(); }
     if (!g_norender) {
         int render_init(CPUState*);
         void gx_start_render_thread(void);
@@ -383,7 +391,11 @@ int main(int argc, char** argv) {
         }
         if (callback_returned(&cpu)) continue;
         maybe_run_callback(&cpu);
-        if (hle_dispatch(&cpu)) continue;
+        {
+            extern u8 g_hle_filter[];
+            u32 k = (cpu.pc >> 2) & 0xFFFF;
+            if ((g_hle_filter[k >> 3] >> (k & 7)) & 1) { if (hle_dispatch(&cpu)) continue; }
+        }
         DolRecompFunction fn = nsmbw_find_code(cpu.pc);
         if (!fn) {
             LOG("stop: no code at %08X (came from %08X)\n", cpu.pc, last_pc);
@@ -420,6 +432,10 @@ int main(int argc, char** argv) {
             if (cpu.exception & ~PPC_EXC_SYSTEM_CALL) break;
             cpu.exception = 0;
         }
+        /* Hardware, IOS and interrupt checks every 8 blocks: a block is often
+           only a few instructions (every call returns here), and these
+           checks cost more than the guest code between them. */
+        if ((++blocks & 7) != 0) continue;
         if ((blocks & 0x3FF) == 0) scripted_input(&cpu);
         mmio_tick(&cpu);
         ios_tick(&cpu);
@@ -436,7 +452,6 @@ int main(int argc, char** argv) {
                 os_enter_exception(&cpu);
             }
         }
-        blocks++;
     }
     dump_threads(&cpu);
     if (g_stack_sampling) print_stacks();
