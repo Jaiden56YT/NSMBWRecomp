@@ -58,6 +58,7 @@
     X(PFNGLUNIFORM1IPROC, glUniform1i) \
     X(PFNGLUNIFORM2FPROC, glUniform2f) \
     X(PFNGLUNIFORM4FVPROC, glUniform4fv) \
+    X(PFNGLUNIFORM4IVPROC, glUniform4iv) \
     X(PFNGLUSEPROGRAMPROC, glUseProgram) \
     X(PFNGLVERTEXATTRIBPOINTERPROC, glVertexAttribPointer) \
     X(PFNGLVIEWPORTPROC, glViewport) \
@@ -115,6 +116,7 @@ GL_LIST(GL_DECLARE)
 #define glUniform1i p_glUniform1i
 #define glUniform2f p_glUniform2f
 #define glUniform4fv p_glUniform4fv
+#define glUniform4iv p_glUniform4iv
 #define glUseProgram p_glUseProgram
 #define glVertexAttribPointer p_glVertexAttribPointer
 #define glViewport p_glViewport
