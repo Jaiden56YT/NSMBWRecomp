@@ -1,0 +1,449 @@
+// Native override for 0x801BDED0, a one-line leaf that just returns the guest global at
+// 0x8042A86C (kViRetraceCountAddr - r13-0x4E34, matching this project's sda_base) - i.e. it's
+// NSMBW's "read the current VI retrace tick" accessor.
+//
+// Found while chasing func_801AF710's boot stall, right after the disk-ID-check fix
+// (nsmbw_disk_id_check_sync.cpp) cleared the previous blocker: func_801AF710 calls this twice and
+// spins (`bl 0x801BDED0; ...; bl 0x801BDED0; subf r0,r24,r3; cmpwi r0,1; blt back`) until the
+// delta between two reads is >=1 - a "wait for at least one VI retrace tick to pass" idiom. Same
+// root cause as the SelectThread bug this session already fixed: the retrace count only actually
+// advances from inside SelectThread's own idle loop (which polls VI_HLE_PollRetrace), and this is
+// a tight spin with no yield point, so it never reaches that idle loop no matter how long it runs.
+//
+// Fix: pump one VI_HLE_PollRetrace() call every time this specific accessor is read, so time
+// visibly advances for whoever's polling it - the general fix for this whole class of "wait for
+// the tick to move" loop (not particular to func_801AF710; anything else reading ticks through
+// this same accessor benefits too), consistent with the SelectThread fix's own approach of running
+// VI's real retrace-advance logic rather than inventing a fake counter increment.
+#include "hle_stubs.h"
+#include <aurora/env.hpp>
+#include "fiber_manager.h"
+#include "ppc_runtime.h"
+#include "abi_bridge.h"
+#include "memory.h"
+#include <cstdio>
+#include <cstdlib>
+
+// Keyboard input used to be polled here and injected as "just pressed" edges into
+// EGG::CoreController::downTrigger. Since 2026-09-20 real samples go through KPADRead instead
+// (nsmbw_kpad_overrides.cpp), which also gives held/release state; this file only pumps VI,
+// prints the boot-time fader diagnostics, and drives the opt-in self-test presses.
+extern "C" uint32_t g_nsmbwCurrentSceneProfile;
+extern "C" uint32_t g_nsmbwSelfTestPressBits;
+// Published for aurora-side diagnostics (see aurora-main/lib/internal.hpp).
+extern "C" uint32_t g_nsmbwCurrentViTick;
+uint32_t g_nsmbwCurrentViTick = 0;
+
+namespace {
+constexpr uint32_t kWpadButtonA = 1u << 11;
+// Sideways-remote "screen right" is the remote's DOWN bit (see nsmbw_kpad_overrides.cpp).
+constexpr uint32_t kWpadScreenRight = 1u << 2;
+constexpr uint32_t kWpadButton2 = 1u << 8;
+constexpr uint32_t kWpadMinus = 1u << 12;
+
+// DIAGNOSTIC (temporary): NSMBW_WATCH_WMOBJ. The world map's teardown (func_808DC2D0, after the
+// wipe-out into a level) deletes the 56-byte object at *(0x8099FE3C) through its vtable and
+// crashes because the vtable word reads 0, although its constructor (0x80103AC0) wrote
+// 0x803218B8 there. This samples that word once per VI tick and reports the tick where it
+// changes, plus the scene, to bracket what overwrote it.
+void NsmbwWatchWmObject() {
+    static const bool enabled = AURORA_ENV("NSMBW_WATCH_WMOBJ") != nullptr;
+    if (!enabled) return;
+    static uint32_t lastObj = 0, lastVtable = 0xFFFFFFFFu;
+    uint32_t obj = 0, vtable = 0xFFFFFFFFu;
+    Memory::TryRead32(0x8099FDFCu, obj);
+    if (obj != 0) Memory::TryRead32(obj, vtable);
+    if (obj != lastObj || vtable != lastVtable) {
+        uint32_t tick = 0;
+        Memory::TryRead32(0x8042AB4Cu, tick);
+        std::fprintf(stderr, "[nsmbw][wmobj] tick=%u scene=%u obj=0x%08X vtable=0x%08X (was obj=0x%08X vtable=0x%08X)\n",
+                     tick, g_nsmbwCurrentSceneProfile, obj, vtable, lastObj, lastVtable);
+        std::fflush(stderr);
+        lastObj = obj; lastVtable = vtable;
+    }
+}
+
+void NsmbwDiagWatch() {
+    NsmbwWatchWmObject();
+
+    // NSMBW_LOG_COIN: dCoin_c::execute (0x8008DED0, called from d_basesNP 0x80830730) steps the
+    // shared coin angle every frame; m_frame @ r13-0x5812 = 0x80429E8E, m_shapeAngle.y @
+    // r13-0x5820+2 = 0x80429E82. Static coins with a frozen value here = execute not running.
+    static const bool logCoin = AURORA_ENV("NSMBW_LOG_COIN") != nullptr;
+    static int coinTicks = 0;
+    if (logCoin && (++coinTicks % 60) == 0) {
+        uint32_t frame = 0, angleY = 0;
+        try {
+            frame = Memory::Read8(0x8042A16Eu);
+            angleY = Memory::Read16(0x8042A162u);
+        } catch (...) {}
+        CpuContext* liveCtx = TryGetCpuContext();
+        std::fprintf(stderr, "[nsmbw][coin] thread=%08X gqr3=%08X scene=%u m_frame=%u m_shapeAngle.y=0x%04X\n",
+                     Fiber::GuestFiberManager::GetCurrentGuestThread(), liveCtx ? liveCtx->gqr[3] : 0xDEADu, g_nsmbwCurrentSceneProfile, frame, angleY);
+    }
+
+    // NSMBW_DUMP_PROFILES: once the profile table exists, print fProfile entries 596-598
+    // (AC_BG_WATER / AC_BG_LAVA / AC_BG_POISON, index = position in PROFILE_NAME_e with BOOT = 0)
+    // as {mpClassInit, mExecuteOrder, mDrawOrder}. fProfListMg_c::m_data_p @ 0x8042A3B8.
+    static const bool dumpProfiles = AURORA_ENV("NSMBW_DUMP_PROFILES") != nullptr;
+    static bool profilesDumped = false;
+    if (dumpProfiles && !profilesDumped) {
+        uint32_t list = 0;
+        Memory::TryRead32(0x8042A698u, list);
+        if (list != 0) {
+            profilesDumped = true;
+            for (uint32_t id = 594; id <= 600; ++id) {
+                uint32_t prof = 0, init = 0, orders = 0;
+                Memory::TryRead32(list + id * 4u, prof);
+                if (prof != 0) {
+                    Memory::TryRead32(prof, init);
+                    Memory::TryRead32(prof + 4u, orders);
+                }
+                if (id == 600) {
+                    // AC_BG_WATER's two m3d::proc_c vtables (stored by its ctor, 0x807B40B0).
+                    for (uint32_t vt : {0x80950C28u, 0x80950C48u}) {
+                        uint32_t w[8] = {};
+                        for (int i = 0; i < 8; ++i) Memory::TryRead32(vt + 4u * i, w[i]);
+                        std::fprintf(stderr, "[nsmbw][profile] vtable 0x%08X: %08X %08X %08X %08X %08X %08X %08X %08X%c", vt,
+                                     w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], 10);
+                    }
+                }
+                std::fprintf(stderr, "[nsmbw][profile] id=%u profile=0x%08X classInit=0x%08X exec=%u draw=%u\n", id, prof,
+                             init, orders >> 16, orders & 0xFFFFu);
+            }
+        }
+    }
+
+    // DEBUG (NSMBW_DUMP_LIGHTTEX=<dir>): 300 ticks into the world map, save the first four light
+    // textures (32x32 RGBA8 EFB copies at 0x80F67740 + n*0x13E0 on the World 2 map) as raw GX-tiled
+    // bytes. Needs NSMBW_DEBUG_READBACK_SMALL_COPIES so the GPU copies land in RAM.
+    {
+        static const char* dumpDir = AURORA_ENV("NSMBW_DUMP_LIGHTTEX");
+        static int mapTicks = 0;
+        static bool dumped = false;
+        mapTicks = g_nsmbwCurrentSceneProfile == 3u ? mapTicks + 1 : 0;
+        if (dumpDir && !dumped && mapTicks == 300) {
+            dumped = true;
+            for (uint32_t i = 0; i < 4; ++i) {
+                const uint32_t addr = 0x80F67700u + i * 0x13E0u;
+                char path[512];
+                std::snprintf(path, sizeof(path), "%s/lighttex_%u_%08X.bin", dumpDir, i, addr);
+                if (FILE* f = std::fopen(path, "wb")) {
+                    for (uint32_t o = 0; o < 4096; ++o) std::fputc(Memory::Read8(addr + o), f);
+                    std::fclose(f);
+                }
+            }
+            std::fprintf(stderr, "[nsmbw][lighttex] dumped 4 light textures to %s\n", dumpDir);
+        }
+    }
+
+    // Every-30-ticks dump of fader / scene globals from the black-screen investigation (settled).
+    // Off unless NSMBW_LOG_HEARTBEAT is set: three unbuffered writes per heartbeat were measurable
+    // frame time (NSMBW_PROFILE_SAMPLER, 2026-09-23).
+    static const bool heartbeatEnabled = AURORA_ENV("NSMBW_LOG_HEARTBEAT") != nullptr;
+    static int heartbeatCount = 0;
+    if (heartbeatEnabled && (++heartbeatCount % 30) == 0) {
+
+        // dScCrsin_c::m_isDispOff (0x8042A1B0) - DISPROVEN as the black-screen cause:
+        // exhaustively scanned main.dol + all 4 RELs (fully relocated) for every
+        // r13-relative load AND every lis+{addi,ori} absolute-address construction of
+        // this exact address - zero reads found anywhere, only the 3 known writers
+        // (dScRestartCrsin_c::startTitle x1, reStartPeachCastle x1, and a third
+        // dInfo_c::startGame-calling helper at 0x800BB880). It's write-only in this
+        // build regardless of what its doc comment says. Kept here only as a settled
+        // negative result, not a live lead.
+        std::printf("[nsmbw][diag] dScCrsin_c::m_isDispOff=%u (write-only, not the cause)\n",
+            Memory::Read8(0x8042A490u));
+
+        // Real lead: dFader_c::calc() (0x800B0B00, disassembled offline) reads its
+        // static current-fader pointer from r13-0x5260 = 0x8042A440, then dispatches
+        // to that object's vtable slot 7 (offset 0x1C). mFaderBase_c::getStatus()
+        // (0x8016DD10: `lwz r3,4(r3); blr`) confirms mStatus lives at object+4.
+        // EStatus: OPAQUE=0 (screen fully blacked out), HIDDEN=1, FADE_IN=2, FADE_OUT=3
+        // (NSMBW-Decomp include/game/mLib/m_fader_base.hpp). startTitle calls
+        // dFader_c::setFader(FADER_FADE) right before the m_isDispOff writes above -
+        // if the fader is stuck at OPAQUE, that alone produces a pure black screen
+        // regardless of what's actually being rendered underneath.
+        uint32_t faderPtr = 0;
+        Memory::TryRead32(0x8042A720u, faderPtr);
+        uint32_t faderStatus = 0xFFFFFFFFu;
+        if (faderPtr != 0) {
+            Memory::TryRead32(faderPtr + 4u, faderStatus);
+        }
+        std::printf("[nsmbw][diag] dFader_c::mFader=0x%08X mStatus=%u (0=OPAQUE 1=HIDDEN 2=FADE_IN 3=FADE_OUT)\n",
+            faderPtr, faderStatus);
+
+        // dScene_c::preExecute() (0x800E1BE0, disassembled offline, matches
+        // NSMBW-Decomp source/dol/bases/d_scene.cpp line-for-line) reads m_isAutoFadeIn
+        // via `lbz r0, -0x6F34(r13)` = address 0x8042873C. This is the ONE global that
+        // decides whether the "fader OPAQUE" auto-fade-in branch can even be taken -
+        // if it's false, dScCrsin_c must be manually calling startFadeIn itself
+        // (matching the doc'd "unless m_isAutoFadeIn is false, in which case the fade-in
+        // must be started manually" design) and something in that manual path is what's
+        // actually stuck. If it's true, preExecute's auto-fade-in check should already
+        // be firing every frame while OPAQUE - meaning the REAL block is upstream of it,
+        // in the `isProcControlFlag(ROOT_DISABLE_EXECUTE)` early-return this same
+        // function has (skips the fade-in check entirely while the scene's child
+        // actors/archives haven't finished being created) - a full pipeline hang, not a
+        // fader-specific one.
+        std::printf("[nsmbw][diag] dScene_c::m_isAutoFadeIn=%u\n", Memory::Read8(0x80428A4Cu));
+    }
+
+    // SELF-TEST ONLY, opt-in via NSMBW_AUTO_PRESS_SELFTEST: hand KPADRead one frame of "A held"
+    // once a second for the first NSMBW_AUTO_PRESS_TICKS (default 4000) ticks, so an unattended
+    // run gets past every button-gated wait (strap / controller-info skip, the save-data-created
+    // dialog, the title) without a physical key. It goes through the same KPAD sample path as a
+    // real key, so it does not test a separate code path. NSMBW_AUTO_PRESS_STOP_SCENE=<profile>
+    // stops the presses once that scene is active so a run can park on it.
+    if (AURORA_ENV("NSMBW_AUTO_PRESS_SELFTEST") != nullptr) {
+        static const long stopScene = [] {
+            const char* v = AURORA_ENV("NSMBW_AUTO_PRESS_STOP_SCENE");
+            return v ? static_cast<long>(std::strtoul(v, nullptr, 10)) : -1L;
+        }();
+        static const int pressWindowTicks = [] {
+            const char* v = AURORA_ENV("NSMBW_AUTO_PRESS_TICKS");
+            // 4000, not 1200: with the strap skip (nsmbw_skip_boot_screens.cpp) a 1200-tick window
+            // ran out at file select on 2026-09-27 (both input paths); 4000 reached 1-1 in ~30 s.
+            return v ? static_cast<int>(std::strtol(v, nullptr, 10)) : 4000;
+        }();
+        static int diagAutoPressTick = 0;
+        ++diagAutoPressTick;
+        const bool parked = stopScene >= 0 && g_nsmbwCurrentSceneProfile == static_cast<uint32_t>(stopScene);
+        // On the world map a resumed save starts Mario on the start node, one step left of 1-1,
+        // so tap screen-right early in each map visit and hold the periodic A presses off for the
+        // first NSMBW_AUTO_PRESS_MAP_RIGHT_TICKS (default 90) ticks; A alone never leaves the node.
+        static const int mapRightTicks = [] {
+            const char* v = AURORA_ENV("NSMBW_AUTO_PRESS_MAP_RIGHT_TICKS");
+            return v ? static_cast<int>(std::strtol(v, nullptr, 10)) : 90;
+        }();
+        static int mapTicks = 0;
+        const bool onMap = g_nsmbwCurrentSceneProfile == 3u;
+        mapTicks = onMap ? mapTicks + 1 : 0;
+        // A short tap (ticks 30..33 of the map visit): holding the direction for longer put the
+        // map into its free-look mode ("Back to Mario" overlay, lvl8_t150.png) instead of moving.
+        // Repeated every 120 ticks: a single early tap was sometimes swallowed (the map was not
+        // accepting input yet) and the run parked on the start node pressing 2 forever. On a file
+        // with only 1-1 open the path to the right ends at 1-1, so extra taps cannot overshoot.
+        const bool tapRight = onMap && mapTicks >= 30 && ((mapTicks - 30) % 120) < 4;
+        const bool walkingRight = onMap && (mapTicks <= mapRightTicks || ((mapTicks - 30) % 120) < 40);
+        // In a level entered from the map, hold right + 2 (a running jump over the first Goomba)
+        // for ticks 120..600 of the visit (2 pulsed), so the first coins of 1-1 come on screen.
+        static bool visitedMap = false;
+        static int levelTicks = 0;
+        visitedMap = visitedMap || onMap;
+        const bool inLevel = visitedMap && g_nsmbwCurrentSceneProfile == 5u;
+        levelTicks = inLevel ? levelTicks + 1 : 0;
+        // NSMBW_AUTO_PRESS_STOP_IN_LEVEL: no presses at all once in a level entered from the map, so
+        // a script can pause and use the menu without the walk or periodic A/2 interfering (the
+        // walk killed Mario in 1-1 and returned to the map before the pause, 2026-09-28).
+        static const bool stopInLevel = AURORA_ENV("NSMBW_AUTO_PRESS_STOP_IN_LEVEL") != nullptr;
+        if (stopInLevel && inLevel) {
+            g_nsmbwSelfTestPressBits = 0;
+            return;
+        }
+        // NSMBW_AUTO_PRESS_MAP_MINUS_TICK=<n>: hold - for ticks n..n+5 of the first map visit (opens
+        // Select World), for scripted runs of that menu; a keyboard press from a script needs the
+        // window in the foreground, which Windows does not reliably grant (2026-10-21).
+        static const int mapMinusTick = [] {
+            const char* v = AURORA_ENV("NSMBW_AUTO_PRESS_MAP_MINUS_TICK");
+            return v ? static_cast<int>(std::strtol(v, nullptr, 10)) : -1;
+        }();
+        static bool mapMinusDone = false;
+        if (mapMinusTick >= 0 && onMap && !mapMinusDone && mapTicks >= mapMinusTick) {
+            if (mapTicks < mapMinusTick + 6) {
+                g_nsmbwSelfTestPressBits |= kWpadMinus;
+            } else {
+                g_nsmbwSelfTestPressBits &= ~kWpadMinus;
+                mapMinusDone = true;
+                std::fprintf(stderr, "[nsmbw][diag] self-test: pressed - on the world map (tick %d)\n", mapTicks);
+            }
+        }
+        const bool walkInLevel = inLevel && levelTicks >= 120 && levelTicks < 600;
+        const bool jumpHeld = walkInLevel && ((levelTicks / 30) % 2) == 0; // re-press 2 every second
+        if (tapRight || walkInLevel) {
+            g_nsmbwSelfTestPressBits |= kWpadScreenRight | (jumpHeld ? kWpadButton2 : 0u);
+        } else {
+            g_nsmbwSelfTestPressBits &= ~(kWpadScreenRight | (inLevel ? kWpadButton2 : 0u));
+        }
+        // On the map A opens free-look ("Back to Mario" overlay); 2 is what enters a level.
+        const uint32_t pressBit = onMap ? kWpadButton2 : kWpadButtonA;
+        if (parked || walkingRight) {
+            g_nsmbwSelfTestPressBits &= ~(kWpadButtonA | kWpadButton2);
+        } else if (diagAutoPressTick <= pressWindowTicks && (diagAutoPressTick % 60) == 0) {
+            // Outside the map, alternate A and 2: the file-select screen sometimes ignored A alone
+            // and the run parked there (developer had to step in, 2026-09-26).
+            const bool useTwo = onMap || ((diagAutoPressTick / 60) % 2) == 1;
+            g_nsmbwSelfTestPressBits |= useTwo ? kWpadButton2 : kWpadButtonA;
+            std::fprintf(stderr, "[nsmbw][diag] self-test: synthesized %s press (tick=%d)\n", useTwo ? "2" : "A", diagAutoPressTick);
+            std::fflush(stderr);
+        }
+    }
+}
+// NSMBW_WATCH_WRITE=<hex guest address>: poll one guest word every VI tick and log each change
+// with the tick, scene and the most recent guest calls (DiagRecentCalls ring). Translated code
+// writes guest memory through host pointers, so a store cannot be trapped directly; this finds
+// the frame a word is clobbered in. Added for d_profileNP's dYesNoWindow MainMsgIDs table, whose
+// entries 12..15 (0x8076A668..0x8076A677) read back garbage although the REL file is intact.
+void NsmbwWatchWrite() {
+    static const uint32_t addr = [] {
+        const char* v = AURORA_ENV("NSMBW_WATCH_WRITE");
+        return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 16)) : 0u;
+    }();
+    if (addr == 0) return;
+    static bool have = false;
+    static uint32_t last = 0;
+    uint32_t cur = 0;
+    if (!Memory::TryRead32(addr, cur)) return;
+    if (have && cur == last) return;
+    uint32_t w1 = 0, w2 = 0, w3 = 0;
+    Memory::TryRead32(addr + 4u, w1);
+    Memory::TryRead32(addr + 8u, w2);
+    Memory::TryRead32(addr + 12u, w3);
+    std::fprintf(stderr,
+                 "[nsmbw][watch] 0x%08X: 0x%08X -> 0x%08X (next words 0x%08X 0x%08X 0x%08X) at tick %u scene %u; "
+                 "recent guest calls (newest last):\n",
+                 addr, last, cur, w1, w2, w3, g_nsmbwCurrentViTick, g_nsmbwCurrentSceneProfile);
+    const uint32_t next = DiagRecentCalls::g_next.load(std::memory_order_relaxed);
+    for (uint32_t i = 24; i > 0; --i) {
+        const uint32_t slot = (next - i) % static_cast<uint32_t>(DiagRecentCalls::kCapacity);
+        std::fprintf(stderr, "[nsmbw][watch]   0x%08X from lr 0x%08X\n", DiagRecentCalls::g_addrs[slot],
+                     DiagRecentCalls::g_lrs[slot]);
+    }
+    have = true;
+    last = cur;
+}
+
+// NSMBW_DEBUG_P1_CHARACTER=<0..3> (0 Mario, 1 Luigi, 2 Yellow Toad, 3 Blue Toad): experiment for
+// "let player 1 pick any character". Writes daPyMng_c::mPlayerType[0] (0x80354E60, a u32 enum per
+// player; syms.txt) while the world map is up, and nowhere else, so whatever the level shows was
+// carried in by the game's own scene change - not re-forced each frame.
+void NsmbwDebugP1Character() {
+    static const long want = [] {
+        const char* v = AURORA_ENV("NSMBW_DEBUG_P1_CHARACTER");
+        return v ? std::strtol(v, nullptr, 10) : -1L;
+    }();
+    if (want < 0 || want > 3 || g_nsmbwCurrentSceneProfile != 3u) return;
+    constexpr uint32_t kPlayerTypeAddr = 0x80355160u;
+    uint32_t cur = 0;
+    if (!Memory::TryRead32(kPlayerTypeAddr, cur) || cur == static_cast<uint32_t>(want)) return;
+    Memory::Write32(kPlayerTypeAddr, static_cast<uint32_t>(want));
+    std::fprintf(stderr, "[nsmbw][diag] P1 character %u -> %ld (on the world map)\n", cur, want);
+}
+} // namespace
+
+extern "C" void NsmbwDumpScnObjs();
+
+extern "C" void nsmbw_tick_read_pump_801be010(CpuContext* ctx)
+{
+    VI_HLE_PollRetrace(ctx);
+    NsmbwDiagWatch();
+    NsmbwDebugP1Character();
+    NsmbwWatchWrite();
+    NsmbwDumpScnObjs();
+    ctx->gpr[3] = ::Memory::Read32(0x8042AB4Cu);
+    g_nsmbwCurrentViTick = ctx->gpr[3];
+}
+
+PPC_NATIVE_OVERRIDE_VOID(801BDED0, nsmbw_tick_read_pump_801be010, (CpuContext* ctx), (ctx));
+
+// dFader_c::mFader (0x8042A440, r13-0x5260) is confirmed live-stuck at mStatus=0
+// (OPAQUE - "the screen is completely blacked out", NSMBW-Decomp
+// include/game/mLib/m_fader_base.hpp) for the entire run following the WPAD-input fix.
+// dFader_c::startFadeIn (0x800B0A20) is the real function that should transition it out
+// of OPAQUE - disassembled offline, its full logic is:
+//   bit 5 (MSB=0 numbering, value 0x04000000) of the word at r13-0x5720 (0x80429F80)
+//   selects a forced 1-frame duration vs the caller's requested duration, then
+//   unconditionally calls setFrame(fader, duration) [0x8016DCE0] followed by the
+//   fader's own vtable slot 5 (offset 0x14) = mFaderBase_c::fadeIn().
+// It has 10 real call sites across the translated code (confirmed via grep), so it is
+// NOT dead code overall - the question is whether any of those sites actually execute
+// for THIS specific stuck fader. Reimplementing exactly (not guessing) so this can be
+// observed live without altering behavior for any caller.
+extern "C" uint32_t StartFadeIn_800B0A20_Diag(uint32_t duration)
+{
+    std::fprintf(stderr, "[nsmbw][diag] dFader_c::startFadeIn(duration=%u) called\n", duration);
+    std::fflush(stderr);
+
+    uint32_t skipFlagWord = 0;
+    Memory::TryRead32(0x8042A260u, skipFlagWord);
+    const bool forceInstant = (skipFlagWord & 0x04000000u) != 0;
+
+    uint32_t faderPtr = 0;
+    Memory::TryRead32(0x8042A720u, faderPtr);
+    if (faderPtr == 0) {
+        std::fprintf(stderr, "[nsmbw][diag] dFader_c::startFadeIn: mFader is null, nothing to do\n");
+        std::fflush(stderr);
+        return 0;
+    }
+
+    auto& cpu = GetPersistentCpuContext();
+    cpu.gpr[3] = faderPtr;
+    cpu.gpr[4] = forceInstant ? 1u : duration;
+    InvokeIndirectCpu(0x8016DE20u, &cpu); // mFaderBase_c::setFrame(duration)
+
+    uint32_t vtable = 0;
+    Memory::TryRead32(faderPtr, vtable);
+    uint32_t fadeInTarget = 0;
+    if (vtable != 0) {
+        Memory::TryRead32(vtable + 0x14u, fadeInTarget);
+    }
+    uint32_t result = 0;
+    if (fadeInTarget != 0) {
+        cpu.gpr[3] = faderPtr;
+        InvokeIndirectCpu(fadeInTarget, &cpu);
+        result = cpu.gpr[3];
+    }
+    std::fprintf(stderr, "[nsmbw][diag] dFader_c::startFadeIn: fader=0x%08X forceInstant=%d fadeIn()->%u\n",
+        faderPtr, forceInstant ? 1 : 0, result);
+    std::fflush(stderr);
+    return result;
+}
+
+PPC_NATIVE_OVERRIDE(800B0A20, StartFadeIn_800B0A20_Diag, uint32_t, (uint32_t duration), (duration));
+
+// startFadeIn succeeded twice (fadeIn()->1) but mStatus stayed OPAQUE(0) afterward per
+// the periodic dump above - contradiction. fadeIn() may only arm a pending transition
+// that dFader_c::calc() (0x800B0B00, disassembled: `lwz r3,mFader; vtable[7](fader)`)
+// is responsible for actually progressing every frame (typical for animated faders:
+// fadeIn() flips an internal target, calc() advances mCurrFrame/mStatus toward it).
+// If calc() is never being called at all, that would explain the stall regardless of
+// fadeIn() reporting success. Reimplementing this trivial tail-call exactly so it can
+// be observed without changing behavior for any caller.
+extern "C" void Calc_800B0B00_Diag()
+{
+    static uint64_t callCount = 0;
+    ++callCount;
+
+    uint32_t faderPtr = 0;
+    Memory::TryRead32(0x8042A720u, faderPtr);
+    uint32_t statusBefore = 0xFFFFFFFFu;
+    if (faderPtr != 0) {
+        Memory::TryRead32(faderPtr + 4u, statusBefore);
+    }
+
+    if (faderPtr != 0) {
+        uint32_t vtable = 0;
+        Memory::TryRead32(faderPtr, vtable);
+        uint32_t calcTarget = 0;
+        if (vtable != 0) {
+            Memory::TryRead32(vtable + 0x1Cu, calcTarget);
+        }
+        if (calcTarget != 0) {
+            auto& cpu = GetPersistentCpuContext();
+            cpu.gpr[3] = faderPtr;
+            InvokeIndirectCpu(calcTarget, &cpu);
+        }
+    }
+
+    if (callCount <= 20 || (callCount % 300) == 0) {
+        uint32_t statusAfter = 0xFFFFFFFFu;
+        if (faderPtr != 0) {
+            Memory::TryRead32(faderPtr + 4u, statusAfter);
+        }
+        std::fprintf(stderr, "[nsmbw][diag] dFader_c::calc: call #%llu fader=0x%08X status %u -> %u\n",
+            static_cast<unsigned long long>(callCount), faderPtr, statusBefore, statusAfter);
+        std::fflush(stderr);
+    }
+}
+
+PPC_NATIVE_OVERRIDE_VOID(800B0B00, Calc_800B0B00_Diag, (), ());

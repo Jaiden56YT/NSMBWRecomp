@@ -1,0 +1,5 @@
+dol         build/nsmbw_us/base_translation_output.json              build/nsmbw_us/functions
+d_basesNP   build/nsmbw_us-d_basesNP/base_translation_output.json    build/nsmbw_us-d_basesNP/functions    0x8076D6C0 0x809A2CE0
+d_en_bossNP build/nsmbw_us-d_en_bossNP/base_translation_output.json  build/nsmbw_us-d_en_bossNP/functions  0x80B1C960 0x80B8E360
+d_enemiesNP build/nsmbw_us-d_enemiesNP/base_translation_output.json  build/nsmbw_us-d_enemiesNP/functions  0x809A2CE0 0x80B1C960
+d_profileNP build/nsmbw_us-d_profileNP/base_translation_output.json  build/nsmbw_us-d_profileNP/functions  0x80768500 0x8076D690

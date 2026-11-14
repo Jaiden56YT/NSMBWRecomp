@@ -1,0 +1,29 @@
+schema_version: 1
+workspace_root: .
+project:
+  id: nsmbw_us-d_basesNP
+  display_name: NSMBW USA Rev 2 - nsmbw_us-d_basesNP
+memory:
+  base: 0x80000000
+  size: 0x01800000
+  sda_base: 0x8042F680
+  sda2_base: 0x80433080
+inputs:
+  dol:
+    path: "../../code/main.dol"
+  rel:
+    path: "../../code/rels/d_basesNP.rel"
+    load_address: 0x8076D6C0
+translation:
+  allow_unsupported_instructions: false
+  function_map:
+    path: function_map_us.txt
+runtime:
+  native_registration_root: native_us
+  native_abi_directories: [native_us]
+output:
+  root: build/nsmbw_us-d_basesNP
+  functions: functions
+  runtime_config: RuntimeConfig.h
+  data_initializer: data_sections_init.cpp
+  base_manifest: base/base_manifest.json

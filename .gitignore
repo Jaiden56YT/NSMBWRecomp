@@ -10,3 +10,6 @@ gxfifo.bin
 host/build-switch/
 dist/
 third_party/NSMBWiicompiled/
+ports/wiicompiled/build/
+ports/wiicompiled/generated_nsmbw/
+ports/wiicompiled/*.log
