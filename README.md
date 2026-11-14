@@ -118,8 +118,31 @@ Fixed: the title's black background / missing 3D models. NW4R g3d builds its mat
 cache and DMAs them to RAM with *physical* addresses; the DMA dropped those writes, so every model
 was transformed by zero matrices.
 
+## Audio, symbols and the road to 1-1 (2026-11-13)
+
+- `host/ax.c`: AX microcode stand-in. Runs the command list the AX library mails to the DSP (process
+  voices: DSP-ADPCM/PCM16/PCM8, resampling, volume, loop/stop; output), and plays the audio DMA blocks
+  through SDL at 32 kHz. Audio frames are 3 ms (96 samples), AI DMA interrupts follow the DMA length.
+- `tools/make_syms.py` builds `code/syms_smne01.txt` (~2,450 names) from the decomp's and Kamek's PAL
+  symbol lists via Kamek's PAL→NTSC v2 offset table; `tools/symbolize.py` annotates logs.
+- `LOG_STATES=1` logs every game state change (hook on `sStateMethod_c::changeStateMethod`, 0x8015FC10),
+  which is how the stalls below were found. `-stacks N` samples main-thread call stacks; `-c ADDR`
+  counts calls; `-m ADDR` dumps memory at exit; `-ra SECS` skips rendering until a guest time.
+- WPAD: `WPADGetInfoAsync` is replaced (battery info + callback); `WPADSetConnectCallback` gets a
+  "connected" event for remote 1. Guest callbacks run like interrupts (`host_queue_guest_call`).
+- Workaround: `CheckIfPlayingSound` reports a sound finished after 4 s. Some NW4R sequence sounds never
+  leave the playing list even though their voices ended; this blocked `dScGameSetup_c::StateID_VoiceEndWait`.
+
+Reached: file select → player select → opening cutscene → World 1 map → **World 1-1, playable**
+(Mario runs, jumps, collects; Goombas kill him when the scripted test input runs into them).
+
+Fixed on the way: EFB-to-texture copies are kept in a 256-entry table that recycles the oldest copy (a
+full 64-entry table dropped the level's light-texture copies, so every lit model rendered black).
+
 ## Next
-1. Play into a level; check tilt/shake and the remaining renderer gaps there.
+1. Speed: busy scenes run at about half speed (CPU vertex transform, one GL draw per GX draw).
+2. Root-cause the stuck NW4R sequence sounds (remove the workaround).
+3. Garbled icons in the item menu (a texture format decoding bug).
 2. Not yet in the renderer: indirect textures, fog, z-textures, culling, EFB copies back to RAM, upscaling.
 3. Audio (AX mixing), real-time pacing, then the Switch build.
 

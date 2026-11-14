@@ -76,7 +76,8 @@ void input_update(void) {
     if (right) h |= BTN_DOWN;
     if (up) h |= BTN_RIGHT;
     if (down) h |= BTN_LEFT;
-    h |= g_input_script_hold;
+    if (g_input_script_hold & 0x10000u) shake = 1;  /* scripted shake */
+    h |= g_input_script_hold & 0xFFFFu;
     if (shake && shake_frames <= 0) shake_frames = 12;
     cur_hold = h;
 }
@@ -140,5 +141,24 @@ void hle_wpad_probe(CPUState* cpu) {
         if (typep) mem_write32(cpu, typep, 0xFD);  /* WPAD_DEV_NONE */
         cpu->gpr[3] = (u32)-1;
     }
+    cpu->pc = cpu->lr;
+}
+
+/* WPADGetInfoAsync(chan r3, WPADInfo* r4, callback r5) */
+void host_queue_guest_call(u32 fn, u32 r3, u32 r4);
+void hle_wpad_get_info_async(CPUState* cpu) {
+    s32 chan = (s32)cpu->gpr[3];
+    u32 info = cpu->gpr[4], cb = cpu->gpr[5];
+    if (chan != 0) { cpu->gpr[3] = (u32)-1; cpu->pc = cpu->lr; return; }
+    if (info) {
+        for (u32 i = 0; i < 0x14; i += 4) mem_write32(cpu, info + i, 0);  /* no IR, speaker off, nothing attached, battery fine */
+        mem_write8(cpu, info + 0x14, 4);   /* battery: full */
+        mem_write8(cpu, info + 0x15, 1);   /* LED 1 */
+        mem_write8(cpu, info + 0x16, 0);
+        mem_write8(cpu, info + 0x17, 0);
+    }
+    if (cb) host_queue_guest_call(cb, 0, 0);  /* (chan 0, WPAD_ERR_NONE) */
+    { static int n; if (n++ < 5) LOG("input: WPADGetInfoAsync(%d, %08X, cb %08X) lr %08X\n", chan, info, cb, cpu->lr); }
+    cpu->gpr[3] = 0;
     cpu->pc = cpu->lr;
 }

@@ -133,9 +133,24 @@ static void dsp_schedule_reply(u16 lo) {
     dsp_reply_tb = g_cpu_mmio->timebase + 60750u;  /* 1 ms */
 }
 
+u64 g_dsp_mails, g_dsp_babe, g_dsp_replies, g_ai_ints, g_dsp_masked;
 static void dsp_cpu_mail(u32 mail) {
+    g_dsp_mails++;
+    if ((mail >> 16) == 0xBABEu) g_dsp_babe++;
+    if (!(mmio_get16(0xCC00500Au) & 0x0100u)) g_dsp_masked++;
     if (!(mmio_get16(0xCC00500Au) & 0x0100u)) return;  /* DSP interrupt masked: ROM/boot stage */
-    if (dsp_ax_state == 1) { dsp_ax_state = 0; dsp_schedule_reply(0x0002); return; }
+    if (dsp_ax_state == 1) {
+        dsp_ax_state = 0;
+        static int dumps;
+        if (getenv("DUMP_AXCL") && dumps++ % 2000 == 1000) {
+            LOG("axcl @%08X:", mail);
+            for (u32 i = 0; i < 64; i++) LOG(" %04X", mem_read16(g_cpu_mmio, (mail | 0x80000000u) + 2 * i));
+            LOG("\n");
+        }
+        { void ax_run_command_list(CPUState*, u32); ax_run_command_list(g_cpu_mmio, mail); }
+        dsp_schedule_reply(0x0002);
+        return;
+    }
     if ((mail >> 16) == 0xBABEu) { dsp_ax_state = 1; return; }
     if (mail == 0xCDD10001u) { dsp_schedule_reply(0x0001); return; }
     dsp_schedule_reply(0x0000);
@@ -179,6 +194,12 @@ static void vi_retrace(void) {
 
 static u64 ai_start_tb;
 static int adma_on;
+/* One DMA block of (len*32) bytes of 16-bit stereo at 32 kHz, in timebase ticks. */
+static u64 adma_period(u32 ctl) {
+    u32 bytes = (ctl & 0x7FFFu) * 32u;
+    if (!bytes) bytes = 384;
+    return (u64)(bytes / 4u) * 60750000u / 32000u;
+}
 static u64 adma_next_tb;
 
 static int write_special(CPUState* cpu, u32 ea, u32 v, u8 size) {
@@ -227,7 +248,7 @@ static int write_special(CPUState* cpu, u32 ea, u32 v, u8 size) {
         return 1;
     case 0xCC005036u:  /* audio DMA control: bit 15 starts 5 ms periodic AI interrupts */
         mmio_set16(ea, (u16)v);
-        if ((v & 0x8000u) && !adma_on) adma_next_tb = cpu->timebase + 303750u;
+        if ((v & 0x8000u) && !adma_on) adma_next_tb = cpu->timebase + adma_period(v);
         adma_on = (v & 0x8000u) != 0;
         return 1;
     case 0xCC005028u:  /* AR DMA count: transfer completes immediately */
@@ -339,12 +360,18 @@ void mmio_tick(CPUState* cpu) {
     }
     if (dsp_reply_pending && cpu->timebase >= dsp_reply_tb) {
         dsp_reply_pending = 0;
+        g_dsp_replies++;
         dsp_send(0xDCD1u, dsp_reply_lo);
         mmio_set16(DSP_CR, (u16)(mmio_get16(DSP_CR) | DSPCR_DSPINT));
         dsp_update_pi();
     }
     if (adma_on && cpu->timebase >= adma_next_tb) {
-        adma_next_tb += 303750u;  /* 5 ms */
+        u16 ctl = mmio_get16(0xCC005036u);
+        adma_next_tb += adma_period(ctl);
+        g_ai_ints++;
+        { void ax_play_dma(CPUState*, u32, u32);
+          u32 a = ((u32)mmio_get16(0xCC005030u) << 16 | mmio_get16(0xCC005032u)) & 0x3FFFFFE0u;
+          ax_play_dma(cpu, a, (ctl & 0x7FFFu) * 32u); }
         mmio_set16(DSP_CR, (u16)(mmio_get16(DSP_CR) | DSPCR_AIINT));
         dsp_update_pi();
     }

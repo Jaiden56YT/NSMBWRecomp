@@ -10,6 +10,40 @@ static volatile sig_atomic_t g_stop;
 static void on_term(int sig) { (void)sig; g_stop = 1; }
 #define SAMPLES 64
 static u32 sample_pc[SAMPLES]; static u64 sample_n[SAMPLES];
+/* Call-stack sampler (-stacks): histogram of the top 6 return addresses. */
+#define NSTACK 512
+static struct { u32 f[7]; u64 n; } stacks[NSTACK];
+static int g_stack_sampling;
+static u32 g_stack_thread = 0x80359938u;  /* main thread */
+static void sample_stack(CPUState* cpu) {
+    u32 f[7] = {cpu->pc, 0, 0, 0, 0, 0, 0};
+    u32 sp = cpu->gpr[1];
+    f[1] = cpu->lr;
+    for (int i = 2; i < 7 && sp >= 0x80000000u && sp < 0x81800000u; i++) {
+        u32 next = mem_read32(cpu, sp);
+        if (next <= sp || next >= 0x81800000u) break;
+        f[i] = mem_read32(cpu, next + 4);
+        sp = next;
+    }
+    if (f[0] >= 0x801B4F00u && f[0] < 0x801B5000u) return;  /* idle loop */
+    if (mem_read32(cpu, 0x800000E4u) != g_stack_thread) return;  /* only the chosen thread */
+    for (int i = 0; i < 7; i++) if (f[i] == 0x801B1884u) return;  /* skip interrupt context */
+    for (int i = 0; i < NSTACK; i++) {
+        if (stacks[i].n && !memcmp(stacks[i].f, f, sizeof(f))) { stacks[i].n++; return; }
+        if (!stacks[i].n) { memcpy(stacks[i].f, f, sizeof(f)); stacks[i].n = 1; return; }
+    }
+}
+static void print_stacks(void) {
+    for (int k = 0; k < 40; k++) {
+        int best = -1;
+        for (int i = 0; i < NSTACK; i++) if (stacks[i].n && (best < 0 || stacks[i].n > stacks[best].n)) best = i;
+        if (best < 0) break;
+        LOG("stack x%llu: %08X %08X %08X %08X %08X %08X %08X\n", (unsigned long long)stacks[best].n, stacks[best].f[0],
+            stacks[best].f[1], stacks[best].f[2], stacks[best].f[3], stacks[best].f[4], stacks[best].f[5], stacks[best].f[6]);
+        stacks[best].n = 0;
+    }
+}
+
 static void sample(u32 pc) {
     for (int i = 0; i < SAMPLES; i++) {
         if (sample_pc[i] == pc) { sample_n[i]++; return; }
@@ -24,6 +58,9 @@ const char* g_disc_root = "extracted";
 static u32 g_break = 0x801A9BA0u; /* PPCHalt */
 static u32 g_dump[8]; static int g_ndump;
 static int g_norender;
+static u32 g_count_pc[32] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+static u64 g_count_n[32];
+static int g_count_on;
 static const char* g_press;
 extern u32 g_input_script_hold;
 
@@ -101,6 +138,43 @@ int os_enter_exception(CPUState* cpu) {
     return 1;
 }
 
+/* Guest callbacks the host wants to run "asynchronously", as an interrupt
+   handler would on hardware: when interrupts are enabled, save the whole
+   CPU state, call fn(r3, r4) on a fresh stack area, and restore everything
+   when it returns to a magic address. */
+#define CALLBACK_RETURN_MAGIC 0x81FFFF10u
+static struct { u32 fn, r3, r4; } cbq[32];
+static int cbq_n;
+static CPUState cb_saved;
+static int cb_active;
+
+void host_queue_guest_call(u32 fn, u32 r3, u32 r4) {
+    if (cbq_n < 32) { cbq[cbq_n].fn = fn; cbq[cbq_n].r3 = r3; cbq[cbq_n].r4 = r4; cbq_n++; }
+}
+
+static void maybe_run_callback(CPUState* cpu) {
+    if (cb_active || !cbq_n || !(cpu->msr & 0x8000u)) return;
+    cb_saved = *cpu;
+    cb_active = 1;
+    cpu->gpr[1] = (cpu->gpr[1] - 0x400u) & ~15u;
+    cpu->gpr[3] = cbq[0].r3;
+    cpu->gpr[4] = cbq[0].r4;
+    cpu->lr = CALLBACK_RETURN_MAGIC;
+    cpu->pc = cbq[0].fn;
+    cpu->msr &= ~0x8000u;
+    memmove(cbq, cbq + 1, sizeof(cbq[0]) * (size_t)--cbq_n);
+}
+
+static int callback_returned(CPUState* cpu) {
+    if (!cb_active || cpu->pc != CALLBACK_RETURN_MAGIC) return 0;
+    u64 tb = cpu->timebase;
+    *cpu = cb_saved;
+    cpu->timebase = tb;
+    cb_active = 0;
+    { static int n; if (n++ < 5) LOG("callback returned\n"); }
+    return 1;
+}
+
 /* Called by generated code before direct cross-chunk calls. */
 static bool host_call(CPUState* cpu, u32 address) {
     if (address == PPC_HOST_CALL_NATIVE_REGION_QUERY) return false;
@@ -157,6 +231,9 @@ int main(int argc, char** argv) {
             /* testing: -press "SECS:BUTTONHEX[,SECS:BUTTONHEX...]" holds buttons for 0.2 s at guest time SECS */
             g_press = argv[++i];
         }
+        else if (!strcmp(argv[i], "-c") && i + 1 < argc) { static int nc; g_count_on = 1; if (nc < 32) g_count_pc[nc++] = (u32)strtoul(argv[++i], NULL, 16); else i++; }
+        else if (!strcmp(argv[i], "-ra") && i + 1 < argc) { extern double g_render_after; g_render_after = atof(argv[++i]); }
+        else if (!strcmp(argv[i], "-stacks") && i + 1 < argc) g_stack_sampling = atoi(argv[++i]);  /* from guest second N */
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) g_disc_root = argv[++i];
     }
     g_log = stdout;
@@ -194,9 +271,13 @@ int main(int argc, char** argv) {
     signal(SIGINT, on_term);
     while (blocks < max_blocks && !g_stop) {
         if ((blocks & 0xFFFF) == 0) sample(cpu.pc);
+        if (g_stack_sampling && (blocks & 0xFFF) == 0 && cpu.timebase > (u64)g_stack_sampling * 60750000u) sample_stack(&cpu);
         /* Real-mode (MMU off) code runs at physical addresses; the
            generated code only knows the cached virtual ones. */
         if (cpu.pc < 0x01800000u) cpu.pc |= 0x80000000u;
+        if (g_count_on) for (int c = 0; c < 32; c++) if (cpu.pc == g_count_pc[c]) g_count_n[c]++;
+        if (callback_returned(&cpu)) continue;
+        maybe_run_callback(&cpu);
         if (hle_dispatch(&cpu)) continue;
         DolRecompFunction fn = nsmbw_find_code(cpu.pc);
         if (!fn) {
@@ -253,6 +334,8 @@ int main(int argc, char** argv) {
         blocks++;
     }
     dump_threads(&cpu);
+    if (g_stack_sampling) print_stacks();
+    for (int c = 0; c < 32; c++) if (g_count_pc[c] != 1) LOG("count %08X: %llu\n", g_count_pc[c], (unsigned long long)g_count_n[c]);
     for (int d = 0; d < g_ndump && d < 8; d++) {
         LOG("mem %08X:", g_dump[d]);
         for (int k = 0; k < 16; k++) LOG(" %08X", mem_read32(&cpu, g_dump[d] + 4u * k));
@@ -265,6 +348,12 @@ int main(int argc, char** argv) {
     {
         extern u64 g_gxfifo_bytes, g_di_reads, g_ipc_requests, g_vi_count;
         extern u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_gx_dlcalls, g_gx_idxloads;
+        extern u64 g_dsp_mails, g_dsp_babe, g_dsp_replies, g_ai_ints, g_dsp_masked;
+        extern u64 g_ax_voices, g_ax_stops;
+        LOG("ax: %llu voice-frames processed, %llu voices ended\n", (unsigned long long)g_ax_voices, (unsigned long long)g_ax_stops);
+        LOG("dsp: %llu mails (%llu command lists, %llu while masked), %llu replies, %llu audio DMA interrupts\n",
+            (unsigned long long)g_dsp_mails, (unsigned long long)g_dsp_babe, (unsigned long long)g_dsp_masked,
+            (unsigned long long)g_dsp_replies, (unsigned long long)g_ai_ints);
         LOG("gx: %llu display-list calls, %llu indexed XF loads\n", (unsigned long long)g_gx_dlcalls, (unsigned long long)g_gx_idxloads);
         LOG("gx: %llu draws, %llu vertices, %llu XFB copies\n", (unsigned long long)g_gx_draws,
             (unsigned long long)g_gx_vertices, (unsigned long long)g_gx_frames);

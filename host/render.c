@@ -20,6 +20,7 @@ extern u64 g_gx_frames;
 u8 g_tmem[1 << 20];
 
 static CPUState* R;
+extern u32 g_konst[4][4];
 static SDL_Window* window;
 static SDL_GLContext glctx;
 static GLuint efb_fbo, efb_color, efb_depth;
@@ -217,7 +218,7 @@ static void light_channel(int chan, const float* vpos, const float* vn, const Ra
                 if (dist > 0) for (int i = 0; i < 3; i++) dir[i] /= dist;
                 float attn = 1;
                 if (afn == 3) {  /* spot */
-                    float cosv = -(dir[0] * ld[0] + dir[1] * ld[1] + dir[2] * ld[2]);
+                    float cosv = dir[0] * ld[0] + dir[1] * ld[1] + dir[2] * ld[2];
                     cosv = cosv < 0 ? 0 : cosv;
                     float ca = xff(base + 4) + xff(base + 5) * cosv + xff(base + 6) * cosv * cosv;
                     float da = xff(base + 7) + xff(base + 8) * dist + xff(base + 9) * d2;
@@ -335,7 +336,7 @@ typedef struct {
 
 #define TEXCACHE 1024
 static TexEntry texcache[TEXCACHE];
-#define EFBCOPIES 64
+#define EFBCOPIES 256
 static TexEntry efbcopies[EFBCOPIES];  /* EFB-to-texture copies, found by address */
 
 static u64 fnv(const u8* p, size_t n) {
@@ -782,8 +783,11 @@ static void apply_state(void) {
 static float vbuf[MAXV * 36];
 static u64 g_frame;
 
+double g_render_after;  /* -ra SECS: skip drawing before this guest time (faster test runs) */
+
 void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
     if (!render_ok || !count) return;
+    if (g_render_after > 0 && R->timebase < (u64)(g_render_after * 60750000.0)) return;
     static RawVtx raw;
     static OutVtx outv[MAXV / 3];
     if (count > MAXV / 3) count = MAXV / 3;
@@ -818,7 +822,23 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
             g_in_dl ? "DL" : "", prim, count, vat, v0->pos[0], v0->pos[1], v0->pos[2], v0->pos[3], raw.pos[0], raw.pos[1], raw.pos[2], raw.pmidx,
             v0->col[0][0], v0->col[0][1], v0->col[0][2], v0->col[0][3], xff(0x101A), xff(0x101B), xff(0x101D), xff(0x101E),
             g_xf[0x1026], g_bp[0x40], g_bp[0x41], ((g_bp[0] >> 10) & 15) + 1, g_bp[0x28], (g_bp[0x94] & 0xFFFFFF) << 5, (g_bp[0x88] >> 20) & 15, g_bp[0]);
-        if (g_in_dl) {
+        if (g_in_dl || xff(0x101B) > -40.0f) {
+            LOG("   chan c0 %08X a0 %08X c1 %08X amb %08X mat %08X nchan %u light0 col %08X pos %.1f %.1f %.1f dir %.2f %.2f %.2f nrm %.2f %.2f %.2f has %d col0 %.2f %.2f %.2f %.2f\n",
+                g_xf[0x100E], g_xf[0x1010], g_xf[0x100F], g_xf[0x100A], g_xf[0x100C], g_xf[0x1009], g_xf[0x603], xff(0x60A), xff(0x60B), xff(0x60C),
+                xff(0x60D), xff(0x60E), xff(0x60F), raw.nrm[0], raw.nrm[1], raw.nrm[2], raw.has_nrm, v0->col[0][0], v0->col[0][1], v0->col[0][2], v0->col[0][3]);
+            u32 nst = ((g_bp[0x00] >> 10) & 15) + 1;
+            for (u32 st = 0; st < nst; st++) {
+                u32 tref = g_bp[0x28 + st / 2] >> ((st & 1) * 12);
+                int map = (int)(tref & 7);
+                int r0 = texmap_regs_lo[map];
+                u32 taddr = (g_bp[r0 + 0x14] & 0xFFFFFF) << 5;
+                int isefb = 0;
+                for (int e = 0; e < EFBCOPIES; e++) if (efbcopies[e].tex && efbcopies[e].addr == taddr) isefb = 1;
+                LOG("   stage %u: map %d coord %u en %u chan %u tex %08X fmt %u%s cenv %06X aenv %06X ksel %06X\n", st, map, (tref >> 3) & 7, (tref >> 6) & 1,
+                    (tref >> 7) & 7, taddr, (g_bp[r0 + 0x08] >> 20) & 15, isefb ? " (EFB copy)" : "", g_bp[0xC0 + st * 2], g_bp[0xC1 + st * 2], g_bp[0xF6 + st / 2]);
+            }
+            LOG("   regs %06X %06X %06X %06X %06X %06X %06X %06X konst0 %u %u %u %u texgen0 %08X ntg %u\n", g_bp[0xE0], g_bp[0xE1], g_bp[0xE2], g_bp[0xE3], g_bp[0xE4], g_bp[0xE5],
+                g_bp[0xE6], g_bp[0xE7], g_konst[0][0], g_konst[0][1], g_konst[0][2], g_konst[0][3], g_xf[0x1040], g_xf[0x103F]);
             u32 ma = (u32)raw.pmidx * 4;
             LOG("   VCD %08X %08X MI %08X pm %d mtx %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f / %.3f %.3f %.3f %.3f\n", g_cp[0x50], g_cp[0x60], g_cp[0x30], raw.pmidx,
                 xff(ma), xff(ma + 1), xff(ma + 2), xff(ma + 3), xff(ma + 4), xff(ma + 5), xff(ma + 6), xff(ma + 7), xff(ma + 8), xff(ma + 9), xff(ma + 10), xff(ma + 11));
@@ -887,6 +907,7 @@ static void present(int sx, int sy, int sw, int sh) {
     SDL_GL_SwapWindow(window);
     g_frame++;
     if (g_shot_dir && g_frame % (u64)g_shot_every == 0) {
+        if (getenv("FULL_EFB")) { sx = 0; sy = 0; sw = EFB_W; sh = EFB_H; }
         u8* px = malloc((size_t)sw * sh * 4);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_fbo);
         glReadPixels(sx, sy, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, px);
@@ -904,6 +925,7 @@ void gx_copy_efb(void) {
     int sx = (int)(g_bp[0x49] & 0x3FF), sy = (int)((g_bp[0x49] >> 10) & 0x3FF);
     int sw = (int)(g_bp[0x4A] & 0x3FF) + 1, sh = (int)((g_bp[0x4A] >> 10) & 0x3FF) + 1;
     if (ctl & 0x4000) {
+        if (g_render_after > 0 && R->timebase < (u64)(g_render_after * 60750000.0)) { g_frame++; return; }
         present(sx, sy, sw, sh);
     } else {
         /* EFB to texture: keep it as a GL texture keyed by its RAM address. */
@@ -912,7 +934,17 @@ void gx_copy_efb(void) {
         int tw = half ? sw / 2 : sw, th = half ? sh / 2 : sh;
         TexEntry* e = NULL;
         for (int i = 0; i < EFBCOPIES; i++) if (efbcopies[i].tex && efbcopies[i].addr == addr) { e = &efbcopies[i]; break; }
-        if (!e) for (int i = 0; i < EFBCOPIES; i++) if (!efbcopies[i].tex) { e = &efbcopies[i]; glGenTextures(1, &e->tex); break; }
+        if (!e) {
+            /* free slot, else recycle the least recently written copy */
+            int oldest = 0;
+            for (int i = 0; i < EFBCOPIES; i++) {
+                if (!efbcopies[i].tex) { oldest = i; break; }
+                if (efbcopies[i].last_frame < efbcopies[oldest].last_frame) oldest = i;
+            }
+            e = &efbcopies[oldest];
+            if (!e->tex) glGenTextures(1, &e->tex);
+        }
+        e->last_frame = g_frame;
         static int efb_log;
         if (efb_log++ < 10) LOG("render: EFB copy %dx%d at (%d,%d) -> %08X%s\n", tw, th, sx, sy, addr, half ? " (half)" : "");
         if (e) {
