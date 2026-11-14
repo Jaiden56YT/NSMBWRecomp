@@ -1,0 +1,59 @@
+diff --git a/absl/base/internal/sysinfo.cc b/absl/base/internal/sysinfo.cc
+index cd08e51..2f73b04 100644
+--- a/absl/base/internal/sysinfo.cc
++++ b/absl/base/internal/sysinfo.cc
+@@ -465,6 +465,13 @@ pid_t GetTID() {
+   return static_cast<pid_t>(zx_thread_self());
+ }
+ 
++#elif defined(__SWITCH__)
++
++// libnx: pthread_t is a pointer; fold it into a pid_t-sized id.
++pid_t GetTID() {
++  return static_cast<pid_t>(reinterpret_cast<uintptr_t>(pthread_self()) & 0x7fffffff);
++}
++
+ #else
+ 
+ // Fallback implementation of `GetTID` using `pthread_self`.
+diff --git a/absl/base/internal/thread_identity.cc b/absl/base/internal/thread_identity.cc
+index 0471a25..bdc365c 100644
+--- a/absl/base/internal/thread_identity.cc
++++ b/absl/base/internal/thread_identity.cc
+@@ -84,7 +84,7 @@ void SetCurrentThreadIdentity(ThreadIdentity* identity,
+   absl::call_once(init_thread_identity_key_once, AllocateThreadIdentityKey,
+                   reclaimer);
+ 
+-#if defined(__wasi__) || defined(__EMSCRIPTEN__) || defined(__MINGW32__) || \
++#if defined(__wasi__) || defined(__EMSCRIPTEN__) || defined(__MINGW32__) || defined(__SWITCH__) || \
+     defined(__hexagon__)
+   // Emscripten, WASI and MinGW pthread implementations does not support
+   // signals. See
+diff --git a/absl/debugging/internal/elf_mem_image.h b/absl/debugging/internal/elf_mem_image.h
+index c8a1036..5bc8536 100644
+--- a/absl/debugging/internal/elf_mem_image.h
++++ b/absl/debugging/internal/elf_mem_image.h
+@@ -32,7 +32,7 @@
+ #error ABSL_HAVE_ELF_MEM_IMAGE cannot be directly set
+ #endif
+ 
+-#if defined(__ELF__) && !defined(__OpenBSD__) && !defined(__QNX__) &&    \
++#if defined(__ELF__) && !defined(__OpenBSD__) && !defined(__QNX__) && !defined(__SWITCH__) &&    \
+     !defined(__asmjs__) && !defined(__wasm__) && !defined(__HAIKU__) &&  \
+     !defined(__sun) && !defined(__VXWORKS__) && !defined(__hexagon__) && \
+     !defined(__XTENSA__)
+diff --git a/absl/time/internal/cctz/src/time_zone_libc.cc b/absl/time/internal/cctz/src/time_zone_libc.cc
+index 362da1a..a018b8c 100644
+--- a/absl/time/internal/cctz/src/time_zone_libc.cc
++++ b/absl/time/internal/cctz/src/time_zone_libc.cc
+@@ -71,6 +71,10 @@ auto tm_zone(const std::tm& tm) -> decltype(tzname[0]) {
+   const bool is_dst = tm.tm_isdst > 0;
+   return tzname[is_dst];
+ }
++#elif defined(__SWITCH__)
++// newlib's struct tm has neither tm_gmtoff nor tm_zone; libnx time is UTC.
++auto tm_gmtoff(const std::tm&) -> long { return 0; }
++auto tm_zone(const std::tm&) -> const char* { return "UTC"; }
+ #elif defined(__VXWORKS__)
+ // Uses the globals: 'timezone' and 'tzname'.
+ auto tm_gmtoff(const std::tm& tm) -> decltype(timezone + 0) {
