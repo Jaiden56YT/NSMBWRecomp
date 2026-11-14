@@ -723,6 +723,8 @@ int ios_mmio_read(u32 ea, u32* value) {
     return 0;
 }
 
+int ios_busy(void) { return q_count != 0 || bt_ev_count != 0; }
+
 void ios_init(CPUState* cpu) {
     g_cpu = cpu;
     disc_build_map();

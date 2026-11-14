@@ -139,8 +139,30 @@ Reached: file select → player select → opening cutscene → World 1 map → 
 Fixed on the way: EFB-to-texture copies are kept in a 256-entry table that recycles the oldest copy (a
 full 64-entry table dropped the level's light-texture copies, so every lit model rendered black).
 
+## Speed (2026-11-13)
+
+Measured unpaced (`-fast`) on an M4, game seconds per wall second:
+
+| Scene | Before | After |
+|---|---|---|
+| Title | ~0.8× | ~1.5× |
+| Opening cutscene / World map | ~0.5× | ~1.2× |
+| World 1-1 gameplay | ~0.5× | ~1.15–1.2× |
+
+What changed:
+- **Draw batching** (`render.c`): consecutive GX draws with identical state (shader, uniforms, textures,
+  viewport/scissor/depth/blend) are queued into one vertex buffer and drawn with one GL call; flushed on
+  state change, texture upload, EFB copy and present. ~21.6 M GX draws → ~0.54 M GL draws on the title.
+- **Idle skipping** (`main.c`): when the OS idle loop (0x801B4FF0) runs with interrupts enabled and
+  nothing pending, the timebase jumps to the next VI/audio-DMA/DSP/decrementer event.
+- **Texture checks**: 8-byte-per-step hashing, a 32-word sampled change check per frame (full hash
+  every 64 frames), palette hashes cached until the next TLUT load, per-slot lookup memo.
+- **Per-draw vertex setup**: vertex format and XF constants computed once per draw, unlit fast path.
+- **Real-time pacing**: by default the game is held to real time at each retrace (`-fast` disables it;
+  `-noidle` disables idle skipping).
+
 ## Next
-1. Speed: busy scenes run at about half speed (CPU vertex transform, one GL draw per GX draw).
+1. More headroom for the Switch: move the vertex transform to a vertex shader, cut GL state changes.
 2. Root-cause the stuck NW4R sequence sounds (remove the workaround).
 3. Garbled icons in the item menu (a texture format decoding bug).
 2. Not yet in the renderer: indirect textures, fog, z-textures, culling, EFB copies back to RAM, upscaling.

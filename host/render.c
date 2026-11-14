@@ -21,6 +21,10 @@ u8 g_tmem[1 << 20];
 
 static CPUState* R;
 extern u32 g_konst[4][4];
+#define MAXV 65536
+static float vbuf[MAXV * 36];
+static u64 g_frame;
+static void batch_flush(void);
 static SDL_Window* window;
 static SDL_GLContext glctx;
 static GLuint efb_fbo, efb_color, efb_depth;
@@ -106,74 +110,104 @@ static const u8* read_index(const u8** pp, u32 mode, int arr) {
     return array_elem(arr, idx);
 }
 
-static void decode_vertex(const u8* p, int vat, RawVtx* v) {
+typedef struct {
+    u32 pmidx_def, tmidx_def[8];
+    u32 has_pmidx, has_tmidx[8];
+    u32 pos_mode, pos_fmt, pos_n; float pos_scale;
+    u32 nrm_mode, nrm_fmt, nrm_count, nrm_idx3, nrm_elem_bytes; float nrm_scale;
+    u32 col_mode[2], col_comp[2];
+    u32 tex_mode[8], tex_fmt[8], tex_n[8]; float tex_scale[8];
+    int any_tex;
+} VFmt;
+
+static void vfmt_build(int vat, VFmt* f) {
     u32 lo = g_cp[0x50], hi = g_cp[0x60];
     u32 a = g_cp[0x70 + vat], b = g_cp[0x80 + vat], c = g_cp[0x90 + vat];
     u32 mi_a = g_cp[0x30], mi_b = g_cp[0x40];
-    memset(v, 0, sizeof(*v));
-    v->pmidx = mi_a & 0x3F;
-    v->tmidx[0] = (mi_a >> 6) & 0x3F;  v->tmidx[1] = (mi_a >> 12) & 0x3F;
-    v->tmidx[2] = (mi_a >> 18) & 0x3F; v->tmidx[3] = (mi_a >> 24) & 0x3F;
-    v->tmidx[4] = mi_b & 0x3F;         v->tmidx[5] = (mi_b >> 6) & 0x3F;
-    v->tmidx[6] = (mi_b >> 12) & 0x3F; v->tmidx[7] = (mi_b >> 18) & 0x3F;
-    if (lo & 1) v->pmidx = *p++ & 0x3F;
-    for (int t = 0; t < 8; t++) if (lo & (2u << t)) v->tmidx[t] = *p++ & 0x3F;
-
-    /* position */
-    u32 pm = (lo >> 9) & 3;
-    if (pm) {
-        u32 fmt = (a >> 1) & 7, n = (a & 1) ? 3 : 2;
-        float scale = fmt == 4 ? 1.f : 1.f / (float)(1u << ((a >> 4) & 31));
-        const u8* src = pm == 1 ? p : read_index(&p, pm, 0);
-        const u8* s = src ? src : (const u8*)"\0\0\0\0\0\0\0\0\0\0\0\0";
-        for (u32 i = 0; i < n; i++) v->pos[i] = read_comp(&s, fmt, scale);
-        if (pm == 1) p = s;
-    }
-    /* normal */
-    u32 nm = (lo >> 11) & 3;
-    if (nm) {
-        u32 fmt = (a >> 10) & 7, nbt = (a >> 9) & 1, idx3 = (a >> 31) & 1;
-        float scale = fmt <= 1 ? (fmt == 1 ? 1.f / 64 : 1.f / 128) : fmt <= 3 ? (fmt == 3 ? 1.f / 16384 : 1.f / 32768) : 1.f;
-        float* dst[3] = {v->nrm, v->bin, v->tan};
-        int count = nbt ? 3 : 1;
-        if (nm == 1) {
-            for (int k = 0; k < count; k++) for (int i = 0; i < 3; i++) dst[k][i] = read_comp(&p, fmt, scale);
-        } else if (nbt && idx3) {
-            for (int k = 0; k < 3; k++) {
-                const u8* s = read_index(&p, nm, 1);
-                if (s) { s += k * 3 * (fmt == 4 ? 4 : fmt >= 2 ? 2 : 1); for (int i = 0; i < 3; i++) dst[k][i] = read_comp(&s, fmt, scale); }
-            }
-        } else {
-            const u8* s = read_index(&p, nm, 1);
-            if (s) for (int k = 0; k < count; k++) for (int i = 0; i < 3; i++) dst[k][i] = read_comp(&s, fmt, scale);
-        }
-        v->has_nrm = 1;
-    }
-    /* colors */
+    memset(f, 0, sizeof(*f));
+    f->pmidx_def = mi_a & 0x3F;
+    f->tmidx_def[0] = (mi_a >> 6) & 0x3F;  f->tmidx_def[1] = (mi_a >> 12) & 0x3F;
+    f->tmidx_def[2] = (mi_a >> 18) & 0x3F; f->tmidx_def[3] = (mi_a >> 24) & 0x3F;
+    f->tmidx_def[4] = mi_b & 0x3F;         f->tmidx_def[5] = (mi_b >> 6) & 0x3F;
+    f->tmidx_def[6] = (mi_b >> 12) & 0x3F; f->tmidx_def[7] = (mi_b >> 18) & 0x3F;
+    f->has_pmidx = lo & 1;
+    for (int t = 0; t < 8; t++) f->has_tmidx[t] = (lo >> (1 + t)) & 1;
+    f->pos_mode = (lo >> 9) & 3;
+    f->pos_fmt = (a >> 1) & 7;
+    f->pos_n = (a & 1) ? 3 : 2;
+    f->pos_scale = f->pos_fmt == 4 ? 1.f : 1.f / (float)(1u << ((a >> 4) & 31));
+    f->nrm_mode = (lo >> 11) & 3;
+    f->nrm_fmt = (a >> 10) & 7;
+    f->nrm_count = (a >> 9) & 1 ? 3 : 1;
+    f->nrm_idx3 = ((a >> 9) & 1) && ((a >> 31) & 1);
+    f->nrm_scale = f->nrm_fmt <= 1 ? (f->nrm_fmt == 1 ? 1.f / 64 : 1.f / 128) : f->nrm_fmt <= 3 ? (f->nrm_fmt == 3 ? 1.f / 16384 : 1.f / 32768) : 1.f;
+    f->nrm_elem_bytes = 3 * (f->nrm_fmt == 4 ? 4 : f->nrm_fmt >= 2 ? 2 : 1);
     for (int ci = 0; ci < 2; ci++) {
-        u32 cm = (lo >> (13 + 2 * ci)) & 3;
-        u32 comp = ci == 0 ? (a >> 14) & 7 : (a >> 18) & 7;
-        if (!cm) continue;
-        if (cm == 1) read_color(&p, comp, v->col[ci]);
-        else {
-            const u8* s = read_index(&p, cm, 2 + ci);
-            if (s) read_color(&s, comp, v->col[ci]);
-        }
-        v->has_col[ci] = 1;
+        f->col_mode[ci] = (lo >> (13 + 2 * ci)) & 3;
+        f->col_comp[ci] = ci == 0 ? (a >> 14) & 7 : (a >> 18) & 7;
     }
-    /* texture coordinates */
     u32 te[8] = {(a >> 21) & 1, b & 1, (b >> 9) & 1, (b >> 18) & 1, (b >> 27) & 1, (c >> 5) & 1, (c >> 14) & 1, (c >> 23) & 1};
     u32 tf[8] = {(a >> 22) & 7, (b >> 1) & 7, (b >> 10) & 7, (b >> 19) & 7, (b >> 28) & 7, (c >> 6) & 7, (c >> 15) & 7, (c >> 24) & 7};
     u32 tq[8] = {(a >> 25) & 31, (b >> 4) & 31, (b >> 13) & 31, (b >> 22) & 31, c & 31, (c >> 9) & 31, (c >> 18) & 31, (c >> 27) & 31};
     for (int t = 0; t < 8; t++) {
-        u32 tm = (hi >> (2 * t)) & 3;
-        if (!tm) continue;
-        float scale = tf[t] == 4 ? 1.f : 1.f / (float)(1u << tq[t]);
-        u32 n = te[t] ? 2 : 1;
-        if (tm == 1) { for (u32 i = 0; i < n; i++) v->tex[t][i] = read_comp(&p, tf[t], scale); }
+        f->tex_mode[t] = (hi >> (2 * t)) & 3;
+        f->tex_fmt[t] = tf[t];
+        f->tex_n[t] = te[t] ? 2 : 1;
+        f->tex_scale[t] = tf[t] == 4 ? 1.f : 1.f / (float)(1u << tq[t]);
+        if (f->tex_mode[t]) f->any_tex = 1;
+    }
+}
+
+static const u8 zero_elem[64];
+
+static void decode_vertex(const u8* p, const VFmt* f, RawVtx* v) {
+    v->pmidx = (int)f->pmidx_def;
+    for (int t = 0; t < 8; t++) v->tmidx[t] = (int)f->tmidx_def[t];
+    if (f->has_pmidx) v->pmidx = *p++ & 0x3F;
+    for (int t = 0; t < 8; t++) if (f->has_tmidx[t]) v->tmidx[t] = *p++ & 0x3F;
+
+    v->pos[2] = 0;
+    if (f->pos_mode) {
+        const u8* src = f->pos_mode == 1 ? p : read_index(&p, f->pos_mode, 0);
+        const u8* s2 = src ? src : zero_elem;
+        for (u32 i = 0; i < f->pos_n; i++) v->pos[i] = read_comp(&s2, f->pos_fmt, f->pos_scale);
+        if (f->pos_mode == 1) p = s2;
+    }
+    v->has_nrm = 0;
+    if (f->nrm_mode) {
+        float* dst[3] = {v->nrm, v->bin, v->tan};
+        if (f->nrm_mode == 1) {
+            for (u32 k = 0; k < f->nrm_count; k++) for (int i = 0; i < 3; i++) dst[k][i] = read_comp(&p, f->nrm_fmt, f->nrm_scale);
+        } else if (f->nrm_idx3) {
+            for (int k = 0; k < 3; k++) {
+                const u8* s2 = read_index(&p, f->nrm_mode, 1);
+                if (s2) { s2 += (u32)k * f->nrm_elem_bytes; for (int i = 0; i < 3; i++) dst[k][i] = read_comp(&s2, f->nrm_fmt, f->nrm_scale); }
+            }
+        } else {
+            const u8* s2 = read_index(&p, f->nrm_mode, 1);
+            if (s2) for (u32 k = 0; k < f->nrm_count; k++) for (int i = 0; i < 3; i++) dst[k][i] = read_comp(&s2, f->nrm_fmt, f->nrm_scale);
+        }
+        v->has_nrm = 1;
+    }
+    for (int ci = 0; ci < 2; ci++) {
+        v->has_col[ci] = 0;
+        if (!f->col_mode[ci]) { v->col[ci][0] = v->col[ci][1] = v->col[ci][2] = v->col[ci][3] = 0; continue; }
+        if (f->col_mode[ci] == 1) read_color(&p, f->col_comp[ci], v->col[ci]);
         else {
-            const u8* s = read_index(&p, tm, 4 + t);
-            if (s) for (u32 i = 0; i < n; i++) v->tex[t][i] = read_comp(&s, tf[t], scale);
+            const u8* s2 = read_index(&p, f->col_mode[ci], 2 + ci);
+            if (s2) read_color(&s2, f->col_comp[ci], v->col[ci]);
+        }
+        v->has_col[ci] = 1;
+    }
+    if (!f->any_tex) return;
+    for (int t = 0; t < 8; t++) {
+        u32 tm = f->tex_mode[t];
+        if (!tm) continue;
+        v->tex[t][1] = 0;
+        if (tm == 1) { for (u32 i = 0; i < f->tex_n[t]; i++) v->tex[t][i] = read_comp(&p, f->tex_fmt[t], f->tex_scale[t]); }
+        else {
+            const u8* s2 = read_index(&p, tm, 4 + t);
+            if (s2) for (u32 i = 0; i < f->tex_n[t]; i++) v->tex[t][i] = read_comp(&s2, f->tex_fmt[t], f->tex_scale[t]);
         }
     }
 }
@@ -249,6 +283,32 @@ static void light_channel(int chan, const float* vpos, const float* vn, const Ra
     }
 }
 
+static struct {
+    float p[6], zrange, farz;
+    int persp;
+    u32 ntg, dual;
+    int lit[2][2];       /* [chan][color/alpha]: lighting enabled */
+    int matsrc[2][2];    /* vertex colour as material */
+    float mat[2][4];     /* material register colours */
+} X;
+
+static void xf_prepare(void) {
+    for (int i = 0; i < 6; i++) X.p[i] = xff(0x1020 + (u32)i);
+    X.persp = g_xf[0x1026] == 0;
+    X.zrange = xff(0x101C);
+    X.farz = xff(0x101F);
+    X.ntg = g_xf[0x103F] & 15;
+    X.dual = g_xf[0x1012] & 1;
+    for (int c = 0; c < 2; c++) {
+        for (int part = 0; part < 2; part++) {
+            u32 ctl = g_xf[(part ? 0x1010 : 0x100E) + c];
+            X.lit[c][part] = (ctl & 2) != 0;
+            X.matsrc[c][part] = ctl & 1;
+        }
+        unpack_rgba(g_xf[0x100C + c], X.mat[c]);
+    }
+}
+
 static void transform_vertex(const RawVtx* rv, OutVtx* o) {
     float in[3] = {rv->pos[0], rv->pos[1], rv->pos[2]};
     float vp[3];
@@ -264,12 +324,12 @@ static void transform_vertex(const RawVtx* rv, OutVtx* o) {
     }
 
     /* projection (XF 0x1020..0x1026) */
-    float p0 = xff(0x1020), p1 = xff(0x1021), p2 = xff(0x1022), p3 = xff(0x1023), p4 = xff(0x1024), p5 = xff(0x1025);
+    float p0 = X.p[0], p1 = X.p[1], p2 = X.p[2], p3 = X.p[3], p4 = X.p[4], p5 = X.p[5];
     float cx, cy, cz, cw;
-    if (g_xf[0x1026] == 0) { cx = p0 * vp[0] + p1 * vp[2]; cy = p2 * vp[1] + p3 * vp[2]; cz = p4 * vp[2] + p5; cw = -vp[2]; }
+    if (X.persp) { cx = p0 * vp[0] + p1 * vp[2]; cy = p2 * vp[1] + p3 * vp[2]; cz = p4 * vp[2] + p5; cw = -vp[2]; }
     else { cx = p0 * vp[0] + p1; cy = p2 * vp[1] + p3; cz = p4 * vp[2] + p5; cw = 1; }
     /* GX depth: z/w in [-1,0] -> viewport farz + z*zrange (24-bit) */
-    float zrange = xff(0x101C), farz = xff(0x101F);
+    float zrange = X.zrange, farz = X.farz;
     float zn = cw != 0 ? cz / cw : 0;
     float depth = (farz + zn * zrange) / 16777216.f;
     o->pos[0] = cx;
@@ -277,11 +337,19 @@ static void transform_vertex(const RawVtx* rv, OutVtx* o) {
     o->pos[2] = (depth * 2 - 1) * cw;
     o->pos[3] = cw;
 
-    for (int c = 0; c < 2; c++) light_channel(c, vp, vn, rv, o->col[c]);
+    for (int c = 0; c < 2; c++) {
+        if (!X.lit[c][0] && !X.lit[c][1]) {  /* unlit: material colour straight through */
+            const float* m0 = X.matsrc[c][0] ? rv->col[c] : X.mat[c];
+            const float* m1 = X.matsrc[c][1] ? rv->col[c] : X.mat[c];
+            o->col[c][0] = m0[0]; o->col[c][1] = m0[1]; o->col[c][2] = m0[2]; o->col[c][3] = m1[3];
+        } else {
+            light_channel(c, vp, vn, rv, o->col[c]);
+        }
+    }
 
     /* texgen */
-    u32 ntg = g_xf[0x103F] & 15;
-    int dual = g_xf[0x1012] & 1;
+    u32 ntg = X.ntg;
+    int dual = (int)X.dual;
     for (u32 t = 0; t < 8; t++) {
         o->tex[t][0] = o->tex[t][1] = 0; o->tex[t][2] = 1;
         if (t >= ntg) continue;
@@ -328,7 +396,7 @@ static void transform_vertex(const RawVtx* rv, OutVtx* o) {
 
 typedef struct {
     u32 addr, w, h, fmt, tlut_hash;
-    u64 hash;
+    u64 hash, quick;
     u64 last_frame;
     GLuint tex;
     int efb;  /* made by an EFB copy: never re-decoded */
@@ -339,10 +407,45 @@ static TexEntry texcache[TEXCACHE];
 #define EFBCOPIES 256
 static TexEntry efbcopies[EFBCOPIES];  /* EFB-to-texture copies, found by address */
 
+/* Content hash: 8 bytes per step (textures are 32-byte aligned). */
 static u64 fnv(const u8* p, size_t n) {
-    u64 h = 1469598103934665603ull;
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ull; }
+    u64 h = 1469598103934665603ull ^ n;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        u64 w;
+        memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0x9E3779B97F4A7C15ull;
+        h ^= h >> 29;
+    }
+    for (; i < n; i++) { h ^= p[i]; h *= 1099511628211ull; }
     return h;
+}
+
+/* Cheap change detector: 32 words spread over the texture. */
+static u64 quick_hash(const u8* p, size_t n) {
+    u64 h = n;
+    if (n < 256) return fnv(p, n);
+    size_t step = (n / 32) & ~(size_t)7;
+    for (size_t i = 0; i + 8 <= n; i += step) {
+        u64 w;
+        memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0x9E3779B97F4A7C15ull;
+    }
+    u64 w;
+    memcpy(&w, p + n - 8, 8);
+    return (h ^ w) * 0x9E3779B97F4A7C15ull;
+}
+
+/* Palettes only change on a TLUT load, so cache their hashes until then. */
+static u32 tmem_generation = 1;
+static u32 tlut_hash_cached(const u8* pal, u32 off, u32 bytes, u32 fmt) {
+    static struct { u32 off, bytes, gen; u32 h; } cache[64];
+    u32 slot = (off >> 9) & 63;
+    if (cache[slot].off == off && cache[slot].bytes == bytes && cache[slot].gen == tmem_generation)
+        return cache[slot].h ^ fmt;
+    u32 h = (u32)fnv(pal, bytes);
+    cache[slot].off = off; cache[slot].bytes = bytes; cache[slot].gen = tmem_generation; cache[slot].h = h;
+    return h ^ fmt;
 }
 
 static void rgb5a3(u16 v, u8* o) {
@@ -470,7 +573,23 @@ static void decode_texture(const u8* src, u32 fmt, u32 w, u32 h, const u8* pal, 
 
 static const int texmap_regs_lo[8] = {0x80, 0x81, 0x82, 0x83, 0xA0, 0xA1, 0xA2, 0xA3};
 
+static GLuint bind_texmap_slow(int map, u64 frame);
+
+/* Same registers, same frame, no palette load since: same texture. */
 static GLuint bind_texmap(int map, u64 frame) {
+    static struct { u32 img0, img3, tlut; u64 frame; u32 gen; GLuint tex; } memo[8];
+    int r0 = texmap_regs_lo[map];
+    u32 img0 = g_bp[r0 + 0x08], img3 = g_bp[r0 + 0x14], tlut = g_bp[r0 + 0x18];
+    if (memo[map].tex && memo[map].frame == frame && memo[map].img0 == img0 && memo[map].img3 == img3 &&
+        memo[map].tlut == tlut && memo[map].gen == tmem_generation)
+        return memo[map].tex;
+    GLuint t = bind_texmap_slow(map, frame);
+    memo[map].img0 = img0; memo[map].img3 = img3; memo[map].tlut = tlut;
+    memo[map].frame = frame; memo[map].gen = tmem_generation; memo[map].tex = t;
+    return t;
+}
+
+static GLuint bind_texmap_slow(int map, u64 frame) {
     int r0 = texmap_regs_lo[map];
     u32 mode0 = g_bp[r0];
     u32 img0 = g_bp[r0 + 0x08], img3 = g_bp[r0 + 0x14], tlut = g_bp[r0 + 0x18];
@@ -479,7 +598,7 @@ static GLuint bind_texmap(int map, u64 frame) {
     u32 tlut_off = (tlut & 0x3FF) << 9, tlut_fmt = (tlut >> 10) & 3;
     const u8* pal = g_tmem + (tlut_off & (sizeof(g_tmem) - 1));
     u32 ncol = fmt == 8 ? 16 : fmt == 9 ? 256 : fmt == 10 ? 16384 : 0;
-    u32 tlut_hash = ncol ? (u32)fnv(pal, ncol * 2 > sizeof(g_tmem) - tlut_off ? 0 : ncol * 2) ^ tlut_fmt : 0;
+    u32 tlut_hash = ncol ? tlut_hash_cached(pal, tlut_off, ncol * 2 > sizeof(g_tmem) - tlut_off ? 0 : ncol * 2, tlut_fmt) : 0;
 
     TexEntry* e = NULL;
     for (int i = 0; i < EFBCOPIES; i++)
@@ -492,8 +611,13 @@ static GLuint bind_texmap(int map, u64 frame) {
     const u8* src = gptr(addr);
     u32 size = tex_size(fmt, w, h);
     if (e && !e->efb && e->last_frame != frame && src) {
-        u64 hh = fnv(src, size);
-        if (hh != e->hash) { e->hash = hh; e->last_frame = 0; goto upload; }
+        /* once per frame: sample check every frame, full hash every 64 frames */
+        u64 q = quick_hash(src, size);
+        if (q != e->quick || (frame & 63) == (e->addr >> 5 & 63)) {
+            u64 hh = fnv(src, size);
+            e->quick = q;
+            if (hh != e->hash) { e->hash = hh; e->last_frame = 0; goto upload; }
+        }
         e->last_frame = frame;
     }
     if (e) goto params;
@@ -505,8 +629,10 @@ static GLuint bind_texmap(int map, u64 frame) {
     if (!e->tex) glGenTextures(1, &e->tex);
     e->addr = addr; e->w = w; e->h = h; e->fmt = fmt; e->tlut_hash = tlut_hash; e->efb = 0;
     e->hash = src ? fnv(src, size) : 0;
+    e->quick = src ? quick_hash(src, size) : 0;
 upload:
     e->last_frame = frame;
+    batch_flush();  /* queued draws may still sample the old contents */
     {
         u8* rgba = malloc((size_t)w * h * 4);
         if (src) decode_texture(src, fmt, w, h, pal, tlut_fmt, rgba);
@@ -516,13 +642,6 @@ upload:
         free(rgba);
     }
 params:
-    glBindTexture(GL_TEXTURE_2D, e->tex);
-    static const GLenum wraps[4] = {GL_CLAMP_TO_EDGE, GL_REPEAT, GL_MIRRORED_REPEAT, GL_REPEAT};
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)wraps[mode0 & 3]);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)wraps[(mode0 >> 2) & 3]);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (mode0 & 0x10) ? GL_LINEAR : GL_NEAREST);
-    u32 minf = (mode0 >> 5) & 7;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (minf == 0 || minf == 1 || minf == 2) && !(minf & 1) ? GL_NEAREST : GL_LINEAR);
     return e->tex;
 }
 
@@ -534,6 +653,7 @@ void render_tlut_load(void) {
     const u8* s = R ? gptr(src) : NULL;
     if (!s || dst + count > sizeof(g_tmem)) return;
     memcpy(g_tmem + dst, s, count);
+    tmem_generation++;
 }
 
 /* ------------------------------------------------------------------ */
@@ -744,44 +864,98 @@ static float s11(u32 v) { int x = (int)(v & 0x7FF); if (x & 0x400) x -= 0x800; r
 /* ------------------------------------------------------------------ */
 /* pipeline state                                                      */
 
-static void apply_state(void) {
-    /* viewport */
+typedef struct {
+    GLuint prog;
+    GLenum mode;
+    float regs[16], konst[16], aref[2], calpha;
+    GLuint tex[8];
+    u32 texmode[8];
+    int vp[4], sc[4];
+    u32 zmode, cmode, has_alpha;
+} DrawState;
+
+static DrawState cur_state;
+static Shader* cur_shader;
+static u32 batch_n;          /* vertices queued in vbuf */
+u64 g_gl_draws, g_gx_batched;
+
+static void capture_state(DrawState* st, Shader* sh, GLenum mode) {
+    memset(st, 0, sizeof(*st));
+    st->prog = sh->prog;
+    st->mode = mode;
+    for (int i = 0; i < 4; i++) {
+        u32 ra = g_bp[0xE0 + i * 2], bg = g_bp[0xE1 + i * 2];
+        st->regs[i * 4 + 0] = s11(ra); st->regs[i * 4 + 3] = s11(ra >> 12);
+        st->regs[i * 4 + 2] = s11(bg); st->regs[i * 4 + 1] = s11(bg >> 12);
+        for (int k = 0; k < 4; k++) st->konst[i * 4 + k] = g_konst[i][k] / 255.f;
+    }
+    st->aref[0] = (g_bp[0xF3] & 0xFF) / 255.f;
+    st->aref[1] = ((g_bp[0xF3] >> 8) & 0xFF) / 255.f;
+    st->calpha = (g_bp[0x42] & 0x100) ? (g_bp[0x42] & 0xFF) / 255.f : -1.f;
     float wd = xff(0x101A), ht = xff(0x101B), xo = xff(0x101D), yo = xff(0x101E);
-    float left = xo - wd - 342, top = yo + ht - 342;
-    glViewport((GLint)lroundf(left), (GLint)lroundf(top), (GLsizei)lroundf(2 * wd), (GLsizei)lroundf(-2 * ht));
-    /* scissor */
-    int st = (int)(g_bp[0x20] & 0x7FF) - 342, sl = (int)((g_bp[0x20] >> 12) & 0x7FF) - 342;
-    int sb = (int)(g_bp[0x21] & 0x7FF) - 342, sr = (int)((g_bp[0x21] >> 12) & 0x7FF) - 342;
+    st->vp[0] = (int)lroundf(xo - wd - 342); st->vp[1] = (int)lroundf(yo + ht - 342);
+    st->vp[2] = (int)lroundf(2 * wd);         st->vp[3] = (int)lroundf(-2 * ht);
+    int top = (int)(g_bp[0x20] & 0x7FF) - 342, left = (int)((g_bp[0x20] >> 12) & 0x7FF) - 342;
+    int bot = (int)(g_bp[0x21] & 0x7FF) - 342, right = (int)((g_bp[0x21] >> 12) & 0x7FF) - 342;
+    st->sc[0] = left; st->sc[1] = top;
+    st->sc[2] = right - left + 1 > 0 ? right - left + 1 : 0;
+    st->sc[3] = bot - top + 1 > 0 ? bot - top + 1 : 0;
+    st->zmode = dbg_nodepth ? 0 : g_bp[0x40];
+    st->cmode = dbg_noblend ? g_bp[0x41] & ~0x801u : g_bp[0x41];
+    st->has_alpha = (g_bp[0x43] & 7) == 1;
+}
+
+static void batch_flush(void) {
+    if (!batch_n) return;
+    const DrawState* st = &cur_state;
+    glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
+    glViewport(st->vp[0], st->vp[1], st->vp[2], st->vp[3]);
     if (dbg_noscissor) glDisable(GL_SCISSOR_TEST); else glEnable(GL_SCISSOR_TEST);
-    glScissor(sl, st, sr - sl + 1 > 0 ? sr - sl + 1 : 0, sb - st + 1 > 0 ? sb - st + 1 : 0);
-    /* depth */
-    u32 z = g_bp[0x40];
+    glScissor(st->sc[0], st->sc[1], st->sc[2], st->sc[3]);
     static const GLenum zf[8] = {GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS};
-    if (dbg_nodepth) z = 0;
-    if (z & 1) { glEnable(GL_DEPTH_TEST); glDepthFunc(zf[(z >> 1) & 7]); } else glDisable(GL_DEPTH_TEST);
-    glDepthMask((z & 1) && (z & 0x10) ? GL_TRUE : GL_FALSE);
-    /* blending */
-    u32 cm = g_bp[0x41];
-    if (dbg_noblend) cm &= ~0x801u;
+    if (st->zmode & 1) { glEnable(GL_DEPTH_TEST); glDepthFunc(zf[(st->zmode >> 1) & 7]); } else glDisable(GL_DEPTH_TEST);
+    glDepthMask((st->zmode & 1) && (st->zmode & 0x10) ? GL_TRUE : GL_FALSE);
     static const GLenum srcf[8] = {GL_ZERO, GL_ONE, GL_DST_COLOR, GL_ONE_MINUS_DST_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
     static const GLenum dstf[8] = {GL_ZERO, GL_ONE, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA};
-    if (cm & 0x800) {
-        glEnable(GL_BLEND); glBlendEquation(GL_FUNC_REVERSE_SUBTRACT); glBlendFunc(GL_ONE, GL_ONE);
-    } else if (cm & 1) {
-        glEnable(GL_BLEND); glBlendEquation(GL_FUNC_ADD); glBlendFunc(srcf[(cm >> 8) & 7], dstf[(cm >> 5) & 7]);
-    } else glDisable(GL_BLEND);
-    int has_alpha = (g_bp[0x43] & 7) == 1;  /* RGBA6_Z24 */
-    glColorMask((cm & 8) != 0, (cm & 8) != 0, (cm & 8) != 0, has_alpha && (cm & 0x10));
-    glDisable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_CLAMP);  /* GX clamps depth instead of clipping at the far plane */
+    u32 cm = st->cmode;
+    if (cm & 0x800) { glEnable(GL_BLEND); glBlendEquation(GL_FUNC_REVERSE_SUBTRACT); glBlendFunc(GL_ONE, GL_ONE); }
+    else if (cm & 1) { glEnable(GL_BLEND); glBlendEquation(GL_FUNC_ADD); glBlendFunc(srcf[(cm >> 8) & 7], dstf[(cm >> 5) & 7]); }
+    else glDisable(GL_BLEND);
+    glColorMask((cm & 8) != 0, (cm & 8) != 0, (cm & 8) != 0, st->has_alpha && (cm & 0x10));
+    glUseProgram(st->prog);
+    glUniform4fv(cur_shader->u_reg, 4, st->regs);
+    glUniform4fv(cur_shader->u_konst, 4, st->konst);
+    glUniform2f(cur_shader->u_aref, st->aref[0], st->aref[1]);
+    glUniform1f(cur_shader->u_const_alpha, st->calpha);
+    static const GLenum wraps[4] = {GL_CLAMP_TO_EDGE, GL_REPEAT, GL_MIRRORED_REPEAT, GL_REPEAT};
+    for (int m = 0; m < 8; m++) {
+        if (!st->tex[m]) continue;
+        glActiveTexture(GL_TEXTURE0 + (GLenum)m);
+        glBindTexture(GL_TEXTURE_2D, st->tex[m]);
+        /* sampler parameters only when they change for this texture */
+        static u32 applied[1 << 16];
+        u32 mode0 = st->texmode[m];
+        if (st->tex[m] < (1u << 16) && applied[st->tex[m]] != mode0 + 1) {
+            applied[st->tex[m]] = mode0 + 1;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)wraps[mode0 & 3]);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)wraps[(mode0 >> 2) & 3]);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (mode0 & 0x10) ? GL_LINEAR : GL_NEAREST);
+            u32 minf = (mode0 >> 5) & 7;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (minf == 0 || minf == 2) ? GL_NEAREST : GL_LINEAR);
+        }
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(batch_n * 36 * sizeof(float)), vbuf, GL_STREAM_DRAW);
+    glDrawArrays(st->mode, 0, (GLsizei)batch_n);
+    g_gl_draws++;
+    batch_n = 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* drawing                                                             */
 
-#define MAXV 65536
-static float vbuf[MAXV * 36];
-static u64 g_frame;
 
 double g_render_after;  /* -ra SECS: skip drawing before this guest time (faster test runs) */
 
@@ -791,13 +965,34 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
     static RawVtx raw;
     static OutVtx outv[MAXV / 3];
     if (count > MAXV / 3) count = MAXV / 3;
+    static VFmt vf;
+    vfmt_build(vat, &vf);
+    memset(&raw, 0, sizeof(raw));
+    xf_prepare();
     for (u32 i = 0; i < count; i++) {
-        decode_vertex(data + (size_t)i * (size_t)vsize, vat, &raw);
+        decode_vertex(data + (size_t)i * (size_t)vsize, &vf, &raw);
         transform_vertex(&raw, &outv[i]);
     }
-    /* expand to GL primitives */
-    u32 n = 0;
-    GLenum mode = GL_TRIANGLES;
+    /* primitive type, then the draw state; a change of state flushes the batch */
+    GLenum mode = prim == 0xA8 || prim == 0xB0 ? GL_LINES : prim == 0xB8 ? GL_POINTS : GL_TRIANGLES;
+    if (prim < 0x80 || prim > 0xB8) return;
+    Shader* sh = get_shader();
+    DrawState st;
+    capture_state(&st, sh, mode);
+    u32 ns = ((g_bp[0x00] >> 10) & 15) + 1;
+    for (u32 s2 = 0; s2 < ns; s2++) {
+        u32 tref = g_bp[0x28 + s2 / 2] >> ((s2 & 1) * 12);
+        if (!((tref >> 6) & 1)) continue;
+        int m = (int)(tref & 7);
+        if (st.tex[m]) continue;
+        st.tex[m] = bind_texmap(m, g_frame);  /* may upload (flushes first) */
+        st.texmode[m] = g_bp[texmap_regs_lo[m]];
+    }
+    if (batch_n && (memcmp(&st, &cur_state, sizeof(st)) != 0 || batch_n + count * 3 > MAXV)) batch_flush();
+    cur_state = st;
+    cur_shader = sh;
+    g_gx_batched++;
+    u32 n = batch_n;
 #define EMIT(i) memcpy(vbuf + (size_t)(n++) * 36, &outv[i], sizeof(OutVtx))
     switch (prim) {
     case 0x80: case 0x88:
@@ -806,12 +1001,13 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
     case 0x90: for (u32 i = 0; i + 2 < count; i += 3) { EMIT(i); EMIT(i + 1); EMIT(i + 2); } break;
     case 0x98: for (u32 i = 0; i + 2 < count; i++) { if (i & 1) { EMIT(i + 1); EMIT(i); EMIT(i + 2); } else { EMIT(i); EMIT(i + 1); EMIT(i + 2); } } break;
     case 0xA0: for (u32 i = 1; i + 1 < count; i++) { EMIT(0); EMIT(i); EMIT(i + 1); } break;
-    case 0xA8: mode = GL_LINES; for (u32 i = 0; i + 1 < count; i += 2) { EMIT(i); EMIT(i + 1); } break;
-    case 0xB0: mode = GL_LINES; for (u32 i = 0; i + 1 < count; i++) { EMIT(i); EMIT(i + 1); } break;
-    case 0xB8: mode = GL_POINTS; for (u32 i = 0; i < count; i++) EMIT(i); break;
+    case 0xA8: for (u32 i = 0; i + 1 < count; i += 2) { EMIT(i); EMIT(i + 1); } break;
+    case 0xB0: for (u32 i = 0; i + 1 < count; i++) { EMIT(i); EMIT(i + 1); } break;
+    case 0xB8: for (u32 i = 0; i < count; i++) EMIT(i); break;
     default: return;
     }
 #undef EMIT
+    batch_n = n;
     if (!n) return;
     static long dump_frame = -2;
     if (dump_frame == -2) { const char* e = getenv("DUMP_FRAME"); dump_frame = e ? atol(e) : -1; }
@@ -849,41 +1045,6 @@ void gx_draw(u32 prim, int vat, u32 count, const u8* data, int vsize) {
                     outv[k].tex[0][0], outv[k].tex[0][1], outv[k].tex[0][2], outv[k].col[0][0], outv[k].col[0][1], outv[k].col[0][2], outv[k].col[0][3]);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
-    apply_state();
-    Shader* sh = get_shader();
-    glUseProgram(sh->prog);
-    float regs[16], konst[16];
-    for (int i = 0; i < 4; i++) {
-        u32 ra = g_bp[0xE0 + i * 2], bg = g_bp[0xE1 + i * 2];
-        regs[i * 4 + 0] = s11(ra); regs[i * 4 + 3] = s11(ra >> 12);
-        regs[i * 4 + 2] = s11(bg); regs[i * 4 + 1] = s11(bg >> 12);
-    }
-    extern u32 g_konst[4][4];
-    for (int i = 0; i < 4; i++) for (int k = 0; k < 4; k++) konst[i * 4 + k] = g_konst[i][k] / 255.f;
-    glUniform4fv(sh->u_reg, 4, regs);
-    glUniform4fv(sh->u_konst, 4, konst);
-    glUniform2f(sh->u_aref, (g_bp[0xF3] & 0xFF) / 255.f, ((g_bp[0xF3] >> 8) & 0xFF) / 255.f);
-    glUniform1f(sh->u_const_alpha, (g_bp[0x42] & 0x100) ? (g_bp[0x42] & 0xFF) / 255.f : -1.f);
-
-    /* textures used by enabled stages */
-    u32 ns = ((g_bp[0x00] >> 10) & 15) + 1;
-    u32 used = 0;
-    for (u32 s = 0; s < ns; s++) {
-        u32 tref = g_bp[0x28 + s / 2] >> ((s & 1) * 12);
-        if ((tref >> 6) & 1) used |= 1u << (tref & 7);
-    }
-    for (int m = 0; m < 8; m++) {
-        if (!(used & (1u << m))) continue;
-        glActiveTexture(GL_TEXTURE0 + (GLenum)m);
-        bind_texmap(m, g_frame);
-    }
-    glActiveTexture(GL_TEXTURE0);
-
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(n * 36 * sizeof(float)), vbuf, GL_STREAM_DRAW);
-    glDrawArrays(mode, 0, (GLsizei)n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -921,6 +1082,8 @@ static void present(int sx, int sy, int sw, int sh) {
 
 void gx_copy_efb(void) {
     if (!render_ok) return;
+    batch_flush();
+    tmem_generation++;  /* a copy may replace a texture already looked up this frame */
     u32 ctl = g_bp[0x52];
     int sx = (int)(g_bp[0x49] & 0x3FF), sy = (int)((g_bp[0x49] >> 10) & 0x3FF);
     int sw = (int)(g_bp[0x4A] & 0x3FF) + 1, sh = (int)((g_bp[0x4A] >> 10) & 0x3FF) + 1;

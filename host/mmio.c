@@ -4,6 +4,7 @@
 #include "host.h"
 
 #include <string.h>
+#include <time.h>
 #include <stdlib.h>
 
 void gx_fifo_write(CPUState* cpu, u64 value, u8 size);
@@ -345,14 +346,46 @@ void mmio_install(CPUState* cpu) {
     cpu->external_write = ext_write;
 }
 
+/* Earliest timebase at which a hardware event is due (for idle skipping). */
+u64 mmio_next_event_tb(void) {
+    u64 t = g_vi_next_tb;
+    if (adma_on && adma_next_tb < t) t = adma_next_tb;
+    if (dsp_reply_pending && dsp_reply_tb < t) t = dsp_reply_tb;
+    return t;
+}
+
+/* Real-time pacing: keep guest time from running ahead of the wall clock. */
+int g_fast;
+static void pace(CPUState* cpu) {
+    static u64 tb0, ns0;
+    if (g_fast) return;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    u64 now = (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
+    if (!ns0) { ns0 = now; tb0 = cpu->timebase; return; }
+    u64 guest_ns = (cpu->timebase - tb0) * 1000000ull / 60750ull;  /* 60.75 MHz: 1 tick = 16.46 ns */
+    u64 real_ns = now - ns0;
+    if (guest_ns > real_ns) {
+        u64 d = guest_ns - real_ns;
+        if (d > 200000000ull) { ns0 = now; tb0 = cpu->timebase; return; }  /* way ahead: resync */
+        struct timespec sl = {(time_t)(d / 1000000000ull), (long)(d % 1000000000ull)};
+        nanosleep(&sl, NULL);
+    } else if (real_ns - guest_ns > 250000000ull) {
+        ns0 = now; tb0 = cpu->timebase;  /* behind by > 250 ms: don't try to catch up */
+    }
+}
+
 void mmio_tick(CPUState* cpu) {
     /* 60 Hz fields: timebase is 60.75 MHz. */
     if (cpu->timebase >= g_vi_next_tb) {
         g_vi_next_tb = cpu->timebase + 1012500u;
         vi_retrace();
+        pace(cpu);
         if (g_vi_count % 300 == 0) {
             extern u64 g_gx_frames, g_pe_done;
-            LOG("tick: vi %llu xfb %llu pe_done %llu pi_sr %08X pi_mr %08X msr %08X\n", (unsigned long long)g_vi_count,
+            struct timespec wt; clock_gettime(CLOCK_MONOTONIC, &wt);
+            static double w0; double w = wt.tv_sec + wt.tv_nsec / 1e9; if (!w0) w0 = w;
+            LOG("tick: wall %.1f guest %.1f vi %llu xfb %llu pe_done %llu pi_sr %08X pi_mr %08X msr %08X\n", w - w0, cpu->timebase / 60750000.0, (unsigned long long)g_vi_count,
                 (unsigned long long)g_gx_frames, (unsigned long long)g_pe_done, mmio_get32(0xCC003000u), mmio_get32(0xCC003004u), cpu->msr);
         }
         { int render_poll(void); if (!render_poll()) exit(0); }

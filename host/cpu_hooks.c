@@ -43,6 +43,12 @@ static void dec_write(CPUState* cpu, u32 value) {
     dec_armed = 1;
 }
 
+/* Timebase at which the decrementer will pass zero (or ~0 if not armed). */
+u64 dec_next_tb(void) {
+    if (!dec_armed || (s32)dec_value < 0) return ~0ull;
+    return dec_tb + (u64)dec_value + 1;
+}
+
 /* True once when the decrementer passes zero. */
 int dec_expired(CPUState* cpu) {
     if (!dec_armed) return 0;

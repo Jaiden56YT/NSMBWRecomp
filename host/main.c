@@ -58,6 +58,8 @@ const char* g_disc_root = "extracted";
 static u32 g_break = 0x801A9BA0u; /* PPCHalt */
 static u32 g_dump[8]; static int g_ndump;
 static int g_norender;
+static int g_noidle;
+static u64 g_idle_skips;
 static u32 g_count_pc[32] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
 static u64 g_count_n[32];
 static int g_count_on;
@@ -227,6 +229,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-S") && i + 1 < argc) { extern int g_shot_every; g_shot_every = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "-hidden")) { extern int g_hidden_window; g_hidden_window = 1; }
         else if (!strcmp(argv[i], "-norender")) g_norender = 1;
+        else if (!strcmp(argv[i], "-fast")) { extern int g_fast; g_fast = 1; }
+        else if (!strcmp(argv[i], "-noidle")) g_noidle = 1;
         else if (!strcmp(argv[i], "-press") && i + 1 < argc) {
             /* testing: -press "SECS:BUTTONHEX[,SECS:BUTTONHEX...]" holds buttons for 0.2 s at guest time SECS */
             g_press = argv[++i];
@@ -276,6 +280,17 @@ int main(int argc, char** argv) {
            generated code only knows the cached virtual ones. */
         if (cpu.pc < 0x01800000u) cpu.pc |= 0x80000000u;
         if (g_count_on) for (int c = 0; c < 32; c++) if (cpu.pc == g_count_pc[c]) g_count_n[c]++;
+        /* Idle skipping: the OS idle loop (all threads waiting, interrupts on)
+           can only end on an interrupt, so jump to the next scheduled event. */
+        if (cpu.pc == 0x801B4FF0u && (cpu.msr & 0x8000u) && !pi_pending() && !cbq_n && !g_noidle) {
+            extern u64 mmio_next_event_tb(void), dec_next_tb(void);
+            extern int ios_busy(void);
+            if (!ios_busy()) {
+                u64 t = mmio_next_event_tb(), d = dec_next_tb();
+                if (d < t) t = d;
+                if (t != ~0ull && t > cpu.timebase) { cpu.timebase = t; g_idle_skips++; }
+            }
+        }
         if (callback_returned(&cpu)) continue;
         maybe_run_callback(&cpu);
         if (hle_dispatch(&cpu)) continue;
@@ -347,7 +362,8 @@ int main(int argc, char** argv) {
         if (sample_n[i] > 4) LOG("hot %08X x%llu\n", sample_pc[i], (unsigned long long)sample_n[i]);
     {
         extern u64 g_gxfifo_bytes, g_di_reads, g_ipc_requests, g_vi_count;
-        extern u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_gx_dlcalls, g_gx_idxloads;
+        extern u64 g_gx_draws, g_gx_vertices, g_gx_frames, g_gx_dlcalls, g_gx_idxloads, g_gl_draws;
+        LOG("render: %llu GL draw calls; %llu idle skips\n", (unsigned long long)g_gl_draws, (unsigned long long)g_idle_skips);
         extern u64 g_dsp_mails, g_dsp_babe, g_dsp_replies, g_ai_ints, g_dsp_masked;
         extern u64 g_ax_voices, g_ax_stops;
         LOG("ax: %llu voice-frames processed, %llu voices ended\n", (unsigned long long)g_ax_voices, (unsigned long long)g_ax_stops);
