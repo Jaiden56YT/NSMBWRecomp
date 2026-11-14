@@ -224,7 +224,12 @@ static void backtrace_guest(CPUState* cpu) {
 #include <switch.h>
 static int real_main(int argc, char** argv);
 static int g_argc; static char** g_argv; static int g_ret;
-static void* main_thread(void* arg) { (void)arg; g_ret = real_main(g_argc, g_argv); return NULL; }
+static void* main_thread(void* arg) {
+    (void)arg;
+    svcSetThreadCoreMask(CUR_THREAD_HANDLE, 0, 1u << 0);  /* emulator on core 0; the renderer takes core 1 */
+    g_ret = real_main(g_argc, g_argv);
+    return NULL;
+}
 
 /* The generated code turns guest calls into host recursion (up to 24 deep,
    large frames), so run everything on a thread with a big stack. */
@@ -285,6 +290,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-hidden")) { extern int g_hidden_window; g_hidden_window = 1; }
         else if (!strcmp(argv[i], "-norender")) g_norender = 1;
         else if (!strcmp(argv[i], "-frameskip") && i + 1 < argc) { extern int g_frameskip; i++; g_frameskip = !strcmp(argv[i], "auto") ? -1 : atoi(argv[i]); }
+        else if (!strcmp(argv[i], "-gpthread") && i + 1 < argc) { extern int g_gpu_thread; g_gpu_thread = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "-fast")) { extern int g_fast; g_fast = 1; }
         else if (!strcmp(argv[i], "-noidle")) g_noidle = 1;
         else if (!strcmp(argv[i], "-press") && i + 1 < argc) {
@@ -338,7 +344,11 @@ int main(int argc, char** argv) {
     boot_setup_lowmem(&cpu);
     ios_init(&cpu);
     gx_init(&cpu);
-    if (!g_norender) { int render_init(CPUState*); render_init(&cpu); }
+    if (!g_norender) {
+        int render_init(CPUState*);
+        void gx_start_render_thread(void);
+        if (render_init(&cpu)) gx_start_render_thread();
+    }
 
     cpu.pc = entry;
     cpu.msr = 0x00003032u;  /* FP, ME, IR, DR, RI */

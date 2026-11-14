@@ -11,7 +11,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#ifdef __SWITCH__
+#include <switch.h>
+#endif
 
+/* The renderer may run on its own thread: it reads its own copy of the GX
+   registers (rs_*, kept by the render queue in gx.c), not the CPU side's. */
+#define g_cp rs_cp
+#define g_bp rs_bp
+#define g_xf rs_xf
+#define g_konst rs_konst
+#define g_in_dl rs_in_dl
 extern u32 g_cp[256];
 extern u32 g_bp[256];
 extern u32 g_xf[0x1100];
@@ -1225,6 +1235,27 @@ int render_init(CPUState* cpu) {
     }
     render_ok = 1;
     return 1;
+}
+
+/* Render thread handoff: the GL context moves from the thread that made it
+   to the render thread. */
+void render_release_context(void) { if (render_ok) SDL_GL_MakeCurrent(window, NULL); }
+void render_thread_begin(void) {
+#ifdef __SWITCH__
+    /* libnx puts new threads on the process's default core (the emulator's):
+       move the renderer to core 1 so the two really run in parallel. */
+    Result rc = svcSetThreadCoreMask(CUR_THREAD_HANDLE, 1, 1u << 1);
+    LOG("render: render thread on core 1: %s (rc %08X, now on core %u)\n", R_SUCCEEDED(rc) ? "ok" : "failed", rc,
+        svcGetCurrentProcessorNumber());
+#endif
+    if (render_ok) SDL_GL_MakeCurrent(window, glctx);
+}
+/* While the CPU thread waits for the renderer. On macOS the window belongs
+   to the main thread, which must keep its event loop running. */
+void render_wait_hook(void) {
+#ifdef __APPLE__
+    if (render_ok) SDL_PumpEvents();
+#endif
 }
 
 /* Called ~60 times a second (guest time): keep the window alive. */

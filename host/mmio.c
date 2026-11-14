@@ -389,7 +389,9 @@ void mmio_tick(CPUState* cpu) {
             static double w0; double w = wt.tv_sec + wt.tv_nsec / 1e9; if (!w0) w0 = w;
             LOG("tick: wall %.1f guest %.1f vi %llu xfb %llu pe_done %llu pi_sr %08X pi_mr %08X msr %08X\n", w - w0, cpu->timebase / 60750000.0, (unsigned long long)g_vi_count,
                 (unsigned long long)g_gx_frames, (unsigned long long)g_pe_done, mmio_get32(0xCC003000u), mmio_get32(0xCC003004u), cpu->msr);
-            LOG("perf: frames shown %llu skipped %llu\n", (unsigned long long)g_frames_shown, (unsigned long long)g_frames_skipped);
+            extern u64 g_rq_waits;
+            LOG("perf: frames shown %llu skipped %llu, CPU waited for the renderer %llu times\n", (unsigned long long)g_frames_shown,
+                (unsigned long long)g_frames_skipped, (unsigned long long)g_rq_waits);
         }
         { int render_poll(void); if (!render_poll()) exit(0); }
         { void input_update(void); input_update(); }
