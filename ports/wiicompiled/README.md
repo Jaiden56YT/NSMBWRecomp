@@ -58,6 +58,24 @@ Build and run (macOS):
     # config: $XDG_DATA_HOME/WiiCompiled/Config.toml with [paths] dvd_root = '<extracted disc>'
 Window screenshots: `swift tools/winid.swift NSMBWCompiled` then `screencapture -x -o -l <id> out.png`.
 
+## Phase 3 (2026-11-14): Switch build - links, not yet run
+Graphics: Dawn's OpenGL backend built for libnx (ports/dawn-switch), aurora in WebGPU
+compatibility mode (verified on the Mac with AURORA_COMPAT=1: identical rendering, no validation
+errors), surface = the default NWindow passed as a native window. SDL3: devkitPro's
+switch-sdl-3.4 branch (third_party/sdl3-switch, built static). Compiler: devkitA64 GCC - GCC
+fallbacks for __builtin_rotateleft32, ext_vector_type (a 2-field struct), the GXSetArray
+overload, -fno-tree-slp-vectorize -fno-semantic-interposition. Memory: one 162 MiB block
+addressed by a 16-entry table on the top address nibble (src/guest_flat_memory_switch.cpp,
+SwitchFlatHost in guest_flat_memory.h). libnx gaps: setjmp instead of sigsetjmp, csrng for
+Crypto++, header-only Tracy, SQLite without WAL/mmap, aurora's abseil patched
+(dawn-switch/abseil-20240722-files), POSIX stubs (switch_posix_stubs.cpp). main() runs the game
+on a 64 MiB-stack thread on core 0; aurora's frame/present workers on cores 1/2.
+Build: cmake -S runtime -B build_switch -G Ninja -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake
+-DCMAKE_BUILD_TYPE=Release -DMKW_BUILD_NSMBW=ON; ninja nsmbw2.nro (shards ~25 min with GCC).
+SD layout (dist/nsmbw2): switch/nsmbw2/{nsmbw2.nro, dsp_coef.bin, initial_pipeline_cache.db,
+initial_texture_preload.txt, wii_bootstrap/, WiiCompiled/Config.toml (dvd_root =
+/switch/nsmbw/extracted)}; log in switch/nsmbw2/nsmbw.log.
+
 ## Next
 1. Mac build of upstream's runtime + aurora (Metal via Dawn): NEON versions of the x86
    SIMD in runtime/include/isa (ppc_isa_float.h, ppc_isa_quantized.h, ppc_isa_fpenv.h),

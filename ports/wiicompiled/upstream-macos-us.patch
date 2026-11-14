@@ -1,3 +1,198 @@
+diff --git a/aurora-main/cmake/AuroraDawnProvider.cmake b/aurora-main/cmake/AuroraDawnProvider.cmake
+index 002344b..6bdb2ec 100644
+--- a/aurora-main/cmake/AuroraDawnProvider.cmake
++++ b/aurora-main/cmake/AuroraDawnProvider.cmake
+@@ -11,7 +11,15 @@ include_guard(GLOBAL)
+ # When using a non-vendored Dawn, we don't get DAWN_ENABLE_* from its build.
+ # Infer from the target platform instead.
+ function(_aurora_dawn_set_platform_backends)
+-  if (WIN32)
++  if (NINTENDO_SWITCH)
++    set(DAWN_ENABLE_D3D12 OFF CACHE INTERNAL "")
++    set(DAWN_ENABLE_D3D11 OFF CACHE INTERNAL "")
++    set(DAWN_ENABLE_VULKAN OFF CACHE INTERNAL "")
++    set(DAWN_ENABLE_METAL OFF CACHE INTERNAL "")
++    set(DAWN_ENABLE_DESKTOP_GL ON CACHE INTERNAL "")
++    set(DAWN_ENABLE_OPENGLES OFF CACHE INTERNAL "")
++    set(DAWN_ENABLE_NULL ON CACHE INTERNAL "")
++  elseif (WIN32)
+     set(DAWN_ENABLE_D3D12 ON CACHE INTERNAL "")
+     # Disable D3D11 because this Aurora fork does not support it.
+     set(DAWN_ENABLE_D3D11 OFF CACHE INTERNAL "")
+diff --git a/aurora-main/include/dolphin/gx/GXGeometry.h b/aurora-main/include/dolphin/gx/GXGeometry.h
+index a71eb74..41f124c 100644
+--- a/aurora-main/include/dolphin/gx/GXGeometry.h
++++ b/aurora-main/include/dolphin/gx/GXGeometry.h
+@@ -22,9 +22,14 @@ void GXSetPointSize(u8 pointSize, GXTexOffset texOffsets);
+ void GXEnableTexOffsets(GXTexCoordID coord, GXBool line_enable, GXBool point_enable);
+ #ifdef TARGET_PC
+ void GXSetArray(GXAttr attr, const void* data, u32 size, u8 stride, bool le);
++#if !defined(__clang__)
++// GCC rejects two C-linkage functions of one name, so there is no 4-argument overload here;
++// callers pass the little-endian flag explicitly.
++#else
+ static inline void GXSetArray(GXAttr attr, const void* data, u32 size, u8 stride) {
+   GXSetArray(attr, data, size, stride, false);
+ }
++#endif
+ #define GXSETARRAY(attr, data, size, stride, le) GXSetArray((attr), (data), (size), (stride), (le))
+ #else
+ void GXSetArray(GXAttr attr, const void* data, u8 stride);
+diff --git a/aurora-main/lib/aurora.cpp b/aurora-main/lib/aurora.cpp
+index 95b510e..d9b9fa8 100644
+--- a/aurora-main/lib/aurora.cpp
++++ b/aurora-main/lib/aurora.cpp
+@@ -1,4 +1,7 @@
+-﻿#include <aurora/aurora.h>
++﻿#ifdef __SWITCH__
++#include <switch.h>
++#endif
++#include <aurora/aurora.h>
+ #include <aurora/env.hpp>
+ #include <atomic>
+ #include <cstdint>
+@@ -294,6 +297,10 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept;
+ #endif
+ 
+ void frame_worker_main() noexcept {
++#ifdef __SWITCH__
++  // libnx starts every thread on the default core (the game's); give this worker its own.
++  svcSetThreadCoreMask(CUR_THREAD_HANDLE, 1, 1u << 1);
++#endif
+   {
+     std::lock_guard lock(g_frameWorker.mutex);
+     g_frameWorker.threadId = std::this_thread::get_id();
+@@ -1136,6 +1143,10 @@ PresenterState g_presenter;
+ std::atomic<bool> g_presenterStarted{false};
+ 
+ void presenter_main() noexcept {
++#ifdef __SWITCH__
++  // libnx starts every thread on the default core (the game's); give this worker its own.
++  svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
++#endif
+   if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
+     Log.warn("Could not raise the asynchronous presenter thread priority: {}", SDL_GetError());
+   }
+diff --git a/aurora-main/lib/dawn/BackendBinding.cpp b/aurora-main/lib/dawn/BackendBinding.cpp
+index bb8fba4..1417314 100644
+--- a/aurora-main/lib/dawn/BackendBinding.cpp
++++ b/aurora-main/lib/dawn/BackendBinding.cpp
+@@ -1,6 +1,9 @@
+ #include "BackendBinding.hpp"
+ 
+ #include <memory>
++#ifdef __SWITCH__
++#include <switch.h>
++#endif
+ 
+ #if !defined(SDL_PLATFORM_MACOS) && !defined(SDL_PLATFORM_IOS) && !defined(SDL_PLATFORM_TVOS)
+ #include <SDL3/SDL_video.h>
+@@ -14,7 +17,14 @@ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptor(SDL_Wind
+   return SetupWindowAndGetSurfaceDescriptorCocoa(window);
+ #else
+   const auto props = SDL_GetWindowProperties(window);
+-#if defined(SDL_PLATFORM_ANDROID)
++#if defined(__SWITCH__)
++  // The Switch's default NWindow, handed to Dawn as a native window (EGL window surface).
++  (void)props;
++  std::shared_ptr<wgpu::SurfaceSourceAndroidNativeWindow> desc =
++      std::make_shared<wgpu::SurfaceSourceAndroidNativeWindow>();
++  desc->window = nwindowGetDefault();
++  return std::move(desc);
++#elif defined(SDL_PLATFORM_ANDROID)
+   std::shared_ptr<wgpu::SurfaceSourceAndroidNativeWindow> desc =
+       std::make_shared<wgpu::SurfaceSourceAndroidNativeWindow>();
+   desc->window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
+diff --git a/aurora-main/lib/webgpu/gpu.cpp b/aurora-main/lib/webgpu/gpu.cpp
+index 55f54ce..e219634 100644
+--- a/aurora-main/lib/webgpu/gpu.cpp
++++ b/aurora-main/lib/webgpu/gpu.cpp
+@@ -1,3 +1,7 @@
++#ifdef __SWITCH__
++#include <EGL/egl.h>
++#include <dawn/native/OpenGLBackend.h>
++#endif
+ #include "gpu.hpp"
+ #include <aurora/env.hpp>
+ 
+@@ -49,6 +53,7 @@ wgpu::Device g_device;
+ wgpu::Queue g_queue;
+ wgpu::Surface g_surface;
+ wgpu::BackendType g_backendType;
++bool g_compatMode = false;  // WebGPU compatibility feature level (OpenGL backends, or AURORA_COMPAT=1)
+ GraphicsConfig g_graphicsConfig;
+ TextureWithSampler g_frameBuffer;
+ TextureWithSampler g_frameBufferResolved;
+@@ -736,11 +741,24 @@ bool initialize(AuroraBackend auroraBackend) {
+     }
+   }
+   {
+-    const wgpu::RequestAdapterOptions options{
++    // WebGPU compatibility mode: what Dawn's OpenGL backends offer (the Switch has only GL), and
++    // testable on any backend with AURORA_COMPAT=1 (Dawn applies the same validation on Metal).
++    g_compatMode = backend == wgpu::BackendType::OpenGL || backend == wgpu::BackendType::OpenGLES ||
++                   std::getenv("AURORA_COMPAT") != nullptr;
++    wgpu::RequestAdapterOptions options{
++        .featureLevel = g_compatMode ? wgpu::FeatureLevel::Compatibility : wgpu::FeatureLevel::Core,
+         .powerPreference = wgpu::PowerPreference::HighPerformance,
+         .backendType = backend,
+         .compatibleSurface = g_surface,
+     };
++#ifdef __SWITCH__
++    // No dynamic loading on the Switch: hand Dawn EGL's own procedure lookup and display.
++    static dawn::native::opengl::RequestAdapterOptionsGetGLProc s_glProc;
++    s_glProc.getProc = reinterpret_cast<dawn::native::opengl::EGLGetProcProc>(eglGetProcAddress);
++    s_glProc.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    options.nextInChain = &s_glProc;
++#endif
++    Log.info("Requesting a {} adapter{}", magic_enum::enum_name(backend), g_compatMode ? " (compatibility mode)" : "");
+     const auto future = g_instance.RequestAdapter(
+         &options, wgpu::CallbackMode::WaitAnyOnly,
+         [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message) {
+@@ -778,9 +796,11 @@ bool initialize(AuroraBackend auroraBackend) {
+   uint32_t maxTextureDimension2D = 0;
+   {
+     wgpu::Limits supportedLimits{};
++    wgpu::CompatibilityModeLimits supportedCompatLimits{};
++    if (g_compatMode) supportedLimits.nextInChain = &supportedCompatLimits;
+     g_adapter.GetLimits(&supportedLimits);
+     maxTextureDimension2D = supportedLimits.maxTextureDimension2D;
+-    const wgpu::Limits requiredLimits{
++    wgpu::Limits requiredLimits{
+         // Use "best" supported limits
+         .maxTextureDimension1D = supportedLimits.maxTextureDimension1D == 0 ? WGPU_LIMIT_U32_UNDEFINED
+                                                                             : supportedLimits.maxTextureDimension1D,
+@@ -801,6 +821,18 @@ bool initialize(AuroraBackend auroraBackend) {
+         .minStorageBufferOffsetAlignment =
+             supportedLimits.minStorageBufferOffsetAlignment < 16 ? 16 : supportedLimits.minStorageBufferOffsetAlignment,
+     };
++    // Compatibility mode starts storage buffers per stage at 0; aurora's vertex shaders pull vertex
++    // data from storage buffers (vbuf/abuf), so ask for everything the adapter has.
++    wgpu::CompatibilityModeLimits requiredCompatLimits{};
++    if (g_compatMode) {
++      requiredCompatLimits.maxStorageBuffersInVertexStage = supportedCompatLimits.maxStorageBuffersInVertexStage;
++      requiredCompatLimits.maxStorageTexturesInVertexStage = supportedCompatLimits.maxStorageTexturesInVertexStage;
++      requiredCompatLimits.maxStorageBuffersInFragmentStage = supportedCompatLimits.maxStorageBuffersInFragmentStage;
++      requiredCompatLimits.maxStorageTexturesInFragmentStage = supportedCompatLimits.maxStorageTexturesInFragmentStage;
++      requiredLimits.nextInChain = &requiredCompatLimits;
++      Log.info("Compatibility limits: storage buffers vertex {} fragment {}",
++               supportedCompatLimits.maxStorageBuffersInVertexStage, supportedCompatLimits.maxStorageBuffersInFragmentStage);
++    }
+     Log.info(
+         "Using limits:"
+         "\n  maxTextureDimension1D: {}"
+diff --git a/aurora-main/lib/webgpu/gpu.hpp b/aurora-main/lib/webgpu/gpu.hpp
+index 98a60c3..078c984 100644
+--- a/aurora-main/lib/webgpu/gpu.hpp
++++ b/aurora-main/lib/webgpu/gpu.hpp
+@@ -50,6 +50,7 @@ extern wgpu::Device g_device;
+ extern wgpu::Queue g_queue;
+ extern wgpu::Surface g_surface;
+ extern wgpu::BackendType g_backendType;
++extern bool g_compatMode;
+ extern GraphicsConfig g_graphicsConfig;
+ extern TextureWithSampler g_frameBuffer;
+ extern TextureWithSampler g_frameBufferResolved;
 diff --git a/generated_nsmbw b/generated_nsmbw
 new file mode 120000
 index 0000000..c634766
@@ -275,10 +470,10 @@ similarity index 100%
 rename from projects/nsmbw/native/nsmbw_wpad_overrides.cpp
 rename to projects/nsmbw/native_pal/nsmbw_wpad_overrides.cpp
 diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
-index 95734ab..4e2283d 100644
+index 95734ab..8c7d634 100644
 --- a/runtime/CMakeLists.txt
 +++ b/runtime/CMakeLists.txt
-@@ -1,14 +1,19 @@
+@@ -1,14 +1,47 @@
 -﻿cmake_minimum_required(VERSION 3.16)
 +cmake_minimum_required(VERSION 3.16)
  project(mkw_recompiled)
@@ -287,7 +482,35 @@ index 95734ab..4e2283d 100644
 -    message(FATAL_ERROR "WiiCompiled requires Windows (LLVM-MinGW) or native Linux")
 +# Hosts: Windows (LLVM-MinGW) and Linux on x86-64 upstream; this tree also builds for
 +# macOS and other ARM64 hosts (x86 SIMD via SIMDe, see include/isa/host_simd.h).
-+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
++if(NINTENDO_SWITCH)
++    # devkitA64 (GCC). The Clang-only spots in the ISA headers have GCC fallbacks.
++    set(MKW_SWITCH_DEPS "${CMAKE_CURRENT_LIST_DIR}/../../" CACHE PATH "third_party dir with dawn-switch/ and sdl3-switch/")
++    set(_dawn "${MKW_SWITCH_DEPS}/dawn-switch")
++    add_library(dawn::webgpu_dawn STATIC IMPORTED GLOBAL)
++    set_target_properties(dawn::webgpu_dawn PROPERTIES
++        IMPORTED_LOCATION "${_dawn}/build/src/dawn/native/libwebgpu_dawn.a"
++        INTERFACE_INCLUDE_DIRECTORIES "${_dawn}/dawn/include;${_dawn}/build/gen/include"
++        INTERFACE_COMPILE_DEFINITIONS "EGL_NO_PLATFORM_SPECIFIC_TYPES")
++    set(Dawn_FOUND TRUE)
++    set(AURORA_DAWN_PROVIDER "system" CACHE STRING "" FORCE)
++    set(AURORA_SDL3_PROVIDER "system" CACHE STRING "" FORCE)
++    set(SDL3_DIR "${MKW_SWITCH_DEPS}/sdl3-switch/install/lib/cmake/SDL3" CACHE PATH "" FORCE)
++    set(AURORA_ENABLE_CARD OFF CACHE BOOL "" FORCE)
++    # Tracy's client always compiles a platform file the Switch lacks; with profiling off its
++    # macros are no-ops, so provide the headers only.
++    include(FetchContent)
++    FetchContent_Declare(tracy
++        URL https://github.com/wolfpld/tracy/archive/a64b9a20294d59421a2f57aeca3c6383d8c48169.tar.gz
++        URL_HASH SHA256=24d342b5127d7f659dc3cf94f24347b348cc736f25b17a691fd7f69541937658
++        SOURCE_SUBDIR none-headers-only)
++    FetchContent_MakeAvailable(tracy)
++    add_library(TracyClient INTERFACE)
++    target_include_directories(TracyClient INTERFACE "${tracy_SOURCE_DIR}/public")
++    # aurora's abseil, pre-patched for libnx (no ELF image, UTC time zone, no signal masks)
++    set(FETCHCONTENT_SOURCE_DIR_ABSEIL-CPP "${MKW_SWITCH_DEPS}/abseil-20240722-switch" CACHE PATH "" FORCE)
++    # devkitPro portlibs (EGL, GL) for aurora's Switch surface code
++    include_directories(SYSTEM "$ENV{DEVKITPRO}/portlibs/switch/include")
++elseif(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
 +    message(FATAL_ERROR "WiiCompiled requires a 64-bit Clang")
  endif()
 -if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
@@ -305,7 +528,19 @@ index 95734ab..4e2283d 100644
  if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
      message(FATAL_ERROR "WiiCompiled only supports Release builds")
  endif()
-@@ -252,12 +257,19 @@ endif()
+@@ -176,6 +209,11 @@ else()
+     add_subdirectory(${MKW_AURORA_DIR} ${CMAKE_BINARY_DIR}/aurora-build EXCLUDE_FROM_ALL)
+     set(CMAKE_DISABLE_PRECOMPILE_HEADERS OFF)
+ 
++    if(NINTENDO_SWITCH AND TARGET sqlite3)
++        # newlib: no mmap/WAL shared memory, no dlopen
++        target_compile_definitions(sqlite3 PRIVATE SQLITE_OMIT_WAL=1 SQLITE_MAX_MMAP_SIZE=0
++            SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_THREADSAFE=1)
++    endif()
+     # Keep upstream Aurora split: several sources intentionally use file-local
+     # names that collide under this repo's aggressive unity build settings.
+     set(AURORA_TARGETS aurora_core aurora_gx aurora_pad aurora_si aurora_mtx aurora_vi)
+@@ -252,12 +290,19 @@ endif()
  set(MKW_TRANSLATED_SHARD_MANIFEST
      "${CMAKE_CURRENT_LIST_DIR}/../generated/build_shards/shards.cmake"
      CACHE FILEPATH "Translator-owned aggregate shard manifest")
@@ -327,7 +562,7 @@ index 95734ab..4e2283d 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..9c3108e 100644
+index ec62546..61b51ea 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,7 +8,6 @@
@@ -365,23 +600,48 @@ index ec62546..9c3108e 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +206,11 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +206,13 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
 -    target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
 +    if(APPLE)
 +        target_link_options(NSMBWCompiled PRIVATE -g -Wl,-stack_size,0x1000000)
++    elseif(NINTENDO_SWITCH)
++        # main() runs the game on a 64 MiB-stack thread (nsmbw_product.cpp); no linker stack option.
 +    else()
 +        target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
 +    endif()
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
+@@ -223,6 +228,13 @@ if(MKW_BUILD_NSMBW)
+     else()
+         target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
+     endif()
++    if(NINTENDO_SWITCH)
++        # Mesa (EGL/GL via glapi, nouveau) for Dawn and SDL3's Switch video driver, then libnx.
++        target_link_libraries(NSMBWCompiled PRIVATE
++            -L$ENV{DEVKITPRO}/portlibs/switch/lib EGL glapi drm_nouveau png z stdc++ nx m)
++        nx_generate_nacp(nsmbw2.nacp NAME "NSMBW Recomp 2" AUTHOR "NSMBWRecomp" VERSION "0.2.0")
++        nx_create_nro(NSMBWCompiled NACP nsmbw2.nacp OUTPUT ${CMAKE_BINARY_DIR}/nsmbw2.nro)
++    endif()
+ 
+     # Same runtime-DLL copy PublicProducts.cmake's mkw_configure_product() does for
+     # WiiCompiled/RetroRewind: aurora/SDL3/Dawn are shared libraries the exe loads at startup, not
 diff --git a/runtime/cmake/PublicProducts.cmake b/runtime/cmake/PublicProducts.cmake
-index d1fff5e..fc0d1dd 100644
+index d1fff5e..d29c1db 100644
 --- a/runtime/cmake/PublicProducts.cmake
 +++ b/runtime/cmake/PublicProducts.cmake
+@@ -31,7 +31,7 @@ endfunction()
+ 
+ function(mkw_apply_translated_compile_options target)
+     target_compile_options(${target} PRIVATE
+-        -O2 ${MKW_TRANSLATED_PPC_FP_OPTIONS} -fno-slp-vectorize -w -pipe)
++        -O2 ${MKW_TRANSLATED_PPC_FP_OPTIONS} $<IF:$<CXX_COMPILER_ID:GNU>,-fno-tree-slp-vectorize;-fno-semantic-interposition,-fno-slp-vectorize> -w -pipe)
+ endfunction()
+ 
+ function(mkw_configure_object_target target)
 @@ -41,7 +41,8 @@ function(mkw_configure_object_target target)
          # Workspace root, so translator output is spelled "generated/<x>.h"
          # instead of a ../ chain whose depth depends on the includer.
@@ -469,6 +729,36 @@ index a654b92..f12f6f5 100644
      const uint32_t slot = g_next.fetch_add(1, std::memory_order_relaxed) % static_cast<uint32_t>(kCapacity);
      g_addrs[slot] = addr;
      g_lrs[slot] = lr;
+diff --git a/runtime/include/guest_flat_memory.h b/runtime/include/guest_flat_memory.h
+index e33573a..72a073d 100644
+--- a/runtime/include/guest_flat_memory.h
++++ b/runtime/include/guest_flat_memory.h
+@@ -19,6 +19,25 @@ inline constexpr uintptr_t kFixedFlatGuestBase = 0x0000'1000'0000'0000ull;
+ 
+ #define MKW_FLAT_GUEST_BASE (reinterpret_cast<uint8_t*>(GuestFlat::kFixedFlatGuestBase))
+ 
++#if defined(__SWITCH__)
++// The Switch has no address-space reservation with aliased views, so guest memory is one
++// block addressed through a 16-entry table, one entry per top address nibble: MEM1's
++// physical/cached/uncached views (0x0, 0x8, 0xC) share a slot, MEM2's (0x1, 0x9, 0xD) another,
++// the locked cache (0xE) a third; every other nibble maps to a small scratch area (mask 0).
++struct SwitchSegment {
++    uint8_t* host;
++    uint32_t mask;
++};
++extern SwitchSegment g_switchSegments[16];
++inline uint8_t* SwitchFlatHost(uint32_t address) {
++    const SwitchSegment& seg = g_switchSegments[address >> 28];
++    return seg.host + (address & seg.mask);
++}
++#define MKW_FLAT_HOST(address) (GuestFlat::SwitchFlatHost(static_cast<uint32_t>(address)))
++#else
++#define MKW_FLAT_HOST(address) (MKW_FLAT_GUEST_BASE + (address))
++#endif
++
+ enum class Backing {
+     Owned,
+     Mem1,
 diff --git a/runtime/include/isa/host_simd.h b/runtime/include/isa/host_simd.h
 new file mode 100644
 index 0000000..103431e
@@ -518,7 +808,7 @@ index 0000000..103431e
 +}
 +#endif
 diff --git a/runtime/include/isa/ppc_isa_config.h b/runtime/include/isa/ppc_isa_config.h
-index f4c41ea..70d7460 100644
+index f4c41ea..8cd6d95 100644
 --- a/runtime/include/isa/ppc_isa_config.h
 +++ b/runtime/include/isa/ppc_isa_config.h
 @@ -4,7 +4,7 @@
@@ -530,6 +820,22 @@ index f4c41ea..70d7460 100644
  
  inline constexpr bool MkwStateFreeAbiEnabled(uint32_t) noexcept
  {
+@@ -29,4 +29,15 @@ inline constexpr bool MkwStateFreeAbiEnabled(uint32_t) noexcept
+ #define MKW_PPC_COLD __attribute__((cold))
+ 
+ 
++#if defined(__clang__)
+ using MkwStateFreeResult2 = uint64_t __attribute__((ext_vector_type(2)));
++#else
++// GCC (devkitA64): vector types cannot be brace-initialized in a return, which the generated
++// code does; a two-field aggregate supports the same `return {a, b}` and `[0]`/`[1]` uses and is
++// returned in x0/x1 on AArch64.
++struct MkwStateFreeResult2 {
++    uint64_t v[2];
++    constexpr uint64_t operator[](int i) const { return v[i]; }
++    uint64_t& operator[](int i) { return v[i]; }
++};
++#endif
 diff --git a/runtime/include/isa/ppc_isa_context.h b/runtime/include/isa/ppc_isa_context.h
 index 0c9381e..c4c1fd5 100644
 --- a/runtime/include/isa/ppc_isa_context.h
@@ -575,6 +881,134 @@ index 75a29bc..3a5c319 100644
      const bool niActive = (csr & kMkwMxcsrFlushToZeroBits) != 0;
      g_mkwHostNiActive = niActive;
      g_mkwNiFlushThreshold = niActive ? kMkwNiFlushThreshold : 0.0;
+diff --git a/runtime/include/isa/ppc_isa_int.h b/runtime/include/isa/ppc_isa_int.h
+index a9e93cc..e08fd37 100644
+--- a/runtime/include/isa/ppc_isa_int.h
++++ b/runtime/include/isa/ppc_isa_int.h
+@@ -11,7 +11,12 @@
+ 
+ inline uint32_t PpcRotl32Inline(uint32_t value, uint32_t shift)
+ {
++#if defined(__clang__)
+     return __builtin_rotateleft32(value, shift);
++#else
++    shift &= 31u;  // GCC: the rotate idiom compiles to a single ror
++    return (value << shift) | (value >> ((32u - shift) & 31u));
++#endif
+ }
+ 
+ extern "C" uint32_t OSSystemCall();
+diff --git a/runtime/include/isa/ppc_isa_quantized.h b/runtime/include/isa/ppc_isa_quantized.h
+index e73e351..725b5eb 100644
+--- a/runtime/include/isa/ppc_isa_quantized.h
++++ b/runtime/include/isa/ppc_isa_quantized.h
+@@ -224,7 +224,7 @@ inline void PpcWritePairPsqInline(uint32_t addr, T first, T second)
+ // reading stale bytes, and unmapped pages commit on demand, same as MemoryInline::Flat* loads.
+ MKW_PPC_FORCE_INLINE const uint8_t* PpcTryGetPsqReadableHostInline(uint32_t addr)
+ {
+-    return MKW_FLAT_GUEST_BASE + addr;
++    return MKW_FLAT_HOST(addr);
+ }
+ 
+ // Same reduction for stores. Still refuses a 32-bit address wrap (one host access can't
+@@ -239,7 +239,7 @@ MKW_PPC_FORCE_INLINE uint8_t* PpcTryGetPsqWritableHostInline(uint32_t addr)
+     if (MemoryInline::FlatMmioNeedsPolicy(addr) ||
+         MemoryInline::FlatMmioNeedsPolicy(addr + 7u)) [[unlikely]]
+         return nullptr;
+-    return MKW_FLAT_GUEST_BASE + addr;
++    return MKW_FLAT_HOST(addr);
+ }
+ 
+ inline double PpcLoadPairPsqFloatFastInline(uint32_t addr)
+diff --git a/runtime/include/memory_access.h b/runtime/include/memory_access.h
+index b859711..37d4f39 100644
+--- a/runtime/include/memory_access.h
++++ b/runtime/include/memory_access.h
+@@ -266,7 +266,7 @@ MKW_MEMORY_FORCE_INLINE uint8_t* ResolveRangeHost(uint32_t base, int32_t minOffs
+     if (needsWrite &&
+         (FlatMmioNeedsPolicy(guestStart) || FlatMmioNeedsPolicy(guestStart + (length - 1))))
+         [[unlikely]] return nullptr;
+-    return MKW_FLAT_GUEST_BASE + guestStart;
++    return MKW_FLAT_HOST(guestStart);
+ }
+ 
+ // Guest-address byte order. Distinct from isa/big_endian.h, which is the
+@@ -567,14 +567,14 @@ MKW_MEMORY_FORCE_INLINE void WriteResolvedFloat64(uint8_t* r, uint32_t o, uint32
+ template <typename T>
+ MKW_MEMORY_FORCE_INLINE T FlatLoad(uint32_t address) {
+     T value{};
+-    std::memcpy(&value, MKW_FLAT_GUEST_BASE + address, sizeof(T));
++    std::memcpy(&value, MKW_FLAT_HOST(address), sizeof(T));
+     return MaybeByteSwap(value);
+ }
+ 
+ template <typename T>
+ MKW_MEMORY_FORCE_INLINE void FlatStore(uint32_t address, T value) {
+     const T swapped = MaybeByteSwap(value);
+-    std::memcpy(MKW_FLAT_GUEST_BASE + address, &swapped, sizeof(T));
++    std::memcpy(MKW_FLAT_HOST(address), &swapped, sizeof(T));
+ }
+ 
+ MKW_MEMORY_FORCE_INLINE uint8_t FlatRead8(uint32_t address) {
+diff --git a/runtime/include/runtime_config.h b/runtime/include/runtime_config.h
+index 7b3527e..f5056f8 100644
+--- a/runtime/include/runtime_config.h
++++ b/runtime/include/runtime_config.h
+@@ -162,7 +162,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
+ }
+ 
+ inline std::optional<std::filesystem::path> ExecutableDirectory() {
+-#ifdef _WIN32
++#if defined(__SWITCH__)
++    // The .nro, its assets and nsmbw_data/ live in one SD folder (devkitPro maps "/" to sdmc:).
++    return std::filesystem::path("/switch/nsmbw2");
++#elif defined(_WIN32)
+     std::wstring buffer(MAX_PATH, L'\0');
+     for (;;) {
+         const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+diff --git a/runtime/include/system_bridge.h b/runtime/include/system_bridge.h
+index 1f57f0d..8e4e128 100644
+--- a/runtime/include/system_bridge.h
++++ b/runtime/include/system_bridge.h
+@@ -16,7 +16,7 @@
+ // only sigsetjmp/siglongjmp save and restore the process signal mask, which is what keeps SIGSEGV
+ // from staying blocked (and a second fault during the same ctor loop from escalating instead of
+ // trapping) after the first recovered fault.
+-#if defined(_WIN32)
++#if defined(_WIN32) || defined(__SWITCH__)  // Switch: no signals, plain setjmp
+ using MkwJmpBuf = jmp_buf;
+ #define MKW_SETJMP(buf) setjmp(buf)
+ #else
+diff --git a/runtime/include/wii_es_crypto.h b/runtime/include/wii_es_crypto.h
+index d1fb78c..891ef4a 100644
+--- a/runtime/include/wii_es_crypto.h
++++ b/runtime/include/wii_es_crypto.h
+@@ -16,6 +16,9 @@
+ // This file is GPL-2.0-or-later as a consequence; see THIRD-PARTY-NOTICES.md.
+ 
+ #pragma once
++#if defined(__SWITCH__)
++extern "C" uint32_t csrngGetRandomBytes(void* out, size_t out_size);
++#endif
+ 
+ #include "isa/big_endian.h"
+ #include "nand_path.h"
+@@ -149,7 +152,15 @@ inline EcSignature SignMessage(const uint8_t* key, const uint8_t* data, size_t s
+         throw std::runtime_error("Crypto++ returned an unexpected sect233r1 signature size");
+     }
+ 
++#if defined(__SWITCH__)
++    // No OS entropy device for Crypto++ on the Switch: libnx's secure RNG instead.
++    struct SwitchRng final : CryptoPP::RandomNumberGenerator {
++        void GenerateBlock(CryptoPP::byte* output, size_t size) override { csrngGetRandomBytes(output, size); }
++    };
++    thread_local SwitchRng random;
++#else
+     thread_local CryptoPP::AutoSeededRandomPool random;
++#endif
+     EcSignature signature{};
+     const size_t written = signer.SignMessage(random, data, size, signature.data());
+     if (written != signature.size()) {
 diff --git a/runtime/src/dynamic_aspect.cpp b/runtime/src/dynamic_aspect.cpp
 index 5c1601c..5ea0b16 100644
 --- a/runtime/src/dynamic_aspect.cpp
@@ -643,11 +1077,12 @@ index 8e15c1a..1586d0a 100644
          uint32_t startFn = 0;
          try {
 diff --git a/runtime/src/guest_flat_memory.cpp b/runtime/src/guest_flat_memory.cpp
-index 43f8b7b..aaff0cd 100644
+index 43f8b7b..eb73921 100644
 --- a/runtime/src/guest_flat_memory.cpp
 +++ b/runtime/src/guest_flat_memory.cpp
-@@ -1,3 +1,10 @@
-+#if !defined(_WIN32)
+@@ -1,3 +1,11 @@
++#if !defined(__SWITCH__)  // the Switch uses guest_flat_memory_switch.cpp
++#if !defined(_WIN32) && !defined(__SWITCH__)
 +#include <execinfo.h>
 +#include <fcntl.h>
 +#include <sys/mman.h>
@@ -657,12 +1092,14 @@ index 43f8b7b..aaff0cd 100644
  #include "guest_flat_memory.h"
  
  #include <algorithm>
-@@ -450,9 +457,13 @@ void ReportFatalGuestFault(const char* category, uint32_t guestAddress, bool isW
+@@ -450,9 +458,15 @@ void ReportFatalGuestFault(const char* category, uint32_t guestAddress, bool isW
      // which can be stale), to pin down exactly which translated PPC function is executing.
      {
          void* frames[32]{};
 +#if defined(_WIN32)
          const USHORT n = CaptureStackBackTrace(0, static_cast<DWORD>(std::size(frames)), frames, nullptr);
++#elif defined(__SWITCH__)
++        const int n = 0;  // no backtrace() in newlib
 +#else
 +        const int n = backtrace(frames, static_cast<int>(std::size(frames)));
 +#endif
@@ -672,7 +1109,7 @@ index 43f8b7b..aaff0cd 100644
              const auto addr = reinterpret_cast<uintptr_t>(frames[i]);
              if (auto info = TranslatedFunctionRegistry::FindByHostAddress(addr)) {
                  std::cerr << "    [" << i << "] " << info->name << " (PPC:0x" << std::hex
-@@ -569,7 +580,19 @@ void Initialize(const std::vector<RegionRequest>& regions) {
+@@ -569,7 +583,19 @@ void Initialize(const std::vector<RegionRequest>& regions) {
          // twice below (once here as the always-accessible host view, once per-region as the
          // guest view whose protection the fault handler controls), the same "one backing store,
          // two VA aliases" trick CreateFileMapping/MapViewOfFile(3) gives Windows.
@@ -692,6 +1129,104 @@ index 43f8b7b..aaff0cd 100644
          if (section.fd < 0) {
              throw std::runtime_error(LastErrorText("memfd_create for guest RAM"));
          }
+@@ -860,3 +886,5 @@ bool HandleAccessViolation(void* faultAddress, bool isWrite) noexcept {
+ }
+ 
+ } // namespace GuestFlat
++
++#endif  // !__SWITCH__
+diff --git a/runtime/src/guest_flat_memory_switch.cpp b/runtime/src/guest_flat_memory_switch.cpp
+new file mode 100644
+index 0000000..a1354eb
+--- /dev/null
++++ b/runtime/src/guest_flat_memory_switch.cpp
+@@ -0,0 +1,86 @@
++// Guest memory on the Nintendo Switch (libnx).
++//
++// The PC builds reserve a 4 GiB address range and map each guest region into it twice (a
++// protected guest view plus a host alias), with page protections driving MMIO, deferred EFB
++// reads and executable-write guards. Horizon offers none of that to homebrew, so here guest
++// memory is one heap block and translated code reaches it through a 16-entry table indexed by
++// the top address nibble (see SwitchFlatHost in guest_flat_memory.h):
++//   0x0/0x8/0xC -> MEM1 slot (32 MiB: 24 MiB MEM1 + the 2 MiB Kamek overlay at 0x81800000)
++//   0x1/0x9/0xD -> MEM2 slot (Memory::kMem2Size)
++//   0xE         -> locked cache slot (2 MiB, as the PC build backs it)
++//   anything else -> a 64-byte scratch area with mask 0 (stray accesses land there harmlessly)
++// MMIO never reaches this path: FlatMmioNeedsPolicy sends it to the checked accessors first.
++// Page-protection features are no-ops: there is no fault interception on the Switch.
++#if defined(__SWITCH__)
++#include "guest_flat_memory.h"
++#include "memory.h"
++
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <stdexcept>
++
++namespace GuestFlat {
++
++SwitchSegment g_switchSegments[16];
++
++namespace {
++constexpr uint32_t kMem1Slot = 0x02000000u;
++constexpr uint32_t kLockedCacheSlot = 0x00200000u;
++uint8_t* g_block = nullptr;
++size_t g_blockSize = 0;
++alignas(64) uint8_t g_scratch[64];
++bool g_active = false;
++
++uint32_t SlotFor(uint32_t address, uint32_t& slotSize) {
++    switch (address >> 28) {
++    case 0x0: case 0x8: case 0xC: slotSize = kMem1Slot; return 0;
++    case 0x1: case 0x9: case 0xD: slotSize = static_cast<uint32_t>(Memory::kMem2Size); return kMem1Slot;
++    case 0xE: slotSize = kLockedCacheSlot; return kMem1Slot + static_cast<uint32_t>(Memory::kMem2Size);
++    default: slotSize = 0; return 0;
++    }
++}
++}  // namespace
++
++bool IsActive() { return g_active; }
++
++void Initialize(const std::vector<RegionRequest>& regions) {
++    if (!g_block) {
++        g_blockSize = kMem1Slot + Memory::kMem2Size + kLockedCacheSlot;
++        g_block = static_cast<uint8_t*>(aligned_alloc(0x10000, g_blockSize));
++        if (!g_block) throw std::runtime_error("Switch: could not allocate guest memory");
++    }
++    std::memset(g_block, 0, g_blockSize);
++    for (int i = 0; i < 16; i++) g_switchSegments[i] = SwitchSegment{g_scratch, 0u};
++    for (uint32_t nib = 0; nib < 16; nib++) {
++        uint32_t size = 0;
++        const uint32_t offset = SlotFor(nib << 28, size);
++        if (size) g_switchSegments[nib] = SwitchSegment{g_block + offset, size - 1u};
++    }
++    for (const auto& r : regions) {
++        uint32_t size = 0;
++        SlotFor(r.base, size);
++        if (!size || (r.base & 0x0FFFFFFFu) + r.size > size)
++            std::fprintf(stderr, "[memory] Switch: region 0x%08X (+0x%llX) does not fit its slot\n", r.base,
++                         static_cast<unsigned long long>(r.size));
++    }
++    std::printf("[memory] Switch guest memory: %zu MiB block, %zu regions\n", g_blockSize >> 20, regions.size());
++    g_active = true;
++}
++
++uint8_t* HostPointer(uint32_t guestAddress) {
++    uint32_t size = 0;
++    const uint32_t offset = SlotFor(guestAddress, size);
++    if (!size || (guestAddress & 0x0FFFFFFFu) >= size) return nullptr;
++    return g_block + offset + (guestAddress & 0x0FFFFFFFu);
++}
++
++void ProtectDeferredRange(uint32_t, size_t) {}
++void UnprotectDeferredRange(uint32_t, size_t) {}
++void RegisterExecutableRange(uint32_t, uint32_t) {}
++FaultCounters Counters() { return {}; }
++void LogFaultSummary() noexcept {}
++bool HandleAccessViolation(void*, bool) noexcept { return false; }
++
++}  // namespace GuestFlat
++#endif  // __SWITCH__
 diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
 index 421ca42..f40eb08 100644
 --- a/runtime/src/hle/audio/audio.cpp
@@ -893,6 +1428,32 @@ index 687d6ba..51b66fb 100644
  #define MKW_AX_MIX_AVX2 1
  #else
  #define MKW_AX_MIX_AVX2 0
+diff --git a/runtime/src/hle/exi.cpp b/runtime/src/hle/exi.cpp
+index c56e2bb..3d00082 100644
+--- a/runtime/src/hle/exi.cpp
++++ b/runtime/src/hle/exi.cpp
+@@ -73,7 +73,7 @@ extern "C" bool EXI_HLE_TryWrite32(uint32_t addr, uint32_t value) {
+             const uint32_t mar = g_exiRegs[channelRegBase + kExiMarOffset / 4u];
+             const uint32_t length = g_exiRegs[channelRegBase + kExiLengthOffset / 4u];
+             if ((value & kExiCrRwMask) == kExiCrRwRead && length != 0u) {
+-                std::memset(MKW_FLAT_GUEST_BASE + mar, 0, length);
++                std::memset(MKW_FLAT_HOST(mar), 0, length);
+             }
+         }
+         value &= ~kExiCrTstart;
+diff --git a/runtime/src/hle/gx/gx_dl.cpp b/runtime/src/hle/gx/gx_dl.cpp
+index cb8e87e..f760a41 100644
+--- a/runtime/src/hle/gx/gx_dl.cpp
++++ b/runtime/src/hle/gx/gx_dl.cpp
+@@ -1107,7 +1107,7 @@ static void ApplyAuroraArrayIfChanged(GXAttr attr, const void* data, uint32_t si
+     if (applied.valid && applied.data == data && applied.size == size && applied.stride == stride) {
+         return;
+     }
+-    GXSetArray(attr, data, size, stride);
++    GXSetArray(attr, data, size, stride, false);
+     applied.data = data;
+     applied.size = size;
+     applied.stride = stride;
 diff --git a/runtime/src/hle/gx/gx_egg.cpp b/runtime/src/hle/gx/gx_egg.cpp
 index 8a9fd75..8bb0a3f 100644
 --- a/runtime/src/hle/gx/gx_egg.cpp
@@ -1141,6 +1702,19 @@ index 89c5465..f970c48 100644
  #endif
  
  // --- External Declarations ---
+diff --git a/runtime/src/hle/gx/gx_stream_common.h b/runtime/src/hle/gx/gx_stream_common.h
+index 006ab47..0547f7f 100644
+--- a/runtime/src/hle/gx/gx_stream_common.h
++++ b/runtime/src/hle/gx/gx_stream_common.h
+@@ -333,7 +333,7 @@ inline bool ApplyIndexedXfArrayForPacket(uint8_t cmd, uint32_t value) {
+         return false;
+     }
+ 
+-    GXSetArray(static_cast<GXAttr>(attr), hostPtr, span, static_cast<uint8_t>(arr.stride));
++    GXSetArray(static_cast<GXAttr>(attr), hostPtr, span, static_cast<uint8_t>(arr.stride), false);
+     return true;
+ }
+ 
 diff --git a/runtime/src/hle/gx/gx_tev.cpp b/runtime/src/hle/gx/gx_tev.cpp
 index d09fe64..74558a1 100644
 --- a/runtime/src/hle/gx/gx_tev.cpp
@@ -1908,7 +2482,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..f0b5957 100644
+index a63636b..16f0e2d 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -84,12 +84,12 @@ namespace {
@@ -2051,7 +2625,19 @@ index a63636b..f0b5957 100644
          InvokeGuestCallGuarded(prolog, cpu, "REL _prolog");
      }
  
-@@ -733,7 +739,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -338,7 +344,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+     config.logLevel = LOG_INFO;
+     config.windowWidth = 640;
+     config.windowHeight = 480;
++#if defined(__SWITCH__)
++    config.desiredBackend = BACKEND_OPENGL;  // Dawn's OpenGL backend on Mesa (the Switch has no Vulkan here)
++#else
+     config.desiredBackend = BACKEND_AUTO;
++#endif
+     config.allowJoystickBackgroundEvents = true;
+     // Mirror main.cpp's MKW init: skip the display copy's vertical deflicker filter (default on,
+     // as in Dolphin). Left zero-initialised, the filter ran on every frame while the F10 checkbox
+@@ -733,7 +743,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
      }
      std::error_code ec;
  
@@ -2060,7 +2646,48 @@ index a63636b..f0b5957 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -863,7 +869,7 @@ int main() {
+@@ -783,7 +793,40 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+ 
+ void NsmbwEnsureDiscFolder();
+ 
++#if defined(__SWITCH__)
++#include <switch.h>
++#include <pthread.h>
++static int NsmbwMain();
++// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
++// this), so the game runs on a thread with a large stack; the log goes to the SD card.
++int main() {
++    chdir("/switch/nsmbw2");
++    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
++    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
++    std::freopen("/switch/nsmbw2/nsmbw.log", "a", stderr);
++    std::printf("[switch] NSMBW (NSMBWiicompiled port) starting\n");
++    std::fflush(stdout);
++    pthread_attr_t attr;
++    pthread_attr_init(&attr);
++    pthread_attr_setstacksize(&attr, 64u << 20);
++    static int result = 0;
++    pthread_t thread;
++    if (pthread_create(&thread, &attr, [](void*) -> void* {
++            svcSetThreadCoreMask(CUR_THREAD_HANDLE, 0, 1u << 0);  // game on core 0; aurora workers on 1 and 2
++            result = NsmbwMain();
++            return nullptr;
++        }, nullptr) != 0) {
++        std::printf("[switch] could not start the game thread\n");
++        return 1;
++    }
++    pthread_join(thread, nullptr);
++    std::fflush(nullptr);
++    return result;
++}
++static int NsmbwMain() {
++#else
+ int main() {
++#endif
+ #ifdef _WIN32
+     // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
+     // one (they can be given as environment variables; set before aurora initializes SDL). Resource
+@@ -863,7 +906,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2069,7 +2696,7 @@ index a63636b..f0b5957 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1074,11 @@ int main() {
+@@ -1068,11 +1111,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -2097,6 +2724,24 @@ index 104ff0d..d99697d 100644
  }
  
  } // namespace
+diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
+new file mode 100644
+index 0000000..efc5d52
+--- /dev/null
++++ b/runtime/src/switch_posix_stubs.cpp
+@@ -0,0 +1,12 @@
++// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
++// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
++#if defined(__SWITCH__)
++#include <cerrno>
++#include <sys/types.h>
++extern "C" {
++pid_t waitpid(pid_t, int*, int) { errno = ENOSYS; return -1; }
++int execvp(const char*, char* const[]) { errno = ENOSYS; return -1; }
++int fchown(int, uid_t, gid_t) { return 0; }
++uid_t geteuid(void) { return 0; }
++}
++#endif
 diff --git a/runtime/src/system_bridge.cpp b/runtime/src/system_bridge.cpp
 index 8b07d12..1e14a7f 100644
 --- a/runtime/src/system_bridge.cpp
