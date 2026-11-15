@@ -153,6 +153,246 @@ index b59795972..e67b4481e 100644
  
      // Workaround: Imagination EGL 1.5 drivers do not support the new robustness enum.
      // Use the pre-1.5 extension enum instead.
+diff --git a/src/dawn/native/opengl/PipelineGL.cpp b/src/dawn/native/opengl/PipelineGL.cpp
+index 40992c48f..18fa7ed39 100644
+--- a/src/dawn/native/opengl/PipelineGL.cpp
++++ b/src/dawn/native/opengl/PipelineGL.cpp
+@@ -26,9 +26,18 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/PipelineGL.h"
++#include "src/utils/platform.h"
++#include "src/dawn/native/Blob.h"
++#include "src/dawn/native/CacheKey.h"
++#include "src/dawn/native/BlobCache.h"
+ 
+ #include <algorithm>
+ #include <set>
++#include <utility>
++#include <span>
++#include <cstring>
++#include <cstdio>
++#include <cstdlib>
+ #include <sstream>
+ #include <string>
+ 
+@@ -52,6 +61,65 @@ PipelineGL::PipelineGL() : mProgram(0) {}
+ 
+ PipelineGL::~PipelineGL() = default;
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++namespace {
++// Program binary cache (Switch). Mesa recompiles every pipeline's GLSL at each launch (~35 ms per
++// pipeline on the Switch CPU, so every level's first load stalled for seconds). Linked programs
++// are saved with glGetProgramBinary in Dawn's blob cache (aurora's dawn_cache.db) keyed by the
++// GLSL of every stage, and restored with glProgramBinary; any failure falls back to compiling.
++GLint ProgramBinaryFormatCount(const OpenGLFunctions& gl) {
++    static GLint count = -1;
++    if (count < 0) {
++        GLint n = 0;
++        gl.GetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &n);
++        count = n;
++        fprintf(stderr, "[dawn-gl] program binary formats: %d\n", count);
++    }
++    return count;
++}
++uint64_t HashBytes(const std::string& text, uint64_t seed) {
++    uint64_t h = 1469598103934665603ull ^ seed;  // FNV-1a, then a final avalanche
++    for (unsigned char c : text) {
++        h ^= c;
++        h *= 1099511628211ull;
++    }
++    h ^= h >> 33;
++    h *= 0xff51afd7ed558ccdull;
++    h ^= h >> 33;
++    return h;
++}
++void AppendBytes(CacheKey& key, const void* data, size_t size) {
++    const auto* bytes = static_cast<const std::byte*>(data);
++    key.insert(key.end(), bytes, bytes + size);
++}
++GLenum StageShaderType(SingleShaderStage stage) {
++    switch (stage) {
++        case SingleShaderStage::Vertex:
++            return GL_VERTEX_SHADER;
++        case SingleShaderStage::Fragment:
++            return GL_FRAGMENT_SHADER;
++        case SingleShaderStage::Compute:
++            return GL_COMPUTE_SHADER;
++    }
++    DAWN_UNREACHABLE();
++}
++struct ProgramBinaryStats {
++    uint32_t hits = 0;
++    uint32_t misses = 0;
++    uint32_t rejected = 0;
++};
++ProgramBinaryStats gProgramBinaryStats;
++void LogProgramBinaryStats(const char* what) {
++    const auto& s = gProgramBinaryStats;
++    const uint32_t total = s.hits + s.misses + s.rejected;
++    if (total <= 3 || total % 50 == 0) {
++        fprintf(stderr, "[dawn-gl] program binary %s (hits %u, compiled %u, rejected %u)\n", what,
++                s.hits, s.misses, s.rejected);
++    }
++}
++}  // namespace
++#endif
++
+ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
+                                       const PipelineLayout* layout,
+                                       const PerStage<ProgrammableStage>& stages,
+@@ -72,6 +140,9 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
+     std::set<CombinedSampler> combinedSamplers;
+     mNeedsSSBOLengthUniformBuffer = false;
+     std::vector<GLuint> glShaders;
++#if DAWN_PLATFORM_IS(SWITCH)
++    std::vector<std::pair<SingleShaderStage, std::string>> stageSources;
++#endif
+     EmulatedTextureBuiltinRegistrar emulatedTextureBuiltins(layout);
+     for (SingleShaderStage stage : IterateStages(activeStages)) {
+         ShaderModule* module = ToBackend(stages[stage].module.Get());
+@@ -79,11 +150,17 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
+         std::vector<CombinedSampler> stageCombinedSamplers;
+         Extent3D localWorkgroupSize;
+         GLuint shader;
++#if DAWN_PLATFORM_IS(SWITCH)
++        std::string stageGlsl;
++        std::string* glslOut = &stageGlsl;
++#else
++        std::string* glslOut = nullptr;
++#endif
+         DAWN_TRY_ASSIGN(
+             shader, module->CompileShader(gl, stages[stage], stage, pipelineImmediateMask,
+                                           bgraSwizzleAttributes, &stageCombinedSamplers, layout,
+                                           &emulatedTextureBuiltins, &needsSSBOLengthUniformBuffer,
+-                                          &localWorkgroupSize));
++                                          &localWorkgroupSize, glslOut));
+         if (stage == SingleShaderStage::Compute) {
+             *workgroupSize = localWorkgroupSize;
+         }
+@@ -91,12 +168,93 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
+         mNeedsSSBOLengthUniformBuffer |= needsSSBOLengthUniformBuffer;
+         combinedSamplers.insert(stageCombinedSamplers.begin(), stageCombinedSamplers.end());
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++        if (shader == 0) {
++            stageSources.emplace_back(stage, std::move(stageGlsl));
++            continue;
++        }
++#endif
+         DAWN_GL_TRY(gl, AttachShader(mProgram, shader));
+         glShaders.push_back(shader);
+     }
+ 
+     mEmulatedTextureBuiltinInfo = emulatedTextureBuiltins.AcquireInfo();
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++    bool loadedFromBinary = false;
++    // DAWN_GL_NO_PROGRAM_BINARY=1 (env.txt on the Switch) turns the cache off.
++    static const bool sBinariesDisabled = std::getenv("DAWN_GL_NO_PROGRAM_BINARY") != nullptr;
++    const bool useBinaries =
++        !sBinariesDisabled && !stageSources.empty() && ProgramBinaryFormatCount(gl) > 0;
++    CacheKey binaryKey = layout->GetDevice()->GetCacheKey();
++    if (!stageSources.empty()) {
++        AppendBytes(binaryKey, "GLPB1", 5);
++        for (const auto& [stage, glsl] : stageSources) {
++            const uint32_t stageId = static_cast<uint32_t>(stage);
++            const uint64_t length = glsl.size();
++            const uint64_t a = HashBytes(glsl, 0);
++            const uint64_t b = HashBytes(glsl, 0x9e3779b97f4a7c15ull);
++            AppendBytes(binaryKey, &stageId, sizeof(stageId));
++            AppendBytes(binaryKey, &length, sizeof(length));
++            AppendBytes(binaryKey, &a, sizeof(a));
++            AppendBytes(binaryKey, &b, sizeof(b));
++        }
++    }
++    if (useBinaries) {
++        Blob blob;
++        auto loadResult = layout->GetDevice()->GetBlobCache()->Load(binaryKey);
++        if (loadResult.IsSuccess()) {
++            blob = loadResult.AcquireSuccess();
++        } else {
++            loadResult.AcquireError();  // a damaged entry just means "compile it again"
++        }
++        if (!blob.Empty() && blob.Size() > sizeof(GLenum)) {
++            GLenum format = 0;
++            std::memcpy(&format, blob.Data().data(), sizeof(format));
++            gl.ProgramBinary(mProgram, format, blob.Data().data() + sizeof(GLenum),
++                             static_cast<GLsizei>(blob.Size() - sizeof(GLenum)));
++            gl.GetError();  // a rejected binary may raise an error; it only means "recompile"
++            GLint status = GL_FALSE;
++            gl.GetProgramiv(mProgram, GL_LINK_STATUS, &status);
++            loadedFromBinary = status == GL_TRUE;
++            if (loadedFromBinary) {
++                ++gProgramBinaryStats.hits;
++                LogProgramBinaryStats("loaded");
++            } else {
++                ++gProgramBinaryStats.rejected;
++                LogProgramBinaryStats("rejected");
++                // A failed glProgramBinary leaves the program unlinked; start from a fresh one.
++                DAWN_GL_TRY(gl, DeleteProgram(mProgram));
++                mProgram = DAWN_GL_TRY(gl, CreateProgram());
++            }
++        }
++    }
++    if (!loadedFromBinary) {
++        for (const auto& [stage, glsl] : stageSources) {
++            GLuint shader = DAWN_GL_TRY(gl, CreateShader(StageShaderType(stage)));
++            const char* source = glsl.c_str();
++            DAWN_GL_TRY(gl, ShaderSource(shader, 1, &source, nullptr));
++            DAWN_GL_TRY(gl, CompileShader(shader));
++            GLint compileStatus = GL_FALSE;
++            DAWN_GL_TRY(gl, GetShaderiv(shader, GL_COMPILE_STATUS, &compileStatus));
++            if (compileStatus == GL_FALSE) {
++                GLint infoLogLength = 0;
++                DAWN_GL_TRY(gl, GetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength));
++                std::vector<char> buffer(std::max(infoLogLength, 1));
++                DAWN_GL_TRY(gl, GetShaderInfoLog(shader, infoLogLength, nullptr, buffer.data()));
++                DAWN_GL_TRY(gl, DeleteShader(shader));
++                return DAWN_VALIDATION_ERROR("%s\nProgram compilation failed:\n%s", source,
++                                             buffer.data());
++            }
++            DAWN_GL_TRY(gl, AttachShader(mProgram, shader));
++            glShaders.push_back(shader);
++        }
++        if (useBinaries) {
++            DAWN_GL_TRY(gl, ProgramParameteri(mProgram, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE));
++        }
++    }
++    if (!loadedFromBinary) {
++#endif
+     // Link all the shaders together.
+     DAWN_GL_TRY(gl, LinkProgram(mProgram));
+ 
+@@ -112,6 +270,27 @@ MaybeError PipelineGL::InitializeBase(const OpenGLFunctions& gl,
+             return DAWN_VALIDATION_ERROR("Program link failed:\n%s", buffer.data());
+         }
+     }
++#if DAWN_PLATFORM_IS(SWITCH)
++    if (useBinaries && linkStatus == GL_TRUE) {
++        GLint binaryLength = 0;
++        gl.GetProgramiv(mProgram, GL_PROGRAM_BINARY_LENGTH, &binaryLength);
++        if (binaryLength > 0) {
++            std::vector<std::byte> stored(sizeof(GLenum) + static_cast<size_t>(binaryLength));
++            GLenum format = 0;
++            GLsizei written = 0;
++            gl.GetProgramBinary(mProgram, binaryLength, &written, &format,
++                                stored.data() + sizeof(GLenum));
++            if (gl.GetError() == GL_NO_ERROR && written > 0) {
++                std::memcpy(stored.data(), &format, sizeof(format));
++                stored.resize(sizeof(GLenum) + static_cast<size_t>(written));
++                layout->GetDevice()->GetBlobCache()->Store(binaryKey, std::span<const std::byte>(stored));
++            }
++        }
++        ++gProgramBinaryStats.misses;
++        LogProgramBinaryStats("compiled");
++    }
++    }  // !loadedFromBinary
++#endif
+ 
+     // Compute links between stages for combined samplers, then bind them to texture units
+     DAWN_GL_TRY(gl, UseProgram(mProgram));
 diff --git a/src/dawn/native/opengl/QueueGL.cpp b/src/dawn/native/opengl/QueueGL.cpp
 index 3857ee0f0..85190285e 100644
 --- a/src/dawn/native/opengl/QueueGL.cpp
@@ -177,6 +417,49 @@ index 3857ee0f0..85190285e 100644
      if (egl.HasExt(EGLExt::NativeFenceSync)) {
          mEGLSyncType = EGL_SYNC_NATIVE_FENCE_ANDROID;
      } else if (egl.HasExt(EGLExt::FenceSync)) {
+diff --git a/src/dawn/native/opengl/ShaderModuleGL.cpp b/src/dawn/native/opengl/ShaderModuleGL.cpp
+index 7ed10399d..fb2d77ea3 100644
+--- a/src/dawn/native/opengl/ShaderModuleGL.cpp
++++ b/src/dawn/native/opengl/ShaderModuleGL.cpp
+@@ -361,7 +361,8 @@ ResultOrError<GLuint> ShaderModule::CompileShader(
+     const PipelineLayout* layout,
+     EmulatedTextureBuiltinRegistrar* emulatedTextureBuiltins,
+     bool* needsSSBOLengthUniformBuffer,
+-    Extent3D* workgroupSize) {
++    Extent3D* workgroupSize,
++    std::string* glslOut) {
+     TRACE_EVENT0(GetDevice()->GetPlatform(), General, "TranslateToGLSL");
+ 
+     const OpenGLVersion& version = gl.GetVersion();
+@@ -560,6 +561,12 @@ ResultOrError<GLuint> ShaderModule::CompileShader(
+         GetDevice()->EmitLog(wgpu::LoggingType::Info, dumpedMsg.str().c_str());
+     }
+ 
++    if (glslOut != nullptr) {
++        *glslOut = compilationResult->glsl;
++        GetDevice()->GetBlobCache()->EnsureStored(compilationResult);
++        return GLuint(0);
++    }
++
+     GLuint shader = DAWN_GL_TRY(gl, CreateShader(GLShaderType(stage)));
+     const char* source = compilationResult->glsl.c_str();
+     {
+diff --git a/src/dawn/native/opengl/ShaderModuleGL.h b/src/dawn/native/opengl/ShaderModuleGL.h
+index 7713b1253..0dddfac9a 100644
+--- a/src/dawn/native/opengl/ShaderModuleGL.h
++++ b/src/dawn/native/opengl/ShaderModuleGL.h
+@@ -93,7 +93,10 @@ class ShaderModule final : public ShaderModuleBase {
+                                         const PipelineLayout* layout,
+                                         EmulatedTextureBuiltinRegistrar* emulatedTextureBuiltings,
+                                         bool* needsSSBOLengthUniformBuffer,
+-                                        Extent3D* workgroupSize);
++                                        Extent3D* workgroupSize,
++                                        // When set: translate only, return the GLSL here and 0
++                                        // instead of a compiled GL shader (program binary cache).
++                                        std::string* glslOut = nullptr);
+ 
+   private:
+     ShaderModule(Device* device,
 diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
 index 15ebd666b..12f7db231 100644
 --- a/src/dawn/native/opengl/SwapChainEGL.cpp
