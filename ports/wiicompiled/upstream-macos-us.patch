@@ -4120,26 +4120,31 @@ index 3f78c82..862a7df 100644
      if (!in) return false;
      out.assign(std::istreambuf_iterator<char>(in), {});
 diff --git a/runtime/include/isa/ppc_isa_float.h b/runtime/include/isa/ppc_isa_float.h
-index fcd5795..ddc5c38 100644
+index fcd5795..882ba72 100644
 --- a/runtime/include/isa/ppc_isa_float.h
 +++ b/runtime/include/isa/ppc_isa_float.h
-@@ -145,6 +145,15 @@ inline bool MkwHostNiActiveInline() noexcept
+@@ -143,8 +143,20 @@ inline bool MkwHostNiActiveInline() noexcept
+     return g_mkwHostNiActive;
+ }
  
++#if defined(__aarch64__)
++__attribute__((always_inline))
++#endif
  inline float PpcForceSingleValueInline(double value)
  {
 +#if defined(__aarch64__)
-+    // Same result as the SSE version below, without the SSE-on-NEON emulation (several NEON ops
-+    // per intrinsic; ~17% of the Switch game thread ran under this helper). Values whose
-+    // magnitude is below the NI flush threshold become a signed zero; NaN compares false and is
-+    // converted normally; the conversion uses the current rounding mode like CVTSD2SS.
-+    if (__builtin_fabs(value) < g_mkwNiFlushThreshold) [[unlikely]]
-+        return __builtin_signbit(value) ? -0.0f : 0.0f;
++    // On ARM the runtime mirrors FPSCR[NI] into FPCR.FZ (host_simd.h, MkwHostSetCsr). With FZ set,
++    // FCVT flushes a result that is tiny before rounding to a signed zero (and treats subnormal
++    // inputs as zero), which is exactly what the SSE path below emulates with the
++    // g_mkwNiFlushThreshold mask. So a plain conversion is the whole operation: no thread_local
++    // read (a function call on the Switch, -mtp=soft) and no SSE-on-NEON emulation. This helper
++    // runs for nearly every guest float operation.
 +    return static_cast<float>(value);
 +#else
      // FPSCR[NI] flushes an exact pre-round single-subnormal even when rounding would promote it
      // to the smallest normal. g_mkwNiFlushThreshold (2^-126 active, 0.0 inactive) turns the
      // flush into a branchless mask: a set compare lane keeps just the sign bit, a clear lane
-@@ -156,6 +165,7 @@ inline float PpcForceSingleValueInline(double value)
+@@ -156,6 +168,7 @@ inline float PpcForceSingleValueInline(double value)
      const __m128d flush = _mm_cmplt_sd(magnitude, _mm_set_sd(g_mkwNiFlushThreshold));
      const __m128d kept = _mm_andnot_pd(_mm_andnot_pd(signMask, flush), v);
      return static_cast<float>(_mm_cvtsd_f64(kept));
