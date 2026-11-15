@@ -61,6 +61,8 @@ int main(int, char**) {
     fsdevMountSdmc();
     mkdir("sdmc:/switch/dawnprobe", 0777);
     g_log = fopen("sdmc:/switch/dawnprobe/probe.log", "w");
+    freopen("sdmc:/switch/dawnprobe/probe_stderr.log", "w", stderr);  // Dawn warnings
+    setvbuf(stderr, nullptr, _IONBF, 0);
     if (!g_log) g_log = stdout;
     L("dawnprobe: start");
 

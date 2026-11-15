@@ -2482,7 +2482,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..16f0e2d 100644
+index a63636b..e3f9209 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -84,12 +84,12 @@ namespace {
@@ -2646,7 +2646,7 @@ index a63636b..16f0e2d 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +793,40 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +793,57 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2659,8 +2659,25 @@ index a63636b..16f0e2d 100644
 +int main() {
 +    chdir("/switch/nsmbw2");
 +    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
++    // Truncate, then reopen both streams in append mode so their lines interleave instead of
++    // overwriting each other; unbuffered so nothing is lost when the app aborts.
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
++    std::freopen("/switch/nsmbw2/nsmbw.log", "a", stdout);
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "a", stderr);
++    setenv("NSMBW_UNBUFFERED_LOG", "1", 0);
++    std::setvbuf(stdout, nullptr, _IONBF, 0);
++    std::setvbuf(stderr, nullptr, _IONBF, 0);
++    std::set_terminate([] {
++        const char* what = "(no exception)";
++        if (auto e = std::current_exception()) {
++            try { std::rethrow_exception(e); }
++            catch (const std::exception& ex) { what = ex.what(); }
++            catch (...) { what = "(non-std exception)"; }
++        }
++        std::fprintf(stderr, "[switch] std::terminate: %s\n", what);
++        std::fflush(nullptr);
++        std::abort();
++    });
 +    std::printf("[switch] NSMBW (NSMBWiicompiled port) starting\n");
 +    std::fflush(stdout);
 +    pthread_attr_t attr;
@@ -2687,7 +2704,7 @@ index a63636b..16f0e2d 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +906,7 @@ int main() {
+@@ -863,7 +923,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2696,7 +2713,7 @@ index a63636b..16f0e2d 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1111,11 @@ int main() {
+@@ -1068,11 +1128,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped

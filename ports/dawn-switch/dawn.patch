@@ -37,6 +37,123 @@ index bdcbf45bd..3e95368b0 100644
          case wgpu::SType::SurfaceSourceAndroidNativeWindow: {
              auto* subDesc = descriptor.Get<SurfaceSourceAndroidNativeWindow>();
              DAWN_ASSERT(subDesc != nullptr);
+diff --git a/src/dawn/native/opengl/BackendGL.cpp b/src/dawn/native/opengl/BackendGL.cpp
+index 8ac34f3cc..f9a778f5a 100644
+--- a/src/dawn/native/opengl/BackendGL.cpp
++++ b/src/dawn/native/opengl/BackendGL.cpp
+@@ -26,6 +26,7 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/BackendGL.h"
++#include "src/utils/platform.h"
+ 
+ #include <memory>
+ #include <string>
+@@ -81,6 +82,9 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
+         Ref<DisplayEGL> display;
+         DAWN_TRY_ASSIGN(display, std::move(maybeDisplay));
+ 
++#if !DAWN_PLATFORM_IS(SWITCH)
++        // The Switch's Mesa EGL has neither extension: robustness stays off and fences use
++        // plain GL sync objects (see UtilsEGL.cpp).
+         if (!display->egl->HasExt(EGLExt::CreateContextRobustness)) {
+             return DAWN_VALIDATION_ERROR("EGL_EXT_create_context_robustness is required.");
+         }
+@@ -89,6 +93,7 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
+             return DAWN_INTERNAL_ERROR(
+                 "EGL_KHR_fence_sync or EGL_KHR_reusable_sync must be supported");
+         }
++#endif
+ 
+         Ref<PhysicalDevice> device;
+         DAWN_TRY_ASSIGN(
+diff --git a/src/dawn/native/opengl/ContextEGL.cpp b/src/dawn/native/opengl/ContextEGL.cpp
+index 0bc3be5b0..c18fe22a5 100644
+--- a/src/dawn/native/opengl/ContextEGL.cpp
++++ b/src/dawn/native/opengl/ContextEGL.cpp
+@@ -26,6 +26,7 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/ContextEGL.h"
++#include "src/utils/platform.h"
+ 
+ #include <memory>
+ #include <string>
+@@ -150,7 +151,12 @@ MaybeError ContextEGL::Initialize(wgpu::BackendType backend,
+                 break;
+             case wgpu::BackendType::OpenGL:
+                 AddAttrib(EGL_CONTEXT_MAJOR_VERSION, 4);
++#if DAWN_PLATFORM_IS(SWITCH)
++                AddAttrib(EGL_CONTEXT_MINOR_VERSION, 3);
++                AddAttrib(EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT);
++#else
+                 AddAttrib(EGL_CONTEXT_MINOR_VERSION, 4);
++#endif
+                 break;
+             default:
+                 DAWN_UNREACHABLE();
+diff --git a/src/dawn/native/opengl/PhysicalDeviceGL.cpp b/src/dawn/native/opengl/PhysicalDeviceGL.cpp
+index b59795972..e67b4481e 100644
+--- a/src/dawn/native/opengl/PhysicalDeviceGL.cpp
++++ b/src/dawn/native/opengl/PhysicalDeviceGL.cpp
+@@ -26,6 +26,7 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/PhysicalDeviceGL.h"
++#include "src/utils/platform.h"
+ 
+ #include <algorithm>
+ #include <memory>
+@@ -160,7 +161,12 @@ MaybeError PhysicalDevice::InitializeImpl() {
+             DAWN_INVALID_IF(!mFunctions.IsAtLeastGLES(3, 1), "OpenGL ES 3.1 is required.");
+             break;
+         case wgpu::BackendType::OpenGL:
++#if DAWN_PLATFORM_IS(SWITCH)
++            // The Switch's Mesa creates core contexts up to 4.3; Dawn's one 4.4 call has a fallback.
++            DAWN_INVALID_IF(!mFunctions.IsAtLeastGL(4, 3), "Desktop OpenGL 4.3 is required.");
++#else
+             DAWN_INVALID_IF(!mFunctions.IsAtLeastGL(4, 4), "Desktop OpenGL 4.4 is required.");
++#endif
+             break;
+         default:
+             DAWN_UNREACHABLE();
+@@ -529,7 +535,11 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
+         }
+     }
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++    bool useRobustness = false;  // no EGL_EXT_create_context_robustness on the Switch
++#else
+     bool useRobustness = !deviceToggles.IsEnabled(Toggle::DisableRobustness);
++#endif
+ 
+     // Workaround: Imagination EGL 1.5 drivers do not support the new robustness enum.
+     // Use the pre-1.5 extension enum instead.
+diff --git a/src/dawn/native/opengl/QueueGL.cpp b/src/dawn/native/opengl/QueueGL.cpp
+index 3857ee0f0..16ddbec63 100644
+--- a/src/dawn/native/opengl/QueueGL.cpp
++++ b/src/dawn/native/opengl/QueueGL.cpp
+@@ -26,6 +26,7 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/QueueGL.h"
++#include "src/utils/platform.h"
+ 
+ #include <vector>
+ 
+@@ -66,7 +67,12 @@ ResultOrError<Ref<Queue>> Queue::Create(Device* device, const QueueDescriptor* d
+ Queue::Queue(Device* device, const QueueDescriptor* descriptor) : QueueBase(device, descriptor) {
+     const auto& egl = device->GetEGL(false);
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++    mEGLSyncType = EGL_SYNC_FENCE;  // backed by a GL fence in WrappedEGLSync
++    if (false) {
++#else
+     if (egl.HasExt(EGLExt::NativeFenceSync)) {
++#endif
+         mEGLSyncType = EGL_SYNC_NATIVE_FENCE_ANDROID;
+     } else if (egl.HasExt(EGLExt::FenceSync)) {
+         mEGLSyncType = EGL_SYNC_FENCE;
 diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
 index 15ebd666b..7f888b9b9 100644
 --- a/src/dawn/native/opengl/SwapChainEGL.cpp
@@ -56,6 +173,113 @@ index 15ebd666b..7f888b9b9 100644
  #if defined(DAWN_ENABLE_BACKEND_METAL)
              case Surface::Type::MetalLayer:
                  mEGLSurface = egl.CreateWindowSurface(eglDisplay, config, surface->GetMetalLayer(),
+diff --git a/src/dawn/native/opengl/UtilsEGL.cpp b/src/dawn/native/opengl/UtilsEGL.cpp
+index e7284a42f..c0db496bf 100644
+--- a/src/dawn/native/opengl/UtilsEGL.cpp
++++ b/src/dawn/native/opengl/UtilsEGL.cpp
+@@ -26,6 +26,10 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/UtilsEGL.h"
++#include "src/utils/platform.h"
++#include "src/dawn/native/opengl/OpenGLFunctions.h"
++
++#include <mutex>
+ 
+ #include <string>
+ #include <vector>
+@@ -103,10 +107,39 @@ MaybeError CheckEGL(const EGLFunctions& egl, EGLBoolean result, const char* cont
+     }
+ }
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++namespace {
++std::mutex gSwitchDeadSyncLock;
++std::vector<GLsync> gSwitchDeadSyncs;
++void SwitchDrainDeadSyncs(const OpenGLFunctions& gl) {
++    std::vector<GLsync> dead;
++    {
++        std::lock_guard<std::mutex> lock(gSwitchDeadSyncLock);
++        dead.swap(gSwitchDeadSyncs);
++    }
++    for (GLsync s : dead) {
++        gl.DeleteSync(s);
++    }
++}
++}  // namespace
++#endif
++
+ ResultOrError<Ref<WrappedEGLSync>> WrappedEGLSync::Create(DisplayEGL* display,
+-                                                          const OpenGLFunctions&,
++                                                          const OpenGLFunctions& gl,
+                                                           EGLenum type,
+                                                           const EGLint* attribs) {
++#if DAWN_PLATFORM_IS(SWITCH)
++    // No EGL sync extensions on the Switch: back the sync with a GL fence. GL objects need a
++    // current context to delete, so destructors queue them and the next Create frees them.
++    (void)type;
++    (void)attribs;
++    SwitchDrainDeadSyncs(gl);
++    GLsync glSync = gl.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++    if (glSync == nullptr) {
++        return DAWN_INTERNAL_ERROR("glFenceSync failed");
++    }
++    return AcquireRef(new WrappedEGLSync(display, reinterpret_cast<EGLSync>(glSync), true));
++#endif
+     const EGLFunctions& egl = display->egl.get();
+ 
+     EGLSyncKHR sync = EGL_NO_SYNC;
+@@ -154,6 +187,13 @@ WrappedEGLSync::WrappedEGLSync(DisplayEGL* display, EGLSync sync, bool ownsSync)
+ }
+ 
+ WrappedEGLSync::~WrappedEGLSync() {
++#if DAWN_PLATFORM_IS(SWITCH)
++    if (mOwnsSync) {
++        std::lock_guard<std::mutex> lock(gSwitchDeadSyncLock);
++        gSwitchDeadSyncs.push_back(reinterpret_cast<GLsync>(mSync));
++    }
++    return;
++#endif
+     if (mOwnsSync) {
+         const EGLFunctions& egl = mDisplay->egl.get();
+         if (egl.HasExt(EGLExt::FenceSync)) {
+@@ -177,9 +217,22 @@ MaybeError WrappedEGLSync::Signal(const OpenGLFunctions&, EGLenum mode) {
+     return {};
+ }
+ 
+-ResultOrError<EGLenum> WrappedEGLSync::ClientWait(const OpenGLFunctions&,
++ResultOrError<EGLenum> WrappedEGLSync::ClientWait(const OpenGLFunctions& gl,
+                                                   EGLint flags,
+                                                   Nanoseconds timeout) {
++#if DAWN_PLATFORM_IS(SWITCH)
++    GLbitfield glFlags = (flags & EGL_SYNC_FLUSH_COMMANDS_BIT) ? GL_SYNC_FLUSH_COMMANDS_BIT : 0;
++    GLenum r = gl.ClientWaitSync(reinterpret_cast<GLsync>(mSync), glFlags, uint64_t(timeout));
++    switch (r) {
++        case GL_ALREADY_SIGNALED:
++        case GL_CONDITION_SATISFIED:
++            return EGLenum(EGL_CONDITION_SATISFIED);
++        case GL_TIMEOUT_EXPIRED:
++            return EGLenum(EGL_TIMEOUT_EXPIRED);
++        default:
++            return DAWN_INTERNAL_ERROR("glClientWaitSync failed");
++    }
++#endif
+     const EGLFunctions& egl = mDisplay->egl.get();
+ 
+     EGLenum result = EGL_FALSE;
+@@ -194,7 +247,11 @@ ResultOrError<EGLenum> WrappedEGLSync::ClientWait(const OpenGLFunctions&,
+     return result;
+ }
+ 
+-MaybeError WrappedEGLSync::Wait(const OpenGLFunctions&) {
++MaybeError WrappedEGLSync::Wait(const OpenGLFunctions& gl) {
++#if DAWN_PLATFORM_IS(SWITCH)
++    gl.WaitSync(reinterpret_cast<GLsync>(mSync), 0, GL_TIMEOUT_IGNORED);
++    return {};
++#endif
+     const EGLFunctions& egl = mDisplay->egl.get();
+     DAWN_ASSERT(egl.HasExt(EGLExt::WaitSync));
+ 
 diff --git a/src/utils/platform.h b/src/utils/platform.h
 index 4dd58a487..3691b701b 100644
 --- a/src/utils/platform.h
@@ -81,9 +305,3 @@ index 4dd58a487..3691b701b 100644
  #if !defined(DAWN_PLATFORM_IS_FUCHSIA)
  #define DAWN_PLATFORM_IS_FUCHSIA 0
  #endif
-diff --git a/third_party/abseil-cpp b/third_party/abseil-cpp
---- a/third_party/abseil-cpp
-+++ b/third_party/abseil-cpp
-@@ -1 +1 @@
--Subproject commit d16e32215c3ab90ba57c2e904a5344d85c7353e4
-+Subproject commit d16e32215c3ab90ba57c2e904a5344d85c7353e4-dirty
