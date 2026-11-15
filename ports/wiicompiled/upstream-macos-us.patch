@@ -3246,7 +3246,7 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..ab32ab3
+index 0000000..afece19
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
 @@ -0,0 +1,218 @@
@@ -3355,7 +3355,7 @@ index 0000000..ab32ab3
 +
 +// Sampling profiler for hardware runs. A thread on core 2 pauses each registered thread about 500
 +// times a second (game thread = slot 0, aurora frame worker = slot 1), reads its PC and LR and
-+// walks eight frames of the frame-pointer chain, then resumes it. Every 30 s the window's counts
++// walks sixteen frames of the frame-pointer chain, then resumes it. Every 30 s the window's counts
 +// go to /switch/nsmbw2/profile_<n>.txt (n = window index mod 40) and are cleared, so startup and
 +// gameplay land in different files. Addresses are absolute; "main=" gives the load base.
 +#include <array>
@@ -3374,7 +3374,7 @@ index 0000000..ab32ab3
 +}
 +void* ProfilerMain(void*) {
 +    svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
-+    using Key = std::array<uint64_t, 10>;  // pc, lr, then eight frame-chain return addresses
++    using Key = std::array<uint64_t, 18>;  // pc, lr, then sixteen frame-chain return addresses
 +    std::map<Key, uint32_t> counts[2];
 +    uint64_t totals[2] = {0, 0};
 +    const uint64_t start = armGetSystemTick();
@@ -3398,7 +3398,7 @@ index 0000000..ab32ab3
 +                    key[0] = ctx.pc.x;
 +                    key[1] = ctx.lr;
 +                    uint64_t fp = ctx.fp;
-+                    for (int d = 2; d < 10 && ReadableWord(fp); ++d) {
++                    for (int d = 2; d < 18 && ReadableWord(fp); ++d) {
 +                        const uint64_t* frame = reinterpret_cast<const uint64_t*>(fp);
 +                        key[d] = frame[1];
 +                        if (frame[0] <= fp) break;  // the chain must grow upwards
