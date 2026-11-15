@@ -574,7 +574,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..61b51ea 100644
+index ec62546..c547e26 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,7 +8,6 @@
@@ -612,7 +612,7 @@ index ec62546..61b51ea 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +206,13 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +206,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -621,13 +621,16 @@ index ec62546..61b51ea 100644
 +        target_link_options(NSMBWCompiled PRIVATE -g -Wl,-stack_size,0x1000000)
 +    elseif(NINTENDO_SWITCH)
 +        # main() runs the game on a 64 MiB-stack thread (nsmbw_product.cpp); no linker stack option.
++        # fchmod is ENOSYS on the SD card; libstdc++ copy_file treats that as failure (see
++        # switch_posix_stubs.cpp __wrap_fchmod).
++        target_link_options(NSMBWCompiled PRIVATE -Wl,--wrap=fchmod)
 +    else()
 +        target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
 +    endif()
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +228,13 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +231,13 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -2763,10 +2766,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..47f86b0
+index 0000000..3f71e43
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,72 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -2825,6 +2828,18 @@ index 0000000..47f86b0
 +        pthread_create(&reaper, nullptr, ReaperMain, nullptr);
 +    }
 +    return 0;
++}
++// The SD card's devoptab has no fchmod, so newlib returns ENOSYS. FAT keeps no Unix permissions,
++// so report success: otherwise std::filesystem::copy_file creates the file, fails on the
++// permission copy, and leaves it empty (the NAND bootstrap files were all 0 bytes).
++extern "C" int __real_fchmod(int fd, mode_t mode);
++extern "C" int __wrap_fchmod(int fd, mode_t mode) {
++    const int r = __real_fchmod(fd, mode);
++    if (r != 0 && errno == ENOSYS) {
++        errno = 0;
++        return 0;
++    }
++    return r;
 +}
 +#endif
 diff --git a/runtime/src/system_bridge.cpp b/runtime/src/system_bridge.cpp
