@@ -574,7 +574,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..c547e26 100644
+index ec62546..a857f39 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,7 +8,6 @@
@@ -623,7 +623,7 @@ index ec62546..c547e26 100644
 +        # main() runs the game on a 64 MiB-stack thread (nsmbw_product.cpp); no linker stack option.
 +        # fchmod is ENOSYS on the SD card; libstdc++ copy_file treats that as failure (see
 +        # switch_posix_stubs.cpp __wrap_fchmod).
-+        target_link_options(NSMBWCompiled PRIVATE -Wl,--wrap=fchmod)
++        target_link_options(NSMBWCompiled PRIVATE -Wl,--wrap=fchmod -Wl,--wrap=pthread_create)
 +    else()
 +        target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
 +    endif()
@@ -2512,10 +2512,18 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..ef5a468 100644
+index a63636b..f4d9183 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
-@@ -84,12 +84,12 @@ namespace {
+@@ -39,6 +39,7 @@
+ #include <cstdio>
+ #include <cerrno>
+ #include <exception>
++#include <sys/stat.h>
+ #include <filesystem>
+ #include <iomanip>
+ #include <ios>
+@@ -84,12 +85,12 @@ namespace {
  //     retail disc image header (New Super Mario Bros. Wii (Europe) (Rev 1).rvz, offset 0x58 in
  //     the RVZ container - "SMNP" + "01" + disc 0 + version 1), not guessed or copied from MKW.
  //   - MEM1 arena lo: derived from wiimj2d.dol's own BSS end (its header's bss_addr+bss_size =
@@ -2530,7 +2538,7 @@ index a63636b..ef5a468 100644
  //     which is conservative but not derived from NSMBW's own arena-init code).
  void SeedLowMemDefaults() {
      struct SeedEntry { uint32_t address; uint32_t value; const char* label; };
-@@ -97,13 +97,13 @@ void SeedLowMemDefaults() {
+@@ -97,13 +98,13 @@ void SeedLowMemDefaults() {
      const uint32_t mem2Size = static_cast<uint32_t>(Memory::kMem2Size);
      const uint32_t mem1End = Memory::kMem1CachedBase + mem1Size;
      // _stack_addr, read from __init_registers (0x80004234-0x80004238: lis r1,-0x7fbd;
@@ -2548,7 +2556,7 @@ index a63636b..ef5a468 100644
      const uint32_t physicalMem2End = Memory::kMem2CachedBase + mem2Size;
      constexpr uint32_t kIosReservedSize = 0x20000u;
      constexpr uint32_t kIPCArenaSize = 0x20000u;
-@@ -117,8 +117,8 @@ void SeedLowMemDefaults() {
+@@ -117,8 +118,8 @@ void SeedLowMemDefaults() {
      constexpr uint32_t kDvdFstReserveSize = 0x200000u;
      g_dvdFstReservedSize = kDvdFstReserveSize;
      g_dvdFstReservedBase = ipcBufLo - kDvdFstReserveSize;
@@ -2559,7 +2567,7 @@ index a63636b..ef5a468 100644
      // Same retail-vs-NDEV test as OS__GetConsoleType_8019f33c (os_init.cpp) - kept in sync so a
      // guest read of this field and a guest call to OSGetConsoleType() never disagree.
      constexpr uint32_t kRetailMem2Size = 64u * 1024u * 1024u;
-@@ -137,10 +137,10 @@ void SeedLowMemDefaults() {
+@@ -137,10 +138,10 @@ void SeedLowMemDefaults() {
          // func_801AA940 itself gets a chance to run, so without this the cache is seen as NULL and
          // that read permanently fails - the actual root cause of the OSSleepThread hang traced this
          // session. This isn't a guess: it's the exact value func_801AA940 would itself store here.
@@ -2572,7 +2580,7 @@ index a63636b..ef5a468 100644
          {0x80003180u, kGameCode, "OS app game code"},
          {0x80003194u, kGameCode, "OS app gamename"},
          {0x800000F8u, static_cast<uint32_t>(TimeBaseContract::kBusClockHz), "__OSBusClock"},
-@@ -179,23 +179,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
+@@ -179,23 +180,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
  
  // Mirrors main.cpp's SeedCpuContext(): r1 is the initial stack pointer. NSMBW's manifest
  // (projects/nsmbw/nsmbw.yml) declares memory.base=0x80000000, memory.size=0x01800000, so guest
@@ -2602,7 +2610,7 @@ index a63636b..ef5a468 100644
  // d_en_bossNP was excluded for two stacked reasons this session, both now fixed:
  //   1. RelFile.cs's ApplyRelocations mis-resolved cross-module relocations (reusing the
  //      currently-relocating module's own baseAddress/Sections instead of the target module's),
-@@ -206,8 +206,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -206,8 +207,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  //      Decomp's real loader (DynamicModuleControl::do_link, source/dol/cLib/c_dylink.cpp) reads
  //      the whole file, links it, then shrinks the heap block to fixSize+bssSize - discarding that
  //      tail. Using the full file length as "resident size" inflated every REL's footprint enough
@@ -2613,7 +2621,7 @@ index a63636b..ef5a468 100644
  //      total resident size - is now placed right after the last real section, matching
  //      do_link()'s actual behavior. With that fix, all four RELs' real footprints are
  //      non-overlapping and pack contiguously (small gaps of a few hundred bytes between them,
-@@ -222,14 +222,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -222,14 +223,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  // the retail .rel headers: prologSection is 1 and prologOffset is 0 for all four, and section 1
  // starts at file offset 0xF0 (0xE0 for d_profileNP), just past each header and section table.
  // Cross-checked against the translated bodies: func_80768680 is d_profileNP's real _prolog (it
@@ -2633,7 +2641,7 @@ index a63636b..ef5a468 100644
  };
  
  // A bad guest constructor must not take down the whole boot sequence - matches
-@@ -239,7 +239,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
+@@ -239,7 +240,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
      MkwJmpBuf jumpBuf;
      g_sehJumpTarget = &jumpBuf;
      if (MKW_SETJMP(jumpBuf) == 0) {
@@ -2642,7 +2650,7 @@ index a63636b..ef5a468 100644
          InvokeIndirectCpu(address, &cpu);
      } else {
          std::fprintf(stderr,
-@@ -271,6 +271,12 @@ void RunGuestConstructors(CpuContext& cpu) {
+@@ -271,6 +272,12 @@ void RunGuestConstructors(CpuContext& cpu) {
  
      std::printf("[nsmbw] Running REL _prolog (static constructors) for each of the 4 RELs...\n");
      for (uint32_t prolog : kRelPrologAddresses) {
@@ -2655,7 +2663,7 @@ index a63636b..ef5a468 100644
          InvokeGuestCallGuarded(prolog, cpu, "REL _prolog");
      }
  
-@@ -338,7 +344,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+@@ -338,7 +345,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
      config.logLevel = LOG_INFO;
      config.windowWidth = 640;
      config.windowHeight = 480;
@@ -2667,7 +2675,7 @@ index a63636b..ef5a468 100644
      config.allowJoystickBackgroundEvents = true;
      // Mirror main.cpp's MKW init: skip the display copy's vertical deflicker filter (default on,
      // as in Dolphin). Left zero-initialised, the filter ran on every frame while the F10 checkbox
-@@ -733,7 +743,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -733,7 +744,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
      }
      std::error_code ec;
  
@@ -2676,7 +2684,7 @@ index a63636b..ef5a468 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +793,66 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +794,123 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2689,23 +2697,80 @@ index a63636b..ef5a468 100644
 +sqlite3_vfs* sqlite3_vfs_find(const char* name);
 +int sqlite3_vfs_register(sqlite3_vfs* vfs, int makeDefault);
 +}
++extern "C" {
++struct sqlite3;
++int sqlite3_open(const char* filename, sqlite3** db);
++int sqlite3_exec(sqlite3* db, const char* sql, int (*cb)(void*, int, char**, char**), void* arg, char** err);
++const char* sqlite3_errmsg(sqlite3* db);
++int sqlite3_close(sqlite3* db);
++}
++// Startup check of SQLite file I/O on the SD card (the shader caches failed with "database disk
++// image is malformed"): runs the same steps as the caches with the default and the Switch
++// settings, and logs each step's result to stderr.
++static void SwitchSqliteSelfTest() {
++    struct Variant { const char* name; const char* pragmas; };
++    const Variant variants[] = {
++        {"default", ""},
++        {"switch", "PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF;"},
++    };
++    for (const auto& v : variants) {
++        const std::string path = std::string("/switch/nsmbw2/sqlite_selftest_") + v.name + ".db";
++        std::remove(path.c_str());
++        std::remove((path + "-journal").c_str());
++        const char* steps[] = {
++            v.pragmas,
++            "CREATE TABLE t(k INTEGER PRIMARY KEY, v BLOB);",
++            "INSERT INTO t(v) VALUES (zeroblob(5000)), (zeroblob(9000)), (randomblob(3000));",
++            "SELECT count(*), sum(length(v)) FROM t;",
++        };
++        sqlite3* db = nullptr;
++        int rc = sqlite3_open(path.c_str(), &db);
++        std::fprintf(stderr, "[sqlite-test] %s open rc=%d %s\n", v.name, rc, db ? sqlite3_errmsg(db) : "");
++        for (const char* sql : steps) {
++            if (rc != 0 || sql[0] == '\0') continue;
++            std::string result;
++            char* err = nullptr;
++            rc = sqlite3_exec(db, sql, [](void* out, int n, char** vals, char**) -> int {
++                    for (int i = 0; i < n; ++i) { *static_cast<std::string*>(out) += vals[i] ? vals[i] : "NULL"; *static_cast<std::string*>(out) += ' '; }
++                    return 0;
++                }, &result, &err);
++            std::fprintf(stderr, "[sqlite-test] %s rc=%d %s %s :: %.40s\n", v.name, rc, err ? err : "", result.c_str(), sql);
++        }
++        sqlite3_close(db);
++        db = nullptr;
++        // Reopen and read back what was written.
++        rc = sqlite3_open(path.c_str(), &db);
++        std::string result;
++        char* err = nullptr;
++        if (rc == 0) {
++            rc = sqlite3_exec(db, "SELECT count(*), sum(length(v)) FROM t;", [](void* out, int n, char** vals, char**) -> int {
++                    for (int i = 0; i < n; ++i) { *static_cast<std::string*>(out) += vals[i] ? vals[i] : "NULL"; *static_cast<std::string*>(out) += ' '; }
++                    return 0;
++                }, &result, &err);
++        }
++        struct stat st{};
++        stat(path.c_str(), &st);
++        std::fprintf(stderr, "[sqlite-test] %s reopen rc=%d %s %s size=%lld (expect 3 17000)\n", v.name, rc,
++                     err ? err : "", result.c_str(), static_cast<long long>(st.st_size));
++        sqlite3_close(db);
++    }
++}
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
-+int main() {
+ int main() {
 +    chdir("/switch/nsmbw2");
 +    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
-+    // Unbuffered so nothing is lost when the app aborts.
 +    // The SD driver will not open one file twice, so stderr (aurora, Dawn) gets its own file.
++    // Logs are block-buffered and flushed every 250 ms by NsmbwMain (unbuffered writes to the SD
++    // card cost the game thread time); the terminate handler below flushes before aborting.
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
 +    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
-+    setenv("NSMBW_UNBUFFERED_LOG", "1", 0);
 +    setenv("SDL_SWITCH_NO_EGL_SURFACE", "1", 1);
-+    setenv("NSMBW_LOG_NAND", "1", 0);  // trace save I/O on hardware
++    setenv("NSMBW_LOG_INTERP", "1", 0);  // frame timing / idle / shader-compile stats every 2 s
 +    // The SD filesystem has no POSIX locks, so SQLite's default VFS fails every query with a disk
 +    // I/O error; the lock-free VFS is safe here (one process uses the caches).
 +    if (sqlite3_vfs* noLock = sqlite3_vfs_find("unix-none")) sqlite3_vfs_register(noLock, 1);  // Dawn creates the window's EGL surface itself
-+    std::setvbuf(stdout, nullptr, _IONBF, 0);
-+    std::setvbuf(stderr, nullptr, _IONBF, 0);
++    SwitchSqliteSelfTest();
 +    std::set_terminate([] {
 +        const char* what = "(no exception)";
 +        if (auto e = std::current_exception()) {
@@ -2738,12 +2803,12 @@ index a63636b..ef5a468 100644
 +}
 +static int NsmbwMain() {
 +#else
- int main() {
++int main() {
 +#endif
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +932,7 @@ int main() {
+@@ -863,7 +990,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2752,7 +2817,7 @@ index a63636b..ef5a468 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1137,11 @@ int main() {
+@@ -1068,11 +1195,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -2782,10 +2847,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..3f71e43
+index 0000000..cc7a5b4
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,89 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -2854,6 +2919,23 @@ index 0000000..3f71e43
 +    if (r != 0 && errno == ENOSYS) {
 +        errno = 0;
 +        return 0;
++    }
++    return r;
++}
++// libnx creates every thread on the process's default core, which is also the game's core, so
++// audio mixing, shader compiles, the log flusher etc. all competed with the game. Move each new
++// thread onto cores 1-2 (alternating preferred core, free to run on either). The game thread
++// pins itself back to core 0; aurora's frame worker and presenter pin themselves to 1 and 2.
++extern "C" int __real_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
++                                     void* (*start)(void*), void* arg);
++extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
++                                     void* (*start)(void*), void* arg) {
++    const int r = __real_pthread_create(thread, attr, start, arg);
++    if (r == 0 && thread != nullptr && *thread != nullptr) {
++        static unsigned s_next;
++        const int core = 1 + static_cast<int>(__atomic_fetch_add(&s_next, 1u, __ATOMIC_RELAXED) & 1u);
++        Thread* t = reinterpret_cast<Thread*>(*thread);
++        svcSetThreadCoreMask(t->handle, core, (1u << 1) | (1u << 2));
 +    }
 +    return r;
 +}
@@ -3016,3 +3098,103 @@ index 5b35e16..088d7a0 100644
      return !ec;
  }
  
+diff --git a/runtime/src/audio_backend.cpp b/runtime/src/audio_backend.cpp
+index 7ceda4c..4b777a4 100644
+--- a/runtime/src/audio_backend.cpp
++++ b/runtime/src/audio_backend.cpp
+@@ -74,6 +74,8 @@ bool AudioBackend::EnsureInitializedLocked(uint32_t sampleRate, uint32_t channel
+         return false;
+     }
+ 
++    RT_LOG(RT_TAG_AUDIO) << "SDL audio driver: " << (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "(none)")
++                         << ", " << spec.freq << " Hz, " << spec.channels << " ch" << std::endl;
+     m_stream = stream;
+     m_spec = spec;
+     m_sampleRate = sampleRate;
+@@ -127,10 +129,13 @@ bool AudioBackend::QueueHasCapacityLocked(int incomingBytes) {
+         // stream creates an audible discontinuity (the severe crackle seen when
+         // VI-batched DMA briefly outran playback).
+         // A drop is audible; report the first one so it is not invisible.
+-        if (!m_reportedDroppedBlock) {
++        static uint64_t s_droppedBlocks = 0;
++        ++s_droppedBlocks;
++        if (!m_reportedDroppedBlock || (s_droppedBlocks % 500u) == 0) {
+             m_reportedDroppedBlock = true;
+             RT_LOG(RT_TAG_AUDIO) << "output queue full (" << queued << "/" << maxQueued
+-                      << " bytes); dropping blocks to preserve continuity" << std::endl;
++                      << " bytes); dropping blocks to preserve continuity (" << s_droppedBlocks
++                      << " dropped so far)" << std::endl;
+         }
+         return false;
+     }
+diff --git a/aurora-main/lib/webgpu/gpu_cache.cpp b/aurora-main/lib/webgpu/gpu_cache.cpp
+index 4f52738..291734a 100644
+--- a/aurora-main/lib/webgpu/gpu_cache.cpp
++++ b/aurora-main/lib/webgpu/gpu_cache.cpp
+@@ -19,6 +19,17 @@
+ #define XXH_STATIC_LINKING_ONLY
+ #include <xxhash.h>
+ 
++#ifdef __SWITCH__
++// SQLite's file I/O on the Switch SD card failed ("database disk image is malformed" on the
++// first CREATE TABLE; WAL is compiled out there). One process owns the cache, so take an
++// exclusive lock and keep the rollback journal in memory: the database file is then only read
++// and written in place, with no journal file churn. A crash can corrupt a cache; it is rebuilt.
++static constexpr const char* kAuroraSqlitePragmas =
++    "PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF;";
++#else
++static constexpr const char* kAuroraSqlitePragmas = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
++#endif
++
+ namespace aurora::webgpu {
+ static Module Log("aurora::gpu::cache");
+ 
+@@ -147,7 +158,7 @@ static bool cache_init_core() {
+   }
+ 
+   // WAL mode + NORMAL = no need for disk syncs, consistent but not durable is fine.
+-  ret = sqlite::exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
++  ret = sqlite::exec(db, kAuroraSqlitePragmas);
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
+     return false;
+@@ -176,7 +187,7 @@ static bool cache_init_core() {
+       Log.error("Failed to recreate database: {}", sqlite3_errmsg(db));
+       return false;
+     }
+-    ret = sqlite::exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
++    ret = sqlite::exec(db, kAuroraSqlitePragmas);
+     if (ret != SQLITE_OK) {
+       Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
+       return false;
+diff --git a/aurora-main/lib/gfx/pipeline_cache.cpp b/aurora-main/lib/gfx/pipeline_cache.cpp
+index ed5b68b..98d1555 100644
+--- a/aurora-main/lib/gfx/pipeline_cache.cpp
++++ b/aurora-main/lib/gfx/pipeline_cache.cpp
+@@ -23,6 +23,17 @@
+ #include <fmt/format.h>
+ #include <tracy/Tracy.hpp>
+ 
++#ifdef __SWITCH__
++// SQLite's file I/O on the Switch SD card failed ("database disk image is malformed" on the
++// first CREATE TABLE; WAL is compiled out there). One process owns the cache, so take an
++// exclusive lock and keep the rollback journal in memory: the database file is then only read
++// and written in place, with no journal file churn. A crash can corrupt a cache; it is rebuilt.
++static constexpr const char* kAuroraSqlitePragmas =
++    "PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF;";
++#else
++static constexpr const char* kAuroraSqlitePragmas = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;";
++#endif
++
+ namespace aurora::gfx {
+ static Module Log("aurora::gfx::pipeline_cache");
+ 
+@@ -724,7 +735,7 @@ static bool prepare_pipeline_cache_db() {
+     return false;
+   }
+ 
+-  ret = sqlite::exec(g_pipelineCacheDb, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
++  ret = sqlite::exec(g_pipelineCacheDb, kAuroraSqlitePragmas);
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to set pipeline cache pragmas: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     pipeline_cache_abort();
