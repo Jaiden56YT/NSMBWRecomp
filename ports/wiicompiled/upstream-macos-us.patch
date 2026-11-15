@@ -2512,7 +2512,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..838c7e4 100644
+index a63636b..ef5a468 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -84,12 +84,12 @@ namespace {
@@ -2676,7 +2676,7 @@ index a63636b..838c7e4 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +793,65 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +793,66 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2700,6 +2700,7 @@ index a63636b..838c7e4 100644
 +    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
 +    setenv("NSMBW_UNBUFFERED_LOG", "1", 0);
 +    setenv("SDL_SWITCH_NO_EGL_SURFACE", "1", 1);
++    setenv("NSMBW_LOG_NAND", "1", 0);  // trace save I/O on hardware
 +    // The SD filesystem has no POSIX locks, so SQLite's default VFS fails every query with a disk
 +    // I/O error; the lock-free VFS is safe here (one process uses the caches).
 +    if (sqlite3_vfs* noLock = sqlite3_vfs_find("unix-none")) sqlite3_vfs_register(noLock, 1);  // Dawn creates the window's EGL surface itself
@@ -2742,7 +2743,7 @@ index a63636b..838c7e4 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +931,7 @@ int main() {
+@@ -863,7 +932,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2751,7 +2752,7 @@ index a63636b..838c7e4 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1136,11 @@ int main() {
+@@ -1068,11 +1137,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -2989,4 +2990,29 @@ index 723f63e..2938125 100644
 +constexpr uint32_t kMiRegCount = 0x40u;
  constexpr uint32_t kMiSize = kMiRegCount * 2u;
  constexpr uint32_t kMiIntsrIndex = 15u; // MI_INTSR (0xCC00401E) - write-1-to-clear
+ 
+diff --git a/runtime/src/hle/storage/nand_fs.cpp b/runtime/src/hle/storage/nand_fs.cpp
+index 5b35e16..088d7a0 100644
+--- a/runtime/src/hle/storage/nand_fs.cpp
++++ b/runtime/src/hle/storage/nand_fs.cpp
+@@ -117,6 +117,20 @@ bool NandRemove(const std::filesystem::path& path) {
+ bool NandRename(const std::filesystem::path& from, const std::filesystem::path& to) {
+     std::error_code ec;
+     std::filesystem::rename(from, to, ec);
++    if (!ec) {
++        return true;
++    }
++    // POSIX rename() replaces an existing destination; the Switch's FS (and some others)
++    // refuses instead. NSMBW saves by renaming /tmp/sys/wiimj2d.sav over the file it just
++    // created in its title dir, so that failure left a 0-byte "corrupted" save. Replace
++    // a regular-file destination explicitly and retry.
++    std::error_code statEc;
++    if (std::filesystem::is_regular_file(from, statEc) && std::filesystem::is_regular_file(to, statEc)) {
++        std::error_code rmEc;
++        std::filesystem::remove(to, rmEc);
++        ec.clear();
++        std::filesystem::rename(from, to, ec);
++    }
+     return !ec;
+ }
  
