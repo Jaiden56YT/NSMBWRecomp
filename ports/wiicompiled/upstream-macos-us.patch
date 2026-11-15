@@ -3791,7 +3791,7 @@ index 4f52738..291734a 100644
        Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
        return false;
 diff --git a/aurora-main/lib/gfx/pipeline_cache.cpp b/aurora-main/lib/gfx/pipeline_cache.cpp
-index ed5b68b..73d1160 100644
+index ed5b68b..6ba9ca9 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.cpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.cpp
 @@ -9,6 +9,7 @@
@@ -3820,7 +3820,7 @@ index ed5b68b..73d1160 100644
  namespace aurora::gfx {
  static Module Log("aurora::gfx::pipeline_cache");
  
-@@ -77,6 +89,30 @@ constexpr size_t BuildPipelinesPerFrame = 1;
+@@ -77,6 +89,61 @@ constexpr size_t BuildPipelinesPerFrame = 1;
  static std::vector<std::thread> g_pipelineThreads;
  static bool g_pipelineThreadEnd = false;
  static size_t g_activeBackgroundPipelineWorkers = 0;
@@ -3833,6 +3833,37 @@ index ed5b68b..73d1160 100644
 +// built yet are skipped for that frame, and a persistent-texture pass builds its own inline.
 +// AURORA_GL_SYNC_PIPELINES=1 restores the old behavior; AURORA_GL_PIPELINE_BUDGET_MS sets the
 +// per-frame budget (default 10 ms; at least one pipeline is always built per frame).
++// Each thread's view of built pipelines. A built pipeline never changes and is only removed at
++// shutdown (which bumps the generation), so a thread that has seen one can reuse it without
++// g_pipelineMutex. The game thread looks pipelines up for every draw and resolve while the frame
++// worker binds them for every draw; on the Switch the two spent ~3% of the game thread contending
++// for that lock. Views are deliberately leaked at thread exit (trivial thread_local, no destructor).
++struct ThreadPipelineView {
++  uint32_t generation = 0;
++  absl::flat_hash_map<PipelineRef, wgpu::RenderPipeline> ready;
++};
++static std::atomic<uint32_t> g_pipelineGeneration{1};
++static ThreadPipelineView& thread_pipeline_view() {
++  static thread_local ThreadPipelineView* view = nullptr;
++  if (view == nullptr) {
++    view = new ThreadPipelineView();
++  }
++  const uint32_t generation = g_pipelineGeneration.load(std::memory_order_acquire);
++  if (view->generation != generation) {
++    view->ready.clear();
++    view->generation = generation;
++  }
++  return *view;
++}
++static const wgpu::RenderPipeline* find_seen_pipeline(PipelineRef ref) {
++  auto& view = thread_pipeline_view();
++  const auto it = view.ready.find(ref);
++  return it != view.ready.end() ? &it->second : nullptr;
++}
++static void note_seen_pipeline(PipelineRef ref, const wgpu::RenderPipeline& pipeline) {
++  thread_pipeline_view().ready.try_emplace(ref, pipeline);
++}
++
 +static bool gl_deferral_allowed() {
 +  static const bool allowed = std::getenv("AURORA_GL_SYNC_PIPELINES") == nullptr;
 +  return allowed;
@@ -3851,7 +3882,7 @@ index ed5b68b..73d1160 100644
  static std::condition_variable g_pipelineCv;
  static absl::flat_hash_map<PipelineRef, CachedPipeline> g_pipelines;
  static std::deque<PendingPipeline> g_priorityPipelines;
-@@ -447,7 +483,8 @@ static PipelineRef find_pipeline_impl(ShaderType type, const PipelineConfig& con
+@@ -447,7 +514,8 @@ static PipelineRef find_pipeline_impl(ShaderType type, const PipelineConfig& con
    std::optional<PipelineCacheWrite> cacheWrite;
    {
      std::scoped_lock guard{g_pipelineMutex};
@@ -3861,7 +3892,7 @@ index ed5b68b..73d1160 100644
      const bool skipUnreadyGxPipeline = deferGxPipeline && g_skipUnreadyGxPipelines.load(std::memory_order_relaxed);
      auto pipelineIt = g_pipelines.find(hash);
      if (pipelineIt != g_pipelines.end()) {
-@@ -561,6 +598,11 @@ static void pipeline_cache_abort() {
+@@ -561,6 +629,11 @@ static void pipeline_cache_abort() {
  static bool write_pipeline_cache_record(const PipelineCacheWrite& write);
  
  static std::string pipeline_cache_seed_path() {
@@ -3873,7 +3904,7 @@ index ed5b68b..73d1160 100644
    if (g_config.resourcesPath == nullptr || g_config.resourcesPath[0] == '\0') {
      return InitialPipelineCacheName;
    }
-@@ -724,7 +766,7 @@ static bool prepare_pipeline_cache_db() {
+@@ -724,7 +797,7 @@ static bool prepare_pipeline_cache_db() {
      return false;
    }
  
@@ -3882,7 +3913,7 @@ index ed5b68b..73d1160 100644
    if (ret != SQLITE_OK) {
      Log.error("Failed to set pipeline cache pragmas: {}", sqlite3_errmsg(g_pipelineCacheDb));
      pipeline_cache_abort();
-@@ -1115,8 +1157,12 @@ static void load_pipeline_cache() {
+@@ -1115,8 +1188,12 @@ static void load_pipeline_cache() {
    }
    load_pipeline_cache_entries<clear::PipelineConfig>(ShaderType::Clear, clear::ClearPipelineConfigVersion,
                                                       clear::create_pipeline);
@@ -3895,16 +3926,32 @@ index ed5b68b..73d1160 100644
    const auto queued = queuedPipelines.load();
    if (queued > 0) {
      g_prewarmCount = queued;
-@@ -1155,6 +1201,18 @@ PipelineRef find_pipeline(ShaderType type, const clear::PipelineConfig& config,
+@@ -1155,6 +1232,34 @@ PipelineRef find_pipeline(ShaderType type, const clear::PipelineConfig& config,
    return find_pipeline_impl(type, config, std::move(cb), true, std::nullopt);
  }
  
++bool find_existing_pipeline(PipelineRef hash) {
++  if (find_seen_pipeline(hash) != nullptr) {
++    return true;
++  }
++  wgpu::RenderPipeline pipeline;
++  {
++    std::scoped_lock guard{g_pipelineMutex};
++    // An existing entry only changes when a lower firstFrameUsed arrives (cache preload), which
++    // never happens for a draw in the current frame.
++    const auto it = g_pipelines.find(hash);
++    if (it == g_pipelines.end()) {
++      return false;
++    }
++    pipeline = it->second.pipeline;
++  }
++  note_seen_pipeline(hash, pipeline);
++  return true;
++}
++
 +bool find_existing_gx_pipeline(const gx::PipelineConfig& config, PipelineRef& out) {
 +  const PipelineRef hash = xxh3_hash(config, static_cast<HashType>(ShaderType::GX));
-+  std::scoped_lock guard{g_pipelineMutex};
-+  // An existing entry only changes when a lower firstFrameUsed arrives (cache preload), which
-+  // never happens for a draw in the current frame.
-+  if (g_pipelines.find(hash) == g_pipelines.end()) {
++  if (!find_existing_pipeline(hash)) {
 +    return false;
 +  }
 +  out = hash;
@@ -3914,7 +3961,7 @@ index ed5b68b..73d1160 100644
  template <>
  PipelineRef find_pipeline(ShaderType type, const gx::PipelineConfig& config, NewPipelineCallback&& cb) {
    return find_pipeline_impl(type, config, std::move(cb), true, std::nullopt);
-@@ -1168,7 +1226,9 @@ void initialize_pipeline_cache() {
+@@ -1168,7 +1273,9 @@ void initialize_pipeline_cache() {
    g_activeBackgroundPipelineWorkers = 0;
  
    if (webgpu::g_backendType == wgpu::BackendType::OpenGL || webgpu::g_backendType == wgpu::BackendType::OpenGLES ||
@@ -3925,7 +3972,16 @@ index ed5b68b..73d1160 100644
      g_hasPipelineThread = false;
    } else {
      g_hasPipelineThread = true;
-@@ -1230,11 +1290,39 @@ void begin_pipeline_frame() {
+@@ -1188,6 +1295,8 @@ void initialize_pipeline_cache() {
+ }
+ 
+ void shutdown_pipeline_cache() {
++  // Invalidate every thread's view of the pipelines about to be dropped.
++  g_pipelineGeneration.fetch_add(1, std::memory_order_acq_rel);
+   if (g_hasPipelineThread) {
+     {
+       std::lock_guard lock{g_pipelineMutex};
+@@ -1230,11 +1339,39 @@ void begin_pipeline_frame() {
  
  void end_pipeline_frame() {
    g_pipelineFrameActive = false;
@@ -3966,9 +4022,37 @@ index ed5b68b..73d1160 100644
  void set_skip_unready_pipelines(bool enabled) noexcept {
    g_skipUnreadyGxPipelines.store(enabled, std::memory_order_relaxed);
  }
-@@ -1262,6 +1350,22 @@ bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
+@@ -1250,18 +1387,45 @@ uint32_t queued_pipeline_count() noexcept {
+ }
+ 
+ bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
+-  std::scoped_lock lock{g_pipelineMutex};
+-  const auto it = g_pipelines.find(ref);
+-  if (it == g_pipelines.end()) {
+-    return false;
++  if (const auto* seen = find_seen_pipeline(ref)) {
++    pipeline = *seen;
++    return true;
+   }
+-  pipeline = it->second.pipeline;
++  {
++    std::scoped_lock lock{g_pipelineMutex};
++    const auto it = g_pipelines.find(ref);
++    if (it == g_pipelines.end()) {
++      return false;
++    }
++    pipeline = it->second.pipeline;
++  }
++  note_seen_pipeline(ref, pipeline);
+   return true;
+ }
+ 
  static bool wait_pipeline_impl(PipelineRef ref, wgpu::RenderPipeline& pipeline, bool fatalIfMissing,
                                 bool persistentPass) {
++  if (const auto* seen = find_seen_pipeline(ref)) {
++    pipeline = *seen;
++    return true;
++  }
    std::unique_lock lock{g_pipelineMutex};
 +  if (!g_hasPipelineThread && !g_pipelines.contains(ref) && g_pendingPipelines.contains(ref)) {
 +    // No pipeline threads (OpenGL): nothing else will build a queued pipeline, so build it here.
@@ -3989,11 +4073,20 @@ index ed5b68b..73d1160 100644
    if (!g_pipelines.contains(ref) && g_pendingPipelines.contains(ref)) {
      ZoneScopedN("wait_pipeline");
      const auto finished = [ref] {
+@@ -1287,6 +1451,8 @@ static bool wait_pipeline_impl(PipelineRef ref, wgpu::RenderPipeline& pipeline,
+     return false;
+   }
+   pipeline = it->second.pipeline;
++  lock.unlock();
++  note_seen_pipeline(ref, pipeline);
+   return true;
+ }
+ 
 diff --git a/aurora-main/lib/gfx/pipeline_cache.hpp b/aurora-main/lib/gfx/pipeline_cache.hpp
-index 6d76b7f..4d5ee83 100644
+index 6d76b7f..7787eda 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.hpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.hpp
-@@ -21,12 +21,19 @@ void shutdown_pipeline_cache();
+@@ -21,12 +21,21 @@ void shutdown_pipeline_cache();
  void flush_pipeline_cache();
  void begin_pipeline_frame();
  void end_pipeline_frame();
@@ -4010,11 +4103,13 @@ index 6d76b7f..4d5ee83 100644
 +// Fast path for the common case of an already-built pipeline: hashes the config and returns
 +// true without building the (heap-allocating) creation callback that find_pipeline needs.
 +bool find_existing_gx_pipeline(const gx::PipelineConfig& config, PipelineRef& out);
++// Same check for an already-hashed config (any pipeline type).
++bool find_existing_pipeline(PipelineRef hash);
  
  bool wait_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
  bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
 diff --git a/aurora-main/lib/gfx/common.cpp b/aurora-main/lib/gfx/common.cpp
-index d7492a9..ddd28d5 100644
+index d7492a9..8d60c76 100644
 --- a/aurora-main/lib/gfx/common.cpp
 +++ b/aurora-main/lib/gfx/common.cpp
 @@ -1,4 +1,5 @@
@@ -4050,7 +4145,19 @@ index d7492a9..ddd28d5 100644
  };
  
  constexpr uint32_t BindGroupCacheRetainFrames = 32;
-@@ -862,6 +879,9 @@ void push_draw_command(gx::DrawData data) {
+@@ -517,6 +534,11 @@ void push_draw_command(clear::DrawData data) {
+ 
+ template <>
+ PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
++  // Same hash as find_pipeline; skips its lock and callback allocation for a built pipeline.
++  if (const PipelineRef hash = xxh3_hash(config, static_cast<HashType>(ShaderType::Clear));
++      find_existing_pipeline(hash)) {
++    return hash;
++  }
+   return find_pipeline(ShaderType::Clear, config, [=] { return create_pipeline(config); });
+ }
+ 
+@@ -862,6 +884,9 @@ void push_draw_command(gx::DrawData data) {
  
  template <>
  PipelineRef pipeline_ref(const gx::PipelineConfig& config) {
@@ -4060,7 +4167,7 @@ index d7492a9..ddd28d5 100644
    return find_pipeline(ShaderType::GX, config, [=] { return create_pipeline(config); });
  }
  
-@@ -2060,9 +2080,55 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
+@@ -2060,9 +2085,55 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
  wgpu::BindGroup& find_bind_group(BindGroupRef id) {
    const auto it = g_cachedBindGroups.find(id);
    CHECK(it != g_cachedBindGroups.end(), "get_bind_group: failed to locate {:x}", id);
