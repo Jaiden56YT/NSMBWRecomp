@@ -4427,3 +4427,53 @@ index 0000000..cacdc76
 +    void operator delete[](void* p, std::size_t) noexcept { thread_cache_new::Free(p); }              \
 +    void operator delete(void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }      \
 +    void operator delete[](void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }
+diff --git a/aurora-main/lib/gx/scaled_tile_cache.cpp b/aurora-main/lib/gx/scaled_tile_cache.cpp
+index 89fcb4b..130d6df 100644
+--- a/aurora-main/lib/gx/scaled_tile_cache.cpp
++++ b/aurora-main/lib/gx/scaled_tile_cache.cpp
+@@ -15,6 +15,10 @@
+ #include <map>
+ #include <vector>
+ 
++// Full state struct, so masked_hash can keep its XXH64 state on the stack instead of malloc'ing one.
++#ifndef XXH_STATIC_LINKING_ONLY
++#define XXH_STATIC_LINKING_ONLY
++#endif
+ #include <xxhash.h>
+ 
+ namespace aurora::gx::scaled_tile_cache {
+@@ -164,7 +168,10 @@ void queue_build(uintptr_t base, Atlas& atlas) noexcept {
+ // XXH64 of the atlas bytes outside every slot's block rows.
+ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
+   const auto info = block_info(atlas.format);
+-  std::vector<std::pair<u32, u32>> skip; // [start, end) byte ranges
++  // Reused across calls (this runs for every sampled atlas every frame): a fresh vector here was a
++  // malloc/free pair per call on the game thread.
++  static thread_local std::vector<std::pair<u32, u32>> skip; // [start, end) byte ranges
++  skip.clear();
+   if (info) {
+     const u32 blocksPerRow = (atlas.width + info->width - 1) / info->width;
+     for (auto it = s_slots.lower_bound(base); it != s_slots.end() && it->first < base + atlas.bytes; ++it) {
+@@ -178,17 +185,15 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
+     }
+     std::sort(skip.begin(), skip.end());
+   }
+-  XXH64_state_t* state = XXH64_createState();
+-  XXH64_reset(state, 0);
++  XXH64_state_t state;
++  XXH64_reset(&state, 0);
+   u32 cursor = 0;
+   for (const auto& [start, end] : skip) {
+-    if (start > cursor) XXH64_update(state, data + cursor, start - cursor);
++    if (start > cursor) XXH64_update(&state, data + cursor, start - cursor);
+     cursor = std::max(cursor, end);
+   }
+-  if (cursor < atlas.bytes) XXH64_update(state, data + cursor, atlas.bytes - cursor);
+-  const u64 hash = XXH64_digest(state);
+-  XXH64_freeState(state);
+-  return hash;
++  if (cursor < atlas.bytes) XXH64_update(&state, data + cursor, atlas.bytes - cursor);
++  return XXH64_digest(&state);
+ }
+ 
+ // A render-scale change leaves the atlas holding `key` at the old scale. queue_paste rejects every new
