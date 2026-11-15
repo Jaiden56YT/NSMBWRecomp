@@ -1064,7 +1064,7 @@ index 5c1601c..5ea0b16 100644
  constexpr uint32_t kEggScreenFlagsOffset = 0x34u;
  constexpr uint16_t kEggScreenFlagFramebufferCanvas = 0x0008u;
 diff --git a/runtime/src/fiber_manager.cpp b/runtime/src/fiber_manager.cpp
-index 8e15c1a..1586d0a 100644
+index 8e15c1a..a0e9cbe 100644
 --- a/runtime/src/fiber_manager.cpp
 +++ b/runtime/src/fiber_manager.cpp
 @@ -71,10 +71,10 @@ std::atomic<uint32_t> g_viRetracePendingCount{0};
@@ -1082,7 +1082,22 @@ index 8e15c1a..1586d0a 100644
  
  // OSThread structure offsets
  constexpr uint32_t kThreadStateOffset = 0x2C8u;
-@@ -684,7 +684,7 @@ void GuestFiberManager::FiberProc(void* param)
+@@ -328,7 +328,14 @@ bool GuestFiberManager::CreateGuestFiber(uint32_t guestThreadAddr, uint32_t entr
+ #else
+     // libco's co_create() entry point takes no argument; SwitchToThread() stages guestThreadAddr
+     // into s_pendingFiberArg immediately before the co_switch that first activates this handle.
++#if defined(__SWITCH__)
++    // libco stacks are fixed-size (Windows fibers grow past the 64 KB commit).
++    // Guest threads call into Dawn/Tint shader compilation, which recurses deeply
++    // and overflowed 64 KB on the Switch.
++    constexpr unsigned int kHostStackSize = 4 * 1024 * 1024;
++#else
+     constexpr unsigned int kHostStackSize = 64 * 1024;
++#endif
+     gf.fiber = co_create(kHostStackSize, &FiberProcTrampoline);
+ 
+     if (!gf.fiber) {
+@@ -684,7 +691,7 @@ void GuestFiberManager::FiberProc(void* param)
      CpuContextScope scope(cpu);
      
      int startDeferAttempts = 0;
