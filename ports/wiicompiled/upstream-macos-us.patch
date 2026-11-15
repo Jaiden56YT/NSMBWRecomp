@@ -2950,7 +2950,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..d5d1849 100644
+index a63636b..6b12479 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -39,6 +39,7 @@
@@ -3122,7 +3122,7 @@ index a63636b..d5d1849 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +794,143 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +794,213 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -3195,6 +3195,74 @@ index a63636b..d5d1849 100644
 +}
 +extern "C" void SwitchProfilerRegisterThread(int slot);
 +extern "C" void SwitchThreadCacheEnable();
++
++// CPU clock. Games run the CPU at 1020 MHz; 1785 MHz is the Switch's own boost clock (what official
++// games get on loading screens, and the highest rate within Nintendo's specs). The game thread is
++// CPU-bound (world map ~35 fps at 1020 MHz), so request the boost clock for the whole session and
++// put the old rate back on exit. Docking or undocking can reapply the system's clock, so
++// SwitchCpuClockMaintain (every 2 s) re-requests it. NSMBW_CPU_MHZ in env.txt picks the rate
++// (0 = leave the clock alone); rates above 1785 are refused.
++static ClkrstSession g_cpuClockSession{};
++static bool g_cpuClockOpen = false;
++static u32 g_cpuClockOriginalHz = 0;
++static u32 g_cpuClockTargetHz = 0;
++static u32 g_cpuClockReapplied = 0;
++static void SwitchCpuClockRestore() {
++    if (!g_cpuClockOpen) return;
++    if (g_cpuClockOriginalHz != 0) clkrstSetClockRate(&g_cpuClockSession, g_cpuClockOriginalHz);
++    clkrstCloseSession(&g_cpuClockSession);
++    clkrstExit();
++    g_cpuClockOpen = false;
++}
++static void SwitchCpuClockBoost() {
++    const char* setting = std::getenv("NSMBW_CPU_MHZ");
++    const unsigned long mhz = setting != nullptr ? std::strtoul(setting, nullptr, 10) : 1785ul;
++    if (mhz == 0) {
++        std::fprintf(stderr, "[switch] CPU clock: left alone (NSMBW_CPU_MHZ=0)\n");
++        return;
++    }
++    if (mhz > 1785ul) {
++        std::fprintf(stderr, "[switch] CPU clock: %lu MHz refused (above the 1785 MHz boost clock)\n", mhz);
++        return;
++    }
++    if (hosversionBefore(8, 0, 0)) {
++        std::fprintf(stderr, "[switch] CPU clock: firmware too old for clkrst, left alone\n");
++        return;
++    }
++    Result rc = clkrstInitialize();
++    if (R_FAILED(rc)) {
++        std::fprintf(stderr, "[switch] CPU clock: clkrstInitialize failed 0x%x\n", rc);
++        return;
++    }
++    rc = clkrstOpenSession(&g_cpuClockSession, PcvModuleId_CpuBus, 3);
++    if (R_FAILED(rc)) {
++        std::fprintf(stderr, "[switch] CPU clock: clkrstOpenSession failed 0x%x\n", rc);
++        clkrstExit();
++        return;
++    }
++    g_cpuClockOpen = true;
++    clkrstGetClockRate(&g_cpuClockSession, &g_cpuClockOriginalHz);
++    g_cpuClockTargetHz = static_cast<u32>(mhz * 1000000ul);
++    rc = clkrstSetClockRate(&g_cpuClockSession, g_cpuClockTargetHz);
++    u32 nowHz = 0;
++    clkrstGetClockRate(&g_cpuClockSession, &nowHz);
++    std::fprintf(stderr, "[switch] CPU clock: %u -> %u MHz requested (rc 0x%x), now %u MHz\n",
++                 g_cpuClockOriginalHz / 1000000u, g_cpuClockTargetHz / 1000000u, rc, nowHz / 1000000u);
++    std::atexit(SwitchCpuClockRestore);
++}
++// Called from the 2 s stats block on the game thread.
++void SwitchCpuClockMaintain() {
++    if (!g_cpuClockOpen || g_cpuClockTargetHz == 0) return;
++    u32 nowHz = 0;
++    if (R_FAILED(clkrstGetClockRate(&g_cpuClockSession, &nowHz))) return;
++    if (nowHz != g_cpuClockTargetHz) {
++        clkrstSetClockRate(&g_cpuClockSession, g_cpuClockTargetHz);
++        if (++g_cpuClockReapplied <= 20) {
++            std::fprintf(stderr, "[switch] CPU clock was %u MHz, re-requested %u MHz\n", nowHz / 1000000u,
++                         g_cpuClockTargetHz / 1000000u);
++        }
++    }
++}
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
 +int main() {
@@ -3228,6 +3296,7 @@ index a63636b..d5d1849 100644
 +    // I/O error; the lock-free VFS is safe here (one process uses the caches).
 +    if (sqlite3_vfs* noLock = sqlite3_vfs_find("unix-none")) sqlite3_vfs_register(noLock, 1);  // Dawn creates the window's EGL surface itself
 +    SwitchSqliteSelfTest();
++    SwitchCpuClockBoost();
 +    std::set_terminate([] {
 +        const char* what = "(no exception)";
 +        if (auto e = std::current_exception()) {
@@ -3237,6 +3306,7 @@ index a63636b..d5d1849 100644
 +        }
 +        std::fprintf(stderr, "[switch] std::terminate: %s\n", what);
 +        std::fflush(nullptr);
++        SwitchCpuClockRestore();
 +        std::abort();
 +    });
 +    std::printf("[switch] NSMBW (NSMBWiicompiled port) starting\n");
@@ -3266,7 +3336,7 @@ index a63636b..d5d1849 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1010,7 @@ int main() {
+@@ -863,7 +1080,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -3275,7 +3345,7 @@ index a63636b..d5d1849 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,6 +1120,11 @@ int main() {
+@@ -973,7 +1190,16 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -3285,9 +3355,14 @@ index a63636b..d5d1849 100644
 +                                 static_cast<unsigned long long>(g_audioPushedBlocks.exchange(0)),
 +                                 static_cast<unsigned long long>(g_audioDroppedBlocks.exchange(0)));
                      prevCreated = created;
++#if defined(__SWITCH__)
++                    extern void SwitchCpuClockMaintain();
++                    SwitchCpuClockMaintain();
++#endif
                  }
                  {
-@@ -1068,11 +1220,11 @@ int main() {
+                     uint64_t drainTotal = 0, drainMax = 0;
+@@ -1068,11 +1294,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
