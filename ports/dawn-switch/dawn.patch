@@ -178,21 +178,50 @@ index 3857ee0f0..85190285e 100644
          mEGLSyncType = EGL_SYNC_NATIVE_FENCE_ANDROID;
      } else if (egl.HasExt(EGLExt::FenceSync)) {
 diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
-index 15ebd666b..5aee70793 100644
+index 15ebd666b..c8c88e595 100644
 --- a/src/dawn/native/opengl/SwapChainEGL.cpp
 +++ b/src/dawn/native/opengl/SwapChainEGL.cpp
-@@ -27,6 +27,7 @@
+@@ -27,6 +27,13 @@
  
  #include "src/dawn/native/opengl/SwapChainEGL.h"
  
 +#include <cstdio>
++
++#if defined(__SWITCH__)
++// libnx: Result nwindowGetDimensions(NWindow*, u32*, u32*). Declared here to keep <switch.h>
++// (and its u32/Result/Event names) out of Dawn.
++extern "C" uint32_t nwindowGetDimensions(void* nw, uint32_t* out_width, uint32_t* out_height);
++#endif
  #include <utility>
  
  #include "src/dawn/native/Surface.h"
-@@ -112,7 +113,21 @@ MaybeError SwapChainEGL::PresentImpl() {
+@@ -111,8 +118,43 @@ MaybeError SwapChainEGL::PresentImpl() {
+                           "getting surface width"));
          DAWN_TRY(CheckEGL(egl, egl.QuerySurface(display, mEGLSurface, EGL_HEIGHT, &surfaceHeight),
                            "getting surface height"));
- 
+-
++#if DAWN_PLATFORM_IS(SWITCH)
++        // Switch Mesa reports 0x0 for NWindow surfaces, which made the blit below a no-op
++        // (black screen). Fall back to the NWindow's own dimensions.
++        if (surfaceWidth <= 0 || surfaceHeight <= 0) {
++            uint32_t nw = 0;
++            uint32_t nh = 0;
++            nwindowGetDimensions(GetSurface()->GetAndroidNativeWindow(), &nw, &nh);
++            if (nw == 0 || nh == 0) {
++                nw = mTexture->GetWidth(Aspect::Color);
++                nh = mTexture->GetHeight(Aspect::Color);
++            }
++            static bool sLogged = false;
++            if (!sLogged) {
++                sLogged = true;
++                fprintf(stderr, "[dawn-present] EGL surface size %dx%d, using NWindow %ux%u\n",
++                        surfaceWidth, surfaceHeight, nw, nh);
++            }
++            surfaceWidth = static_cast<EGLint>(nw);
++            surfaceHeight = static_cast<EGLint>(nh);
++        }
++#endif
++
 +#if DAWN_PLATFORM_IS(SWITCH)
 +        // Bind the context (with the window surface) only for the blit and the swap, then
 +        // release it: GetGL() would leave it current on this (presenter) thread and every other
@@ -211,7 +240,7 @@ index 15ebd666b..5aee70793 100644
  
          GLuint readFbo = 0;
          DAWN_GL_TRY(gl, GenFramebuffers(1, &readFbo));
-@@ -125,10 +140,67 @@ MaybeError SwapChainEGL::PresentImpl() {
+@@ -125,10 +167,67 @@ MaybeError SwapChainEGL::PresentImpl() {
                                          mTexture->GetHeight(Aspect::Color), 0, surfaceHeight,
                                          surfaceWidth, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR));
  
@@ -279,7 +308,7 @@ index 15ebd666b..5aee70793 100644
  
      mTexture->APIDestroy();
      mTexture = nullptr;
-@@ -206,6 +278,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
+@@ -206,6 +305,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
                      static_cast<ANativeWindow*>(surface->GetAndroidNativeWindow()), attribs.data());
                  return {};
  #endif  // DAWN_PLATFORM_IS(ANDROID)

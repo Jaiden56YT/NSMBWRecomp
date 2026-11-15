@@ -2974,3 +2974,19 @@ index 5c46a48..35d0090 100644
  
  static void co_init(void) {
    #ifdef LIBCO_MPROTECT
+diff --git a/runtime/src/hle/mi.cpp b/runtime/src/hle/mi.cpp
+index 723f63e..2938125 100644
+--- a/runtime/src/hle/mi.cpp
++++ b/runtime/src/hle/mi.cpp
+@@ -15,7 +15,10 @@
+ 
+ namespace {
+ constexpr uint32_t kMiBase = 0xCC004000u;
+-constexpr uint32_t kMiRegCount = 20u;
++// 0x00-0x27 are the SDK's MI_HW_REGS[20]; 0x28-0x7F hold the MI performance counters and
++// other registers. Model the whole 0x80-byte block as plain storage, as Dolphin does: reading
++// e.g. 0xCC00404E otherwise threw an access violation on the Switch.
++constexpr uint32_t kMiRegCount = 0x40u;
+ constexpr uint32_t kMiSize = kMiRegCount * 2u;
+ constexpr uint32_t kMiIntsrIndex = 15u; // MI_INTSR (0xCC00401E) - write-1-to-clear
+ 
