@@ -3826,7 +3826,7 @@ index 7ceda4c..f5babc0 100644
  }
  
 diff --git a/aurora-main/lib/webgpu/gpu_cache.cpp b/aurora-main/lib/webgpu/gpu_cache.cpp
-index 4f52738..291734a 100644
+index 4f52738..151c73e 100644
 --- a/aurora-main/lib/webgpu/gpu_cache.cpp
 +++ b/aurora-main/lib/webgpu/gpu_cache.cpp
 @@ -19,6 +19,17 @@
@@ -3847,7 +3847,20 @@ index 4f52738..291734a 100644
  namespace aurora::webgpu {
  static Module Log("aurora::gpu::cache");
  
-@@ -147,7 +158,7 @@ static bool cache_init_core() {
+@@ -113,6 +124,12 @@ INSERT INTO aurora_schema VALUES ({});)",
+ }
+ 
+ static void prune_stale_rows() {
++  // last_used is stored after each row's blob, so without an index the prune below walks every
++  // blob's overflow pages, i.e. reads the whole file on every launch (~1 s on the Switch SD card
++  // before program binaries made the file larger). Building the index costs that read once.
++  if (sqlite::exec(db, "CREATE INDEX IF NOT EXISTS cache_last_used_idx ON cache(last_used);") != SQLITE_OK) {
++    Log.warn("Failed to index Dawn cache last_used: {}", sqlite3_errmsg(db));
++  }
+   const auto cmd = fmt::format("DELETE FROM cache WHERE last_used < {}", days_now() - PruneAfterDays);
+   auto ret = sqlite::exec(db, cmd.c_str());
+   if (ret != SQLITE_OK) {
+@@ -147,7 +164,7 @@ static bool cache_init_core() {
    }
  
    // WAL mode + NORMAL = no need for disk syncs, consistent but not durable is fine.
@@ -3856,7 +3869,7 @@ index 4f52738..291734a 100644
    if (ret != SQLITE_OK) {
      Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
      return false;
-@@ -176,7 +187,7 @@ static bool cache_init_core() {
+@@ -176,7 +193,7 @@ static bool cache_init_core() {
        Log.error("Failed to recreate database: {}", sqlite3_errmsg(db));
        return false;
      }
