@@ -2918,3 +2918,44 @@ index 3a295f0..60c5df9 100644
          }
          FileOutput.WriteTextIfChanged(assemblyPath, assembly.ToString());
      }
+diff --git a/runtime/third_party/libco/aarch64.c b/runtime/third_party/libco/aarch64.c
+index 5c46a48..35d0090 100644
+--- a/runtime/third_party/libco/aarch64.c
++++ b/runtime/third_party/libco/aarch64.c
+@@ -18,6 +18,28 @@ static thread_local unsigned long co_active_buffer[64];
+ static thread_local cothread_t co_active_handle = 0;
+ static void (*co_swap)(cothread_t, cothread_t) = 0;
+ 
++#if defined(__SWITCH__)
++/* Switch: the section(".text#") trick doesn't work with the aarch64 assembler
++   ('#' is not a comment there), so the array ends up in a non-executable
++   ".text#" section. Emit the same instructions as real code instead. */
++extern const uint32_t co_swap_function[];
++__asm__(
++  ".text\n"
++  ".balign 16\n"
++  ".type co_swap_function, %function\n"
++  "co_swap_function:\n"
++  "  .inst 0x910003f0, 0xa9007830, 0xa9407810, 0x9100021f\n"
++  "  .inst 0xa9015033, 0xa9415013, 0xa9025835, 0xa9425815\n"
++  "  .inst 0xa9036037, 0xa9436017, 0xa9046839, 0xa9446819\n"
++  "  .inst 0xa905703b, 0xa945701b, 0xf900303d, 0xf940301d\n"
++  "  .inst 0x6d072428, 0x6d472408, 0x6d082c2a, 0x6d482c0a\n"
++  "  .inst 0x6d09342c, 0x6d49340c, 0x6d0a3c2e, 0x6d4a3c0e\n"
++  "  .inst 0xd61f03c0\n"
++  ".size co_swap_function, . - co_swap_function\n");
++#define LIBCO_SWITCH_ASM_SWAP 1
++#endif
++
++#if !defined(LIBCO_SWITCH_ASM_SWAP)
+ #ifdef LIBCO_MPROTECT
+   alignas(4096)
+ #else
+@@ -50,6 +72,7 @@ static const uint32_t co_swap_function[1024] = {
+   0x6d4a3c0e,  /* ldp d14,d15,[x0,160] */
+   0xd61f03c0,  /* br x30               */
+ };
++#endif
+ 
+ static void co_init(void) {
+   #ifdef LIBCO_MPROTECT
