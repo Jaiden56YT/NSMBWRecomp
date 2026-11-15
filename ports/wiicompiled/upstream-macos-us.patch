@@ -39,7 +39,7 @@ index a71eb74..41f124c 100644
  #else
  void GXSetArray(GXAttr attr, const void* data, u8 stride);
 diff --git a/aurora-main/lib/aurora.cpp b/aurora-main/lib/aurora.cpp
-index 95b510e..4d4b03c 100644
+index 95b510e..ca5eb2f 100644
 --- a/aurora-main/lib/aurora.cpp
 +++ b/aurora-main/lib/aurora.cpp
 @@ -1,4 +1,7 @@
@@ -80,10 +80,16 @@ index 95b510e..4d4b03c 100644
    if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
      Log.warn("Could not raise the asynchronous presenter thread priority: {}", SDL_GetError());
    }
-@@ -1711,6 +1728,11 @@ struct WorkerCycleTiming {
+@@ -1710,7 +1727,16 @@ struct WorkerCycleTiming {
+   uint32_t cycles = 0;
  };
  WorkerCycleTiming s_workerTiming;
- const bool s_logWorkerTiming = AURORA_ENV("AURORA_LOG_WORKER_TIMING") != nullptr;
+-const bool s_logWorkerTiming = AURORA_ENV("AURORA_LOG_WORKER_TIMING") != nullptr;
++// Read on first use: the Switch build sets the variable in main(), after static initialization.
++bool log_worker_timing() {
++  static const bool enabled = AURORA_ENV("AURORA_LOG_WORKER_TIMING") != nullptr;
++  return enabled;
++}
 +#ifdef __SWITCH__
 +const bool s_alwaysOverlapEncode = AURORA_ENV("AURORA_NO_OVERLAP_ENCODE") == nullptr;
 +#else
@@ -92,7 +98,13 @@ index 95b510e..4d4b03c 100644
  double ms_since(std::chrono::steady_clock::time_point t) noexcept {
    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
  }
-@@ -1733,7 +1755,11 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+@@ -1728,12 +1754,16 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+   auto phaseStart = std::chrono::steady_clock::now();
+   {
+     std::lock_guard gpuLock(g_rendererGpuMutex);
+-    if (s_logWorkerTiming) {
++    if (log_worker_timing()) {
+       note_worker_phase(s_workerTiming.lockWait, s_workerTiming.lockMax, ms_since(phaseStart));
        phaseStart = std::chrono::steady_clock::now();
      }
      seal_frame_locked(sealedFrame, ctx);
@@ -105,6 +117,41 @@ index 95b510e..4d4b03c 100644
      if (!overlapEncode) {
        presentationJobs = encode_sealed_frame(sealedFrame, ctx);
      }
+@@ -1741,7 +1771,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+   if (!overlapEncode) {
+     publish_presentations(std::move(presentationJobs), ctx.interpolationActive);
+   }
+-  if (s_logWorkerTiming) {
++  if (log_worker_timing()) {
+     note_worker_phase(s_workerTiming.seal, s_workerTiming.sealMax, ms_since(phaseStart));
+     phaseStart = std::chrono::steady_clock::now();
+   }
+@@ -1758,14 +1788,14 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+   // Preparing the next frame belongs to the SEALED phase: without a fresh pass 0 and mapped
+   // staging buffers the producer's drain has nowhere to put its commands.
+   bool imguiNewFrameOwed = false;
+-  if (s_logWorkerTiming) {
++  if (log_worker_timing()) {
+     note_worker_phase(s_workerTiming.permitWait, s_workerTiming.permitMax, ms_since(phaseStart));
+     phaseStart = std::chrono::steady_clock::now();
+   }
+   const bool prepared = begin_frame_impl(
+       false, overlapEncode ? ImGuiFramePolicy::Deferred : ImGuiFramePolicy::Immediate,
+       &imguiNewFrameOwed);
+-  if (s_logWorkerTiming) {
++  if (log_worker_timing()) {
+     note_worker_phase(s_workerTiming.prepare, s_workerTiming.prepareMax, ms_since(phaseStart));
+     phaseStart = std::chrono::steady_clock::now();
+   }
+@@ -1797,7 +1827,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+     g_frameWorker.cv.notify_all();
+   }
+ 
+-  if (s_logWorkerTiming) {
++  if (log_worker_timing()) {
+     note_worker_phase(s_workerTiming.encode, s_workerTiming.encodeMax, ms_since(phaseStart));
+     if (++s_workerTiming.cycles == 120) {
+       const auto& t = s_workerTiming;
 diff --git a/aurora-main/lib/dawn/BackendBinding.cpp b/aurora-main/lib/dawn/BackendBinding.cpp
 index bb8fba4..1417314 100644
 --- a/aurora-main/lib/dawn/BackendBinding.cpp
@@ -1290,10 +1337,10 @@ index 0000000..a1354eb
 +}  // namespace GuestFlat
 +#endif  // __SWITCH__
 diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
-index 421ca42..f40eb08 100644
+index 421ca42..e471353 100644
 --- a/runtime/src/hle/audio/audio.cpp
 +++ b/runtime/src/hle/audio/audio.cpp
-@@ -30,15 +30,15 @@ constexpr uint32_t kBytesPerSample = 2u;
+@@ -30,20 +30,29 @@ constexpr uint32_t kBytesPerSample = 2u;
  // The relative layout matches MKW's (initialized/busy adjacent, stack-switch/dma-callback
  // adjacent), which is the cross-check that these are the same four variables.
  #ifdef MKW_RUNTIME_PRODUCT_NSMBW
@@ -1317,7 +1364,21 @@ index 421ca42..f40eb08 100644
  #endif
  
  // Max completed 3 ms DMA blocks delivered per tick. Draining several at once catches up
-@@ -198,7 +198,9 @@ extern "C" void AIInit_801240b0(uint32_t callback_stack_switch)
+ // backlog from a long frame without letting a large stall spiral into an unbounded loop.
++#if defined(__SWITCH__)
++// On the Switch a game frame takes 20-30 ms and contains few audio polls; 4 blocks (12 ms) per
++// poll produced about half real-time audio (choppy sound). Allow a full frame's worth.
++constexpr int kMaxBlocksPerTick = 16;
++// Backlog beyond this is dropped so sound never trails the picture by more than ~120 ms.
++constexpr double kMaxAudioBacklogSeconds = 0.120;
++#else
+ constexpr int kMaxBlocksPerTick = 4;
++constexpr double kMaxAudioBacklogSeconds = 1e9;
++#endif
+ 
+ struct AIDmaState {
+     std::mutex mutex;
+@@ -198,7 +207,9 @@ extern "C" void AIInit_801240b0(uint32_t callback_stack_switch)
      }
  }
  
@@ -1327,7 +1388,7 @@ index 421ca42..f40eb08 100644
  
  extern "C" uint32_t AICheckInit_80124094()
  {
-@@ -206,7 +208,7 @@ extern "C" uint32_t AICheckInit_80124094()
+@@ -206,7 +217,7 @@ extern "C" uint32_t AICheckInit_80124094()
      Memory::TryRead32(kAIInitializedAddr, initialized);
      return initialized;
  }
@@ -1336,7 +1397,7 @@ index 421ca42..f40eb08 100644
  
  
  
-@@ -222,13 +224,13 @@ extern "C" uint32_t DSPCheckInit_8015d504()
+@@ -222,13 +233,13 @@ extern "C" uint32_t DSPCheckInit_8015d504()
  {
      return AxDspHle::CheckInit();
  }
@@ -1352,7 +1413,7 @@ index 421ca42..f40eb08 100644
  
  extern "C" void __DSP_boot_task_8015dc60(uint32_t task_ptr)
  {
-@@ -362,13 +364,13 @@ extern "C" uint32_t DSPCheckMailFromDSP_8015d40c()
+@@ -362,13 +373,13 @@ extern "C" uint32_t DSPCheckMailFromDSP_8015d40c()
  {
      return AxDspHle::CheckMailFromDSP();
  }
@@ -1368,6 +1429,16 @@ index 421ca42..f40eb08 100644
  
  extern "C" uint32_t DSPAssertTask_8015d57c(uint32_t taskPtr)
  {
+@@ -457,6 +468,9 @@ void Audio_HLE_Tick(CpuContext* ctx, uint32_t deltaMicros)
+             // SoundThread can hit the idle scheduler before the outer AXOut frame finishes;
+             // retain elapsed time here rather than recursively entering the singleton AI/AX device.
+             g_ai.accumulatorSeconds += static_cast<double>(deltaMicros) / 1'000'000.0;
++            if (g_ai.accumulatorSeconds > kMaxAudioBacklogSeconds) {
++                g_ai.accumulatorSeconds = kMaxAudioBacklogSeconds;
++            }
+             if (g_ai.tickActive) {
+                 return;
+             }
 diff --git a/runtime/src/hle/audio/ax_effects.cpp b/runtime/src/hle/audio/ax_effects.cpp
 index a30a4ac..1e2b70c 100644
 --- a/runtime/src/hle/audio/ax_effects.cpp
@@ -2894,7 +2965,7 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..38da078
+index 0000000..92796ad
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
 @@ -0,0 +1,204 @@
@@ -3003,7 +3074,7 @@ index 0000000..38da078
 +
 +// Sampling profiler for hardware runs. A thread on core 2 pauses each registered thread about 500
 +// times a second (game thread = slot 0, aurora frame worker = slot 1), reads its PC and LR and
-+// walks four frames of the frame-pointer chain, then resumes it. Every 30 s the window's counts
++// walks eight frames of the frame-pointer chain, then resumes it. Every 30 s the window's counts
 +// go to /switch/nsmbw2/profile_<n>.txt (n = window index mod 40) and are cleared, so startup and
 +// gameplay land in different files. Addresses are absolute; "main=" gives the load base.
 +#include <array>
@@ -3022,7 +3093,7 @@ index 0000000..38da078
 +}
 +void* ProfilerMain(void*) {
 +    svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
-+    using Key = std::array<uint64_t, 6>;  // pc, lr, then four frame-chain return addresses
++    using Key = std::array<uint64_t, 10>;  // pc, lr, then eight frame-chain return addresses
 +    std::map<Key, uint32_t> counts[2];
 +    uint64_t totals[2] = {0, 0};
 +    const uint64_t start = armGetSystemTick();
@@ -3046,7 +3117,7 @@ index 0000000..38da078
 +                    key[0] = ctx.pc.x;
 +                    key[1] = ctx.lr;
 +                    uint64_t fp = ctx.fp;
-+                    for (int d = 2; d < 6 && ReadableWord(fp); ++d) {
++                    for (int d = 2; d < 10 && ReadableWord(fp); ++d) {
 +                        const uint64_t* frame = reinterpret_cast<const uint64_t*>(fp);
 +                        key[d] = frame[1];
 +                        if (frame[0] <= fp) break;  // the chain must grow upwards
@@ -3354,7 +3425,7 @@ index 4f52738..291734a 100644
        Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
        return false;
 diff --git a/aurora-main/lib/gfx/pipeline_cache.cpp b/aurora-main/lib/gfx/pipeline_cache.cpp
-index ed5b68b..0dd78e5 100644
+index ed5b68b..c041315 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.cpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.cpp
 @@ -23,6 +23,17 @@
@@ -3396,3 +3467,63 @@ index ed5b68b..0dd78e5 100644
    if (ret != SQLITE_OK) {
      Log.error("Failed to set pipeline cache pragmas: {}", sqlite3_errmsg(g_pipelineCacheDb));
      pipeline_cache_abort();
+@@ -1115,8 +1131,12 @@ static void load_pipeline_cache() {
+   }
+   load_pipeline_cache_entries<clear::PipelineConfig>(ShaderType::Clear, clear::ClearPipelineConfigVersion,
+                                                      clear::create_pipeline);
++#ifndef __SWITCH__
++  // Not on the Switch: Dawn's GL backend cannot keep compiled programs, so preloading recompiles
++  // every cached pipeline at each boot (~5 per second; minutes of black screen). Compile on use.
+   load_pipeline_cache_entries<gx::PipelineConfig>(ShaderType::GX, gx::GXPipelineConfigVersion,
+                                                   gx::create_pipeline);
++#endif
+   const auto queued = queuedPipelines.load();
+   if (queued > 0) {
+     g_prewarmCount = queued;
+@@ -1155,6 +1175,18 @@ PipelineRef find_pipeline(ShaderType type, const clear::PipelineConfig& config,
+   return find_pipeline_impl(type, config, std::move(cb), true, std::nullopt);
+ }
+ 
++bool find_existing_gx_pipeline(const gx::PipelineConfig& config, PipelineRef& out) {
++  const PipelineRef hash = xxh3_hash(config, static_cast<HashType>(ShaderType::GX));
++  std::scoped_lock guard{g_pipelineMutex};
++  // An existing entry only changes when a lower firstFrameUsed arrives (cache preload), which
++  // never happens for a draw in the current frame.
++  if (g_pipelines.find(hash) == g_pipelines.end()) {
++    return false;
++  }
++  out = hash;
++  return true;
++}
++
+ template <>
+ PipelineRef find_pipeline(ShaderType type, const gx::PipelineConfig& config, NewPipelineCallback&& cb) {
+   return find_pipeline_impl(type, config, std::move(cb), true, std::nullopt);
+diff --git a/aurora-main/lib/gfx/pipeline_cache.hpp b/aurora-main/lib/gfx/pipeline_cache.hpp
+index 6d76b7f..8b6ea22 100644
+--- a/aurora-main/lib/gfx/pipeline_cache.hpp
++++ b/aurora-main/lib/gfx/pipeline_cache.hpp
+@@ -27,6 +27,9 @@ uint32_t queued_pipeline_count() noexcept;
+ 
+ template <typename Config>
+ PipelineRef find_pipeline(ShaderType type, const Config& config, NewPipelineCallback&& cb);
++// Fast path for the common case of an already-built pipeline: hashes the config and returns
++// true without building the (heap-allocating) creation callback that find_pipeline needs.
++bool find_existing_gx_pipeline(const gx::PipelineConfig& config, PipelineRef& out);
+ 
+ bool wait_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
+ bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
+diff --git a/aurora-main/lib/gfx/common.cpp b/aurora-main/lib/gfx/common.cpp
+index d7492a9..992ef9f 100644
+--- a/aurora-main/lib/gfx/common.cpp
++++ b/aurora-main/lib/gfx/common.cpp
+@@ -862,6 +862,9 @@ void push_draw_command(gx::DrawData data) {
+ 
+ template <>
+ PipelineRef pipeline_ref(const gx::PipelineConfig& config) {
++  if (PipelineRef existing; find_existing_gx_pipeline(config, existing)) {
++    return existing;
++  }
+   return find_pipeline(ShaderType::GX, config, [=] { return create_pipeline(config); });
+ }
+ 
