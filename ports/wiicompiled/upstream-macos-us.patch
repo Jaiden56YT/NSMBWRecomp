@@ -2438,7 +2438,7 @@ index 9d8157e..ed34dff 100644
 +
 +#endif  // x86-64 only: other hosts have no ISA level to check
 diff --git a/runtime/src/product/nsmbw_controls.cpp b/runtime/src/product/nsmbw_controls.cpp
-index d0b2e6f..1d3a58a 100644
+index d0b2e6f..cda92e9 100644
 --- a/runtime/src/product/nsmbw_controls.cpp
 +++ b/runtime/src/product/nsmbw_controls.cpp
 @@ -15,9 +15,9 @@
@@ -2453,7 +2453,15 @@ index d0b2e6f..1d3a58a 100644
  //
  // A binding is one control or a combination of up to three joined with '+' ("back+start",
  // "left_shoulder+right_shoulder"), which is down while every part is. A control that is part of a
-@@ -89,9 +89,9 @@ constexpr uint32_t kScreenRight = kWpadDown;
+@@ -39,6 +39,7 @@
+ #include "runtime_config.h"
+ #include "settings_overlay.h"
+ 
++#include <chrono>
+ #include <dolphin/pad.h>
+ #include <imgui.h>
+ 
+@@ -89,9 +90,9 @@ constexpr uint32_t kScreenRight = kWpadDown;
  constexpr uint32_t kScreenUp = kWpadRight;
  constexpr uint32_t kScreenDown = kWpadLeft;
  
@@ -2465,7 +2473,48 @@ index d0b2e6f..1d3a58a 100644
  constexpr uint32_t kGameModeTitle = 2, kGameModeTitleReplay = 3;
  constexpr uint32_t kProfileWorldMap = 3, kProfileStage = 5;
  
-@@ -620,10 +620,10 @@ const char* ContextName(Context context) noexcept {
+@@ -543,7 +544,40 @@ struct Device {
+     bool keyboard = false;
+     SDL_Gamepad* pad = nullptr;
+ };
++std::array<Device, kPlayers> ResolveUncachedLocked();
++// The guest reads the remotes several times per frame; rebuilding the player/device mapping each
++// time (gamepad enumeration, GUID strings, vectors) cost ~3% of the Switch game thread. A mapping
++// at most 50 ms old is indistinguishable for hot-plugging or settings changes.
+ std::array<Device, kPlayers> ResolveLocked() {
++    // Pads are cached by joystick ID, not pointer: a pad closed after unplugging must not be used.
++    static std::array<bool, kPlayers> s_keyboard{};
++    static std::array<SDL_JoystickID, kPlayers> s_padIds{};
++    static std::chrono::steady_clock::time_point s_resolvedAt{};
++    static bool s_valid = false;
++    const auto now = std::chrono::steady_clock::now();
++    if (s_valid && now - s_resolvedAt <= std::chrono::milliseconds(50)) {
++        std::array<Device, kPlayers> out{};
++        bool stale = false;
++        for (uint32_t p = 0; p < kPlayers; ++p) {
++            out[p].keyboard = s_keyboard[p];
++            if (s_padIds[p] != 0) {
++                out[p].pad = SDL_GetGamepadFromID(s_padIds[p]);
++                stale = stale || out[p].pad == nullptr;
++            }
++        }
++        if (!stale) return out;
++    }
++    const auto out = ResolveUncachedLocked();
++    for (uint32_t p = 0; p < kPlayers; ++p) {
++        s_keyboard[p] = out[p].keyboard;
++        s_padIds[p] = out[p].pad != nullptr ? SDL_GetGamepadID(out[p].pad) : 0;
++    }
++    s_resolvedAt = now;
++    s_valid = true;
++    return out;
++}
++
++std::array<Device, kPlayers> ResolveUncachedLocked() {
+     std::array<Device, kPlayers> out{};
+     std::vector<SDL_Gamepad*> free = OrderedPads();
+     auto take = [&](size_t i) {
+@@ -620,10 +654,10 @@ const char* ContextName(Context context) noexcept {
  namespace {
  // Whether a game object (fBase_c) of this profile is alive, from fManager_c's execute list: every
  // created base is on it, also while the F10 menu stops its updates. The list is a cLineMg_c at
@@ -2478,7 +2527,7 @@ index d0b2e6f..1d3a58a 100644
  uint32_t FindProfile(uint16_t profile) {
      uint32_t node = 0;
      Memory::TryRead32(kExecuteListAddr, node);
-@@ -664,12 +664,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
+@@ -664,12 +698,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
  
  // Any scene: it is a course (scene 5), not the world map as first assumed.
  // The manager exists for the whole hint course, so "open" is its state machine leaving the idle
@@ -2496,7 +2545,7 @@ index d0b2e6f..1d3a58a 100644
  bool HintListOpen() {
      static const bool off = std::getenv("NSMBW_NO_HINT_LIST_CONTEXT") != nullptr; // diagnostic A/B
      if (off) return false;
-@@ -722,7 +722,7 @@ std::string AliveMenuProfiles() {
+@@ -722,7 +756,7 @@ std::string AliveMenuProfiles() {
  
  // The hint movie list confirms with A, not 2: it opens from a block inside a small course (scene
  // 5), where the Gameplay bindings applied and the developer found B (bubble = A) confirmed and Y
@@ -3514,10 +3563,43 @@ index 6d76b7f..8b6ea22 100644
  bool wait_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
  bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
 diff --git a/aurora-main/lib/gfx/common.cpp b/aurora-main/lib/gfx/common.cpp
-index d7492a9..992ef9f 100644
+index d7492a9..ddd28d5 100644
 --- a/aurora-main/lib/gfx/common.cpp
 +++ b/aurora-main/lib/gfx/common.cpp
-@@ -862,6 +862,9 @@ void push_draw_command(gx::DrawData data) {
+@@ -1,4 +1,5 @@
+ #include "common.hpp"
++#include <vector>
+ #include <aurora/env.hpp>
+ #include "../gx/shader_info.hpp"
+ 
+@@ -107,10 +108,26 @@ inline HashType xxh3_hash(const wgpu::SamplerDescriptor& input, HashType seed) {
+ } // namespace aurora
+ 
+ namespace aurora::gfx {
++// Declared in common.hpp; see lazy_bind_group_ref.
++struct LazyBindGroup {
++  WGPUBindGroupLayout layout = nullptr;
++  std::vector<WGPUBindGroupEntry> entries;
++  std::once_flag once;
++  wgpu::BindGroup bindGroup;
++  ~LazyBindGroup() {
++    for (const auto& e : entries) {
++      if (e.textureView != nullptr) wgpuTextureViewRelease(e.textureView);
++      if (e.sampler != nullptr) wgpuSamplerRelease(e.sampler);
++      if (e.buffer != nullptr) wgpuBufferRelease(e.buffer);
++    }
++    if (layout != nullptr) wgpuBindGroupLayoutRelease(layout);
++  }
++};
+ namespace {
+ struct CachedBindGroup {
+   wgpu::BindGroup bindGroup;
+   uint32_t lastUsedFrame = 0;
++  std::unique_ptr<LazyBindGroup> lazy;
+ };
+ 
+ constexpr uint32_t BindGroupCacheRetainFrames = 32;
+@@ -862,6 +879,9 @@ void push_draw_command(gx::DrawData data) {
  
  template <>
  PipelineRef pipeline_ref(const gx::PipelineConfig& config) {
@@ -3527,3 +3609,282 @@ index d7492a9..992ef9f 100644
    return find_pipeline(ShaderType::GX, config, [=] { return create_pipeline(config); });
  }
  
+@@ -2060,9 +2080,55 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
+ wgpu::BindGroup& find_bind_group(BindGroupRef id) {
+   const auto it = g_cachedBindGroups.find(id);
+   CHECK(it != g_cachedBindGroups.end(), "get_bind_group: failed to locate {:x}", id);
++  if (it->second.lazy) {
++    resolve_lazy_bind_group(it->second.lazy.get());
++    return it->second.lazy->bindGroup;
++  }
+   return it->second.bindGroup;
+ }
+ 
++LazyBindGroupRef lazy_bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
++  const auto id = xxh3_hash(descriptor);
++  const auto it = g_cachedBindGroups.find(id);
++  if (it != g_cachedBindGroups.end()) {
++    it->second.lastUsedFrame = g_frameIndex;
++    if (it->second.lazy) {
++      return {.id = id, .lazy = it->second.lazy.get()};
++    }
++    return {.id = id, .ready = it->second.bindGroup.Get()};
++  }
++  auto lazy = std::make_unique<LazyBindGroup>();
++  lazy->layout = descriptor.layout;
++  if (lazy->layout != nullptr) wgpuBindGroupLayoutAddRef(lazy->layout);
++  lazy->entries.assign(descriptor.entries, descriptor.entries + descriptor.entryCount);
++  for (auto& e : lazy->entries) {
++    e.nextInChain = nullptr;
++    if (e.textureView != nullptr) wgpuTextureViewAddRef(e.textureView);
++    if (e.sampler != nullptr) wgpuSamplerAddRef(e.sampler);
++    if (e.buffer != nullptr) wgpuBufferAddRef(e.buffer);
++  }
++  LazyBindGroup* raw = lazy.get();
++  g_cachedBindGroups.emplace(id, CachedBindGroup{
++                                     .bindGroup = {},
++                                     .lastUsedFrame = g_frameIndex,
++                                     .lazy = std::move(lazy),
++                                 });
++  return {.id = id, .lazy = raw};
++}
++
++WGPUBindGroup resolve_lazy_bind_group(LazyBindGroup* lazy) {
++  std::call_once(lazy->once, [lazy] {
++    const WGPUBindGroupDescriptor descriptor{
++        .label = {"GX Texture Bind Group", WGPU_STRLEN},
++        .layout = lazy->layout,
++        .entryCount = lazy->entries.size(),
++        .entries = lazy->entries.data(),
++    };
++    lazy->bindGroup = wgpu::BindGroup::Acquire(wgpuDeviceCreateBindGroup(g_device.Get(), &descriptor));
++  });
++  return lazy->bindGroup.Get();
++}
++
+ wgpu::Sampler& sampler_ref(const wgpu::SamplerDescriptor& descriptor) {
+   const auto id = xxh3_hash(descriptor);
+   auto it = g_cachedSamplers.find(id);
+diff --git a/aurora-main/lib/gfx/common.hpp b/aurora-main/lib/gfx/common.hpp
+index 45021be..00c9076 100644
+--- a/aurora-main/lib/gfx/common.hpp
++++ b/aurora-main/lib/gfx/common.hpp
+@@ -415,6 +415,17 @@ bool bind_pipeline(PipelineRef ref, const wgpu::RenderPassEncoder& pass, Pipelin
+ 
+ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor);
+ wgpu::BindGroup& find_bind_group(BindGroupRef id);
++// A bind group whose Dawn object is created on first use by the encoding thread. Creating it on
++// the producer (game) thread took Dawn's device lock, which the frame worker holds while it
++// submits a frame (~13 ms on the Switch): the game thread spent ~8% of its time waiting there.
++struct LazyBindGroup;
++struct LazyBindGroupRef {
++  BindGroupRef id = 0;
++  LazyBindGroup* lazy = nullptr;  // set when the bind group may not exist yet
++  WGPUBindGroup ready = nullptr;  // set when it already exists
++};
++LazyBindGroupRef lazy_bind_group_ref(const WGPUBindGroupDescriptor& descriptor);
++WGPUBindGroup resolve_lazy_bind_group(LazyBindGroup* lazy);
+ 
+ wgpu::Sampler& sampler_ref(const wgpu::SamplerDescriptor& descriptor);
+ 
+diff --git a/aurora-main/lib/gx/gx.hpp b/aurora-main/lib/gx/gx.hpp
+index 185e085..f3de6dd 100644
+--- a/aurora-main/lib/gx/gx.hpp
++++ b/aurora-main/lib/gx/gx.hpp
+@@ -711,6 +711,8 @@ struct GXBindGroups {
+   gfx::BindGroupRef textureBindGroup;
+   // Bind group resolved at draw-build time so that gx::render does not have to hash-map the ref again for every draw.
+   WGPUBindGroup resolvedTextureBindGroup = nullptr;
++  // Set instead of resolvedTextureBindGroup when the Dawn object is created at encode time.
++  gfx::LazyBindGroup* lazyTextureBindGroup = nullptr;
+ };
+ // Which matrix-memory slots a generated shader can actually read, and where each one lives in the compacted uniform arrays.
+ struct UniformMatrixLayout {
+diff --git a/aurora-main/lib/gx/gx.cpp b/aurora-main/lib/gx/gx.cpp
+index 23bd818..4e39d59 100644
+--- a/aurora-main/lib/gx/gx.cpp
++++ b/aurora-main/lib/gx/gx.cpp
+@@ -2314,10 +2314,11 @@ static GXBindGroups build_bind_groups_uncached(const ShaderInfo& info) noexcept
+       .entryCount = textureEntries.size(),
+       .entries = textureEntries.data(),
+   };
+-  const auto ref = gfx::bind_group_ref(textureBindGroupDescriptor);
++  const auto ref = gfx::lazy_bind_group_ref(textureBindGroupDescriptor);
+   return {
+-      .textureBindGroup = ref,
+-      .resolvedTextureBindGroup = gfx::find_bind_group(ref).Get(),
++      .textureBindGroup = ref.id,
++      .resolvedTextureBindGroup = ref.ready,
++      .lazyTextureBindGroup = ref.lazy,
+   };
+ }
+ 
+diff --git a/aurora-main/lib/gx/pipeline.cpp b/aurora-main/lib/gx/pipeline.cpp
+index 8dbf993..5f937eb 100644
+--- a/aurora-main/lib/gx/pipeline.cpp
++++ b/aurora-main/lib/gx/pipeline.cpp
+@@ -98,10 +98,13 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass, DrawEncod
+   const std::array offsets{uniformRange.offset};
+   pass.SetBindGroup(1, gfx::g_uniformBindGroup, offsets.size(), offsets.data());
+   // Resolved when the draw was recorded; see GXBindGroups.
+-  if (data.bindGroups.resolvedTextureBindGroup != nullptr &&
+-      data.bindGroups.resolvedTextureBindGroup != state.boundTextureBindGroup) {
+-    wgpuRenderPassEncoderSetBindGroup(pass.Get(), 2, data.bindGroups.resolvedTextureBindGroup, 0, nullptr);
+-    state.boundTextureBindGroup = data.bindGroups.resolvedTextureBindGroup;
++  WGPUBindGroup textureBindGroup = data.bindGroups.resolvedTextureBindGroup;
++  if (textureBindGroup == nullptr && data.bindGroups.lazyTextureBindGroup != nullptr) {
++    textureBindGroup = gfx::resolve_lazy_bind_group(data.bindGroups.lazyTextureBindGroup);
++  }
++  if (textureBindGroup != nullptr && textureBindGroup != state.boundTextureBindGroup) {
++    wgpuRenderPassEncoderSetBindGroup(pass.Get(), 2, textureBindGroup, 0, nullptr);
++    state.boundTextureBindGroup = textureBindGroup;
+   }
+   if (data.dstAlpha != UINT32_MAX) {
+     const wgpu::Color color{0.f, 0.f, 0.f, data.dstAlpha / 255.f};
+diff --git a/runtime/include/hle/dvd_contract.h b/runtime/include/hle/dvd_contract.h
+index 9cb9576..10d7d75 100644
+--- a/runtime/include/hle/dvd_contract.h
++++ b/runtime/include/hle/dvd_contract.h
+@@ -8,6 +8,8 @@
+ #include <cstdint>
+ #include <filesystem>
+ #include <fstream>
++#include <mutex>
++#include <cstdio>
+ #include <limits>
+ #include <map>
+ #include <memory>
+@@ -284,6 +286,31 @@ inline constexpr const char* Describe(HostReadFailure failure) noexcept {
+     return "unknown host read error";
+ }
+ 
++#if defined(__SWITCH__)
++// Disc files kept open between reads on the Switch (see ReadExact).
++struct CachedDiscFile { std::string path; std::FILE* f = nullptr; int64_t size = 0; uint64_t lastUse = 0; };
++struct DiscFileCache {
++    std::mutex mutex;
++    CachedDiscFile files[8];
++    uint64_t clock = 0;
++};
++inline DiscFileCache& GetDiscFileCache() {
++    static DiscFileCache cache;
++    return cache;
++}
++// The SD card driver refuses a second open of a file that is already open: anything that opens
++// disc files directly calls this first.
++inline void CloseCachedDiscFiles() {
++    auto& cache = GetDiscFileCache();
++    std::lock_guard<std::mutex> lock(cache.mutex);
++    for (auto& of : cache.files) {
++        if (of.f != nullptr) { std::fclose(of.f); of.f = nullptr; }
++    }
++}
++#else
++inline void CloseCachedDiscFiles() {}
++#endif
++
+ // Read into private storage first and publish it only after the complete host
+ // range has been obtained. Callers can therefore leave a guest DMA destination
+ // untouched for every failure, including a host file truncated after indexing.
+@@ -294,6 +321,61 @@ inline bool ReadExact(const std::filesystem::path& hostPath,
+                       HostReadFailure& failure) {
+     failure = HostReadFailure::None;
+ 
++#if defined(__SWITCH__)
++    // Each open/seek/read/close is an IPC round trip to the SD card service; opening the file on
++    // every DVD read cost ~6% of the game thread during play. Keep the last few files open (with
++    // their size and a 64 KB read buffer). Disc files are read-only and only read through here.
++    {
++        auto& cache = GetDiscFileCache();
++        std::lock_guard<std::mutex> lock(cache.mutex);
++        const std::string key = hostPath.string();
++        CachedDiscFile* slot = nullptr;
++        for (auto& of : cache.files) {
++            if (of.f != nullptr && of.path == key) { slot = &of; break; }
++        }
++        if (slot == nullptr) {
++            CachedDiscFile* victim = &cache.files[0];
++            for (auto& of : cache.files) {
++                if (of.f == nullptr) { victim = &of; break; }
++                if (of.lastUse < victim->lastUse) victim = &of;
++            }
++            if (victim->f != nullptr) { std::fclose(victim->f); victim->f = nullptr; }
++            std::FILE* f = std::fopen(key.c_str(), "rb");
++            if (f == nullptr) {
++                failure = HostReadFailure::MissingFile;
++                return false;
++            }
++            std::setvbuf(f, nullptr, _IOFBF, 64 * 1024);
++            std::fseek(f, 0, SEEK_END);
++            victim->size = static_cast<int64_t>(std::ftell(f));
++            victim->path = key;
++            victim->f = f;
++            slot = victim;
++        }
++        slot->lastUse = ++cache.clock;
++        if (slot->size < 0 || offset >= static_cast<uint64_t>(slot->size)) {
++            failure = HostReadFailure::BadOffset;
++            return false;
++        }
++        if (static_cast<uint64_t>(length) > static_cast<uint64_t>(slot->size) - offset) {
++            failure = HostReadFailure::ShortRead;
++            return false;
++        }
++        std::vector<uint8_t> staged(length);
++        if (std::fseek(slot->f, static_cast<long>(offset), SEEK_SET) != 0) {
++            failure = HostReadFailure::BadOffset;
++            return false;
++        }
++        if (length != 0 && std::fread(staged.data(), 1, length, slot->f) != length) {
++            std::clearerr(slot->f);
++            failure = HostReadFailure::ShortRead;
++            return false;
++        }
++        destination = std::move(staged);
++        return true;
++    }
++#endif
++
+     std::ifstream file(hostPath, std::ios::binary);
+     if (!file.is_open()) {
+         failure = HostReadFailure::MissingFile;
+diff --git a/runtime/src/product/nsmbw_layout_patch.cpp b/runtime/src/product/nsmbw_layout_patch.cpp
+index 6c7e32b..e6c2b0c 100644
+--- a/runtime/src/product/nsmbw_layout_patch.cpp
++++ b/runtime/src/product/nsmbw_layout_patch.cpp
+@@ -23,6 +23,7 @@
+ //   BRLAN: same header, then pat1 (group list: count at +10, groups offset at +16, 20 bytes per
+ //     group) and pai1 (entry count at +14, entry offset table at the offset in +16; each entry is
+ //     self-contained - name (20 bytes), then tags at offsets relative to the entry).
++#include "hle/dvd_contract.h"
+ #include "nsmbw_layout_patch.h"
+ 
+ #include "dvd_generated_files.h"
+@@ -463,6 +464,7 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
+ }
+ 
+ std::optional<Bytes> ReadFile(const fs::path& path) {
++    DvdReadContract::CloseCachedDiscFiles();
+     std::ifstream f(path, std::ios::binary);
+     if (!f) return std::nullopt;
+     return Bytes(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+diff --git a/runtime/src/product/nsmbw_menu_art.cpp b/runtime/src/product/nsmbw_menu_art.cpp
+index 3f78c82..862a7df 100644
+--- a/runtime/src/product/nsmbw_menu_art.cpp
++++ b/runtime/src/product/nsmbw_menu_art.cpp
+@@ -13,6 +13,7 @@
+ // Layout offsets match the Python tools used to make the mockups (scratchpad arc_extract.py /
+ // render_kit.py), which were checked by rendering the stock pause menu and comparing it with a
+ // screenshot of the real one (2026-10-26).
++#include "hle/dvd_contract.h"
+ #include "nsmbw_menu_art.h"
+ 
+ #include "runtime_config.h"
+@@ -48,6 +49,7 @@ uint32_t Be32(const Bytes& d, size_t o) {
+ }
+ 
+ bool ReadFile(const fs::path& path, Bytes& out) {
++    DvdReadContract::CloseCachedDiscFiles();
+     std::ifstream in(path, std::ios::binary);
+     if (!in) return false;
+     out.assign(std::istreambuf_iterator<char>(in), {});
