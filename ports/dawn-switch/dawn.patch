@@ -343,6 +343,51 @@ index e7284a42f..c0db496bf 100644
      const EGLFunctions& egl = mDisplay->egl.get();
      DAWN_ASSERT(egl.HasExt(EGLExt::WaitSync));
  
+diff --git a/src/tint/lang/glsl/writer/raise/builtin_polyfill.cc b/src/tint/lang/glsl/writer/raise/builtin_polyfill.cc
+index 85d54e2a3..5bceaf0f4 100644
+--- a/src/tint/lang/glsl/writer/raise/builtin_polyfill.cc
++++ b/src/tint/lang/glsl/writer/raise/builtin_polyfill.cc
+@@ -26,6 +26,7 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/tint/lang/glsl/writer/raise/builtin_polyfill.h"
++#include "src/tint/lang/core/type/bool.h"
+ 
+ #include <utility>
+ #include <vector>
+@@ -425,6 +426,32 @@ struct State {
+                 cond = b.Construct(ty.MatchWidth(ty.bool_(), val_ty), cond)->Result();
+             }
+ 
++            // mix(genIType/genUType/genBType, ..., genBType) needs GLSL 4.50 (or
++            // GL_EXT_shader_integer_mix); desktop GL 4.3 drivers such as the Switch's
++            // Mesa reject it. Lower integer/bool selects to arithmetic instead:
++            //   f + (t - f) * T(cond)
++            auto* elem = val_ty->DeepestElement();
++            if (elem->IsIntegerScalar() || elem->Is<core::type::Bool>()) {
++                const bool is_bool = elem->Is<core::type::Bool>();
++                auto* int_ty = is_bool ? ty.MatchWidth(ty.u32(), val_ty) : val_ty;
++                core::ir::Value* f = args[0];
++                core::ir::Value* t = args[1];
++                if (is_bool) {
++                    f = b.Convert(int_ty, f)->Result();
++                    t = b.Convert(int_ty, t)->Result();
++                }
++                auto* c = b.Convert(int_ty, cond)->Result();
++                auto* diff = b.Subtract(t, f)->Result();
++                auto* scaled = b.Multiply(diff, c)->Result();
++                if (is_bool) {
++                    auto* sum = b.Add(f, scaled)->Result();
++                    b.ConvertWithResult(call->DetachResult(), sum);
++                } else {
++                    b.AddWithResult(call->DetachResult(), f, scaled);
++                }
++                return;
++            }
++
+             b.CallWithResult<glsl::ir::BuiltinCall>(call->DetachResult(), glsl::BuiltinFn::kMix,
+                                                     args[0], args[1], cond);
+         });
 diff --git a/src/utils/platform.h b/src/utils/platform.h
 index 4dd58a487..3691b701b 100644
 --- a/src/utils/platform.h
@@ -368,3 +413,9 @@ index 4dd58a487..3691b701b 100644
  #if !defined(DAWN_PLATFORM_IS_FUCHSIA)
  #define DAWN_PLATFORM_IS_FUCHSIA 0
  #endif
+diff --git a/third_party/abseil-cpp b/third_party/abseil-cpp
+--- a/third_party/abseil-cpp
++++ b/third_party/abseil-cpp
+@@ -1 +1 @@
+-Subproject commit d16e32215c3ab90ba57c2e904a5344d85c7353e4
++Subproject commit d16e32215c3ab90ba57c2e904a5344d85c7353e4-dirty
