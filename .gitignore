@@ -14,3 +14,4 @@ ports/wiicompiled/build/
 ports/wiicompiled/generated_nsmbw/
 ports/wiicompiled/*.log
 ports/wiicompiled/userdata/
+ryujinx-test/

@@ -178,10 +178,50 @@ index 3857ee0f0..85190285e 100644
          mEGLSyncType = EGL_SYNC_NATIVE_FENCE_ANDROID;
      } else if (egl.HasExt(EGLExt::FenceSync)) {
 diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
-index 15ebd666b..7f888b9b9 100644
+index 15ebd666b..646eb09b4 100644
 --- a/src/dawn/native/opengl/SwapChainEGL.cpp
 +++ b/src/dawn/native/opengl/SwapChainEGL.cpp
-@@ -206,6 +206,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
+@@ -112,7 +112,21 @@ MaybeError SwapChainEGL::PresentImpl() {
+         DAWN_TRY(CheckEGL(egl, egl.QuerySurface(display, mEGLSurface, EGL_HEIGHT, &surfaceHeight),
+                           "getting surface height"));
+ 
++#if DAWN_PLATFORM_IS(SWITCH)
++        // Bind the context (with the window surface) only for the blit and the swap, then
++        // release it: GetGL() would leave it current on this (presenter) thread and every other
++        // thread's eglMakeCurrent would then fail with EGL_BAD_ACCESS.
++        ContextEGL::ScopedMakeCurrent scopedCurrent;
++        const bool ownScope = !device->GetContext()->IsInScopedMakeCurrent();
++        if (ownScope) {
++            DAWN_TRY_ASSIGN(scopedCurrent, device->GetContext()->MakeCurrent());
++        } else {
++            device->GetContext()->DeprecatedMakeCurrent();
++        }
++        const OpenGLFunctions& gl = device->GetGL(/*makeCurrent=*/false);
++#else
+         const OpenGLFunctions& gl = device->GetGL();
++#endif
+ 
+         GLuint readFbo = 0;
+         DAWN_GL_TRY(gl, GenFramebuffers(1, &readFbo));
+@@ -126,9 +140,17 @@ MaybeError SwapChainEGL::PresentImpl() {
+                                         surfaceWidth, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR));
+ 
+         DAWN_GL_TRY(gl, DeleteFramebuffers(1, &readFbo));
++#if DAWN_PLATFORM_IS(SWITCH)
++        egl.SwapBuffers(display, mEGLSurface);
++        if (ownScope) {
++            DAWN_TRY(scopedCurrent.End());
++        }
++#endif
+     }
+ 
++#if !DAWN_PLATFORM_IS(SWITCH)
+     egl.SwapBuffers(display, mEGLSurface);
++#endif
+ 
+     mTexture->APIDestroy();
+     mTexture = nullptr;
+@@ -206,6 +228,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
                      static_cast<ANativeWindow*>(surface->GetAndroidNativeWindow()), attribs.data());
                  return {};
  #endif  // DAWN_PLATFORM_IS(ANDROID)
