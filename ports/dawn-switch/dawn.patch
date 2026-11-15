@@ -178,10 +178,18 @@ index 3857ee0f0..85190285e 100644
          mEGLSyncType = EGL_SYNC_NATIVE_FENCE_ANDROID;
      } else if (egl.HasExt(EGLExt::FenceSync)) {
 diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
-index 15ebd666b..646eb09b4 100644
+index 15ebd666b..5aee70793 100644
 --- a/src/dawn/native/opengl/SwapChainEGL.cpp
 +++ b/src/dawn/native/opengl/SwapChainEGL.cpp
-@@ -112,7 +112,21 @@ MaybeError SwapChainEGL::PresentImpl() {
+@@ -27,6 +27,7 @@
+ 
+ #include "src/dawn/native/opengl/SwapChainEGL.h"
+ 
++#include <cstdio>
+ #include <utility>
+ 
+ #include "src/dawn/native/Surface.h"
+@@ -112,7 +113,21 @@ MaybeError SwapChainEGL::PresentImpl() {
          DAWN_TRY(CheckEGL(egl, egl.QuerySurface(display, mEGLSurface, EGL_HEIGHT, &surfaceHeight),
                            "getting surface height"));
  
@@ -203,12 +211,62 @@ index 15ebd666b..646eb09b4 100644
  
          GLuint readFbo = 0;
          DAWN_GL_TRY(gl, GenFramebuffers(1, &readFbo));
-@@ -126,9 +140,17 @@ MaybeError SwapChainEGL::PresentImpl() {
+@@ -125,10 +140,67 @@ MaybeError SwapChainEGL::PresentImpl() {
+                                         mTexture->GetHeight(Aspect::Color), 0, surfaceHeight,
                                          surfaceWidth, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR));
  
++#if DAWN_PLATFORM_IS(SWITCH)
++        // Black-screen probe: sample the source frame and the window after the blit on a few
++        // frames and log them with any GL/EGL error.
++        static uint32_t sPresentCount = 0;
++        const uint32_t presentN = ++sPresentCount;
++        const bool probe = presentN == 2 || presentN == 60 || presentN == 300 ||
++                           presentN == 1200 || presentN == 3600;
++        if (probe) {
++            const GLint tw = static_cast<GLint>(mTexture->GetWidth(Aspect::Color));
++            const GLint th = static_cast<GLint>(mTexture->GetHeight(Aspect::Color));
++            const GLint pts[5][2] = {{tw / 2, th / 2}, {tw / 4, th / 4}, {3 * tw / 4, th / 4},
++                                     {tw / 4, 3 * th / 4}, {3 * tw / 4, 3 * th / 4}};
++            uint8_t src[5][4] = {};
++            uint8_t dst[5][4] = {};
++            for (int i = 0; i < 5; ++i) {
++                gl.ReadPixels(pts[i][0], pts[i][1], 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, src[i]);
++            }
++            gl.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++            for (int i = 0; i < 5; ++i) {
++                const GLint x = pts[i][0] * surfaceWidth / (tw ? tw : 1);
++                const GLint y = pts[i][1] * surfaceHeight / (th ? th : 1);
++                gl.ReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, dst[i]);
++            }
++            GLboolean scissorOn = gl.IsEnabled(GL_SCISSOR_TEST);
++            GLboolean cmask[4] = {};
++            gl.GetBooleanv(GL_COLOR_WRITEMASK, cmask);
++            const GLenum glErr = gl.GetError();
++            fprintf(stderr,
++                    "[dawn-present] #%u tex %dx%d surf %dx%d glErr=0x%X scissor=%d mask=%d%d%d%d\n"
++                    "[dawn-present]   src:", presentN, tw, th, surfaceWidth, surfaceHeight,
++                    glErr, scissorOn, cmask[0], cmask[1], cmask[2], cmask[3]);
++            for (int i = 0; i < 5; ++i) {
++                fprintf(stderr, " %02x%02x%02x%02x", src[i][0], src[i][1], src[i][2], src[i][3]);
++            }
++            fprintf(stderr, "\n[dawn-present]   win:");
++            for (int i = 0; i < 5; ++i) {
++                fprintf(stderr, " %02x%02x%02x%02x", dst[i][0], dst[i][1], dst[i][2], dst[i][3]);
++            }
++            fprintf(stderr, "\n");
++        }
++#endif
          DAWN_GL_TRY(gl, DeleteFramebuffers(1, &readFbo));
 +#if DAWN_PLATFORM_IS(SWITCH)
-+        egl.SwapBuffers(display, mEGLSurface);
++        const EGLBoolean swapOk = egl.SwapBuffers(display, mEGLSurface);
++        if (probe || !swapOk) {
++            static uint32_t sSwapFails = 0;
++            if (!swapOk) ++sSwapFails;
++            if (probe || sSwapFails <= 5) {
++                fprintf(stderr, "[dawn-present] #%u eglSwapBuffers=%d eglErr=0x%X fails=%u\n",
++                        presentN, swapOk, egl.GetError(), sSwapFails);
++            }
++        }
 +        if (ownScope) {
 +            DAWN_TRY(scopedCurrent.End());
 +        }
@@ -221,7 +279,7 @@ index 15ebd666b..646eb09b4 100644
  
      mTexture->APIDestroy();
      mTexture = nullptr;
-@@ -206,6 +228,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
+@@ -206,6 +278,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
                      static_cast<ANativeWindow*>(surface->GetAndroidNativeWindow()), attribs.data());
                  return {};
  #endif  // DAWN_PLATFORM_IS(ANDROID)
