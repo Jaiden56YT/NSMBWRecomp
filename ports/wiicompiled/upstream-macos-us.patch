@@ -653,7 +653,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..a857f39 100644
+index ec62546..415d1ce 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,7 +8,6 @@
@@ -702,7 +702,7 @@ index ec62546..a857f39 100644
 +        # main() runs the game on a 64 MiB-stack thread (nsmbw_product.cpp); no linker stack option.
 +        # fchmod is ENOSYS on the SD card; libstdc++ copy_file treats that as failure (see
 +        # switch_posix_stubs.cpp __wrap_fchmod).
-+        target_link_options(NSMBWCompiled PRIVATE -Wl,--wrap=fchmod -Wl,--wrap=pthread_create)
++        target_link_options(NSMBWCompiled PRIVATE -Wl,--wrap=fchmod -Wl,--wrap=pthread_create -Wl,--wrap=free)
 +    else()
 +        target_link_options(NSMBWCompiled PRIVATE -g -Wl,--stack,16777216)
 +    endif()
@@ -2438,7 +2438,7 @@ index 9d8157e..ed34dff 100644
 +
 +#endif  // x86-64 only: other hosts have no ISA level to check
 diff --git a/runtime/src/product/nsmbw_controls.cpp b/runtime/src/product/nsmbw_controls.cpp
-index d0b2e6f..8224ec3 100644
+index d0b2e6f..c8a0a04 100644
 --- a/runtime/src/product/nsmbw_controls.cpp
 +++ b/runtime/src/product/nsmbw_controls.cpp
 @@ -15,9 +15,9 @@
@@ -2453,15 +2453,16 @@ index d0b2e6f..8224ec3 100644
  //
  // A binding is one control or a combination of up to three joined with '+' ("back+start",
  // "left_shoulder+right_shoulder"), which is down while every part is. A control that is part of a
-@@ -39,6 +39,7 @@
+@@ -39,6 +39,8 @@
  #include "runtime_config.h"
  #include "settings_overlay.h"
  
++#include <unordered_map>
 +#include <chrono>
  #include <dolphin/pad.h>
  #include <imgui.h>
  
-@@ -89,9 +90,9 @@ constexpr uint32_t kScreenRight = kWpadDown;
+@@ -89,9 +91,9 @@ constexpr uint32_t kScreenRight = kWpadDown;
  constexpr uint32_t kScreenUp = kWpadRight;
  constexpr uint32_t kScreenDown = kWpadLeft;
  
@@ -2473,7 +2474,80 @@ index d0b2e6f..8224ec3 100644
  constexpr uint32_t kGameModeTitle = 2, kGameModeTitleReplay = 3;
  constexpr uint32_t kProfileWorldMap = 3, kProfileStage = 5;
  
-@@ -543,7 +544,40 @@ struct Device {
+@@ -296,9 +298,11 @@ struct Capture {
+ // Per player: how many frames each combination member has been down (ReadWpad runs once per frame
+ // per player), and the members a combination used, silent until released.
+ constexpr int kComboGraceFrames = 3; // 50 ms at 60 Hz
++// Members are control IDs (see ParseBinding): a pad control's index in kPadControls, or
++// kKeyIdBase + scancode for a key.
+ struct ComboState {
+-    std::map<std::string, int> downFrames;
+-    std::set<std::string> latched;
++    std::map<int, int> downFrames;
++    std::set<int> latched;
+ };
+ std::array<ComboState, kPlayers> g_combo;
+ 
+@@ -461,6 +465,58 @@ bool KeyPartDown(const bool* keys, int numKeys, const std::string& part) {
+     const SDL_Scancode code = NameToKey(part);
+     return keys != nullptr && code != SDL_SCANCODE_UNKNOWN && code < numKeys && keys[code];
+ }
++// A binding string parsed once into control IDs. ReadWpad runs every frame for every player, and
++// splitting "back+start" into new strings, sets and maps on each read cost ~12% of the Switch game
++// thread (each allocation also contends on newlib's global allocator lock with the render threads).
++constexpr int kKeyIdBase = 0x10000;
++struct ParsedBinding {
++    std::array<int, 8> ids{};  // -1 = unknown name (never down)
++    uint8_t count = 0;
++    bool combo = false;
++    bool empty = true;
++};
++// Called with g_mutex held (every reader takes it).
++const ParsedBinding& ParseBinding(const std::string& binding, bool key) {
++    static std::unordered_map<std::string, ParsedBinding> s_pad;
++    static std::unordered_map<std::string, ParsedBinding> s_key;
++    auto& cache = key ? s_key : s_pad;
++    const auto it = cache.find(binding);
++    if (it != cache.end()) return it->second;
++    ParsedBinding pb;
++    pb.empty = binding.empty();
++    pb.combo = IsCombo(binding);
++    if (!pb.empty) {
++        for (const auto& part : Parts(binding)) {
++            if (pb.count >= pb.ids.size()) break;
++            int id = -1;
++            if (key) {
++                const SDL_Scancode code = NameToKey(part);
++                if (code != SDL_SCANCODE_UNKNOWN) id = kKeyIdBase + int(code);
++            } else if (const PadControl* c = FindPad(part)) {
++                id = int(c - kPadControls);
++            }
++            pb.ids[pb.count++] = id;
++        }
++    }
++    return cache.emplace(binding, pb).first->second;
++}
++bool ControlIdDown(int id, SDL_Gamepad* pad, const bool* keys, int numKeys) {
++    if (id < 0) return false;
++    if (id >= kKeyIdBase) {
++        const int code = id - kKeyIdBase;
++        return keys != nullptr && code < numKeys && keys[code];
++    }
++    return pad != nullptr && PadControlDown(pad, kPadControls[id]);
++}
++// Every part down. An empty binding is never down.
++bool ParsedBindingDown(const ParsedBinding& pb, SDL_Gamepad* pad, const bool* keys, int numKeys) {
++    if (pb.empty) return false;
++    for (uint8_t i = 0; i < pb.count; ++i) {
++        if (!ControlIdDown(pb.ids[i], pad, keys, numKeys)) return false;
++    }
++    return true;
++}
++
+ // Every part down. An empty binding is never down.
+ bool PadBindingDown(SDL_Gamepad* pad, const std::string& binding) {
+     if (binding.empty()) return false;
+@@ -543,7 +599,40 @@ struct Device {
      bool keyboard = false;
      SDL_Gamepad* pad = nullptr;
  };
@@ -2514,7 +2588,7 @@ index d0b2e6f..8224ec3 100644
      std::array<Device, kPlayers> out{};
      std::vector<SDL_Gamepad*> free = OrderedPads();
      auto take = [&](size_t i) {
-@@ -620,10 +654,10 @@ const char* ContextName(Context context) noexcept {
+@@ -620,10 +709,10 @@ const char* ContextName(Context context) noexcept {
  namespace {
  // Whether a game object (fBase_c) of this profile is alive, from fManager_c's execute list: every
  // created base is on it, also while the F10 menu stops its updates. The list is a cLineMg_c at
@@ -2527,7 +2601,7 @@ index d0b2e6f..8224ec3 100644
  uint32_t FindProfile(uint16_t profile) {
      uint32_t node = 0;
      Memory::TryRead32(kExecuteListAddr, node);
-@@ -664,12 +698,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
+@@ -664,12 +753,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
  
  // Any scene: it is a course (scene 5), not the world map as first assumed.
  // The manager exists for the whole hint course, so "open" is its state machine leaving the idle
@@ -2545,7 +2619,7 @@ index d0b2e6f..8224ec3 100644
  bool HintListOpen() {
      static const bool off = std::getenv("NSMBW_NO_HINT_LIST_CONTEXT") != nullptr; // diagnostic A/B
      if (off) return false;
-@@ -722,7 +756,7 @@ std::string AliveMenuProfiles() {
+@@ -722,7 +811,7 @@ std::string AliveMenuProfiles() {
  
  // The hint movie list confirms with A, not 2: it opens from a block inside a small course (scene
  // 5), where the Gameplay bindings applied and the developer found B (bubble = A) confirmed and Y
@@ -2554,7 +2628,7 @@ index d0b2e6f..8224ec3 100644
  // 1 (0x200; 1 | B with a Nunchuk). So while it is open the Menu actions are used, with 2 and A
  // swapped: confirm (normally 2) is sent as A, "A button" as 2; back stays 1. ListBit applies the
  // swap to what is sent; the prompt glyphs use the same swap (it is its own inverse) to find the
-@@ -1274,6 +1308,14 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
+@@ -1274,36 +1363,56 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
      const auto& defs = ActionsFor(c);
      const auto& binds = g_bindings[chan < kPlayers ? chan : 0][size_t(c)];
      const Device device = chan < kPlayers ? ResolveLocked()[chan] : Device{};
@@ -2569,6 +2643,132 @@ index d0b2e6f..8224ec3 100644
      int numKeys = 0;
      const bool* keys = device.keyboard ? SDL_GetKeyboardState(&numKeys) : nullptr;
  
+     // Controls that are part of a combination, in this context or the options menu's (Back + Start
+     // must not leak - and + to the game). "p:" pad / "k:" key names.
+     auto& combo = g_combo[chan < kPlayers ? chan : 0];
+-    std::set<std::string> members;
++    std::array<int, 64> members{};
++    size_t memberCount = 0;
++    auto isMember = [&](int id) {
++        for (size_t i = 0; i < memberCount; ++i) {
++            if (members[i] == id) return true;
++        }
++        return false;
++    };
++    auto addMember = [&](int id) {
++        if (!isMember(id) && memberCount < members.size()) members[memberCount++] = id;
++    };
+     auto collect = [&](const std::vector<Binding>& list) {
+         for (const auto& b : list) {
+             for (const auto& name : b.pad) {
+-                if (!IsCombo(name)) continue;
+-                for (const auto& part : Parts(name)) members.insert("p:" + part);
+-                if (PadBindingDown(device.pad, name)) {
+-                    for (const auto& part : Parts(name)) combo.latched.insert("p:" + part);
++                const ParsedBinding& pb = ParseBinding(name, false);
++                if (!pb.combo) continue;
++                for (uint8_t i = 0; i < pb.count; ++i) addMember(pb.ids[i]);
++                if (ParsedBindingDown(pb, device.pad, keys, numKeys)) {
++                    for (uint8_t i = 0; i < pb.count; ++i) combo.latched.insert(pb.ids[i]);
+                 }
+             }
+             for (const auto& name : b.key) {
+-                if (!IsCombo(name)) continue;
+-                for (const auto& part : Parts(name)) members.insert("k:" + part);
+-                if (KeyBindingDown(keys, numKeys, name)) {
+-                    for (const auto& part : Parts(name)) combo.latched.insert("k:" + part);
++                const ParsedBinding& pb = ParseBinding(name, true);
++                if (!pb.combo) continue;
++                for (uint8_t i = 0; i < pb.count; ++i) addMember(pb.ids[i]);
++                if (ParsedBindingDown(pb, device.pad, keys, numKeys)) {
++                    for (uint8_t i = 0; i < pb.count; ++i) combo.latched.insert(pb.ids[i]);
+                 }
+             }
+         }
+     };
+     collect(binds);
+     collect(g_bindings[chan < kPlayers ? chan : 0][size_t(Context::Options)]);
+-    for (const auto& m : members) {
+-        const bool isDown = m[0] == 'p' ? PadPartDown(device.pad, m.substr(2)) : KeyPartDown(keys, numKeys, m.substr(2));
+-        if (isDown) {
++    for (size_t mi = 0; mi < memberCount; ++mi) {
++        const int m = members[mi];
++        if (ControlIdDown(m, device.pad, keys, numKeys)) {
+             ++combo.downFrames[m];
+         } else {
+             combo.downFrames.erase(m);
+@@ -1312,21 +1421,25 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
+     }
+     // A single control counts unless it is a combination member that is still in its grace frames
+     // or was used by a combination and not yet released.
+-    auto singleCounts = [&](const std::string& m) {
+-        if (!members.count(m)) return true;
+-        return !combo.latched.count(m) && combo.downFrames[m] >= kComboGraceFrames;
++    auto singleCounts = [&](int m) {
++        if (!isMember(m)) return true;
++        const auto it = combo.downFrames.find(m);
++        const int frames = it != combo.downFrames.end() ? it->second : 0;
++        return !combo.latched.count(m) && frames >= kComboGraceFrames;
+     };
+ 
+     uint32_t out = 0;
+     for (size_t i = 0; i < defs.size(); ++i) {
+         bool down = false;
+         for (const auto& name : binds[i].pad) {
+-            if (IsCombo(name)) down |= PadBindingDown(device.pad, name);
+-            else if (PadBindingDown(device.pad, name) && singleCounts("p:" + name)) down = true;
++            const ParsedBinding& pb = ParseBinding(name, false);
++            if (pb.combo) down |= ParsedBindingDown(pb, device.pad, keys, numKeys);
++            else if (ParsedBindingDown(pb, device.pad, keys, numKeys) && singleCounts(pb.ids[0])) down = true;
+         }
+         for (const auto& name : binds[i].key) {
+-            if (IsCombo(name)) down |= KeyBindingDown(keys, numKeys, name);
+-            else if (KeyBindingDown(keys, numKeys, name) && singleCounts("k:" + name)) down = true;
++            const ParsedBinding& pb = ParseBinding(name, true);
++            if (pb.combo) down |= ParsedBindingDown(pb, device.pad, keys, numKeys);
++            else if (ParsedBindingDown(pb, device.pad, keys, numKeys) && singleCounts(pb.ids[0])) down = true;
+         }
+         if (down) out |= defs[i].wpad;
+     }
+@@ -1365,8 +1478,9 @@ extern "C" float NsmbwControlsReadTilt(uint32_t chan) {
+     const auto& defs = ActionsFor(Context::Gameplay);
+     const auto& binds = g_bindings[chan < kPlayers ? chan : 0][size_t(Context::Gameplay)];
+     const Device device = chan < kPlayers ? ResolveLocked()[chan] : Device{};
+-    std::vector<SDL_Gamepad*> pads;
+-    if (device.pad != nullptr) pads.push_back(device.pad);
++    if (!device.keyboard && device.pad == nullptr) return 0.0f;
++    std::array<SDL_Gamepad*, 1> pads{device.pad};
++    const size_t padCount = device.pad != nullptr ? 1 : 0;
+     int numKeys = 0;
+     const bool* keys = device.keyboard ? SDL_GetKeyboardState(&numKeys) : nullptr;
+ 
+@@ -1374,18 +1488,20 @@ extern "C" float NsmbwControlsReadTilt(uint32_t chan) {
+     auto amount = [&](const Binding& b) {
+         float best = 0.0f;
+         for (const auto& name : b.key) {
+-            if (KeyBindingDown(keys, numKeys, name)) best = 1.0f;
++            if (ParsedBindingDown(ParseBinding(name, true), nullptr, keys, numKeys)) best = 1.0f;
+         }
+         for (const auto& name : b.pad) {
+-            if (IsCombo(name)) {
+-                for (SDL_Gamepad* p : pads) {
+-                    if (PadBindingDown(p, name)) best = 1.0f;
++            const ParsedBinding& pb = ParseBinding(name, false);
++            if (pb.combo) {
++                for (size_t pi = 0; pi < padCount; ++pi) {
++                    if (ParsedBindingDown(pb, pads[pi], nullptr, 0)) best = 1.0f;
+                 }
+                 continue;
+             }
+-            const PadControl* control = name.empty() ? nullptr : FindPad(name);
++            const PadControl* control = pb.empty || pb.count == 0 || pb.ids[0] < 0 ? nullptr : &kPadControls[pb.ids[0]];
+             if (control == nullptr) continue;
+-            for (SDL_Gamepad* p : pads) {
++            for (size_t pi = 0; pi < padCount; ++pi) {
++                SDL_Gamepad* p = pads[pi];
+                 if (control->kind == PadKind::Button) {
+                     if (SDL_GetGamepadButton(p, SDL_GamepadButton(control->id))) best = 1.0f;
+                     continue;
 diff --git a/runtime/src/product/nsmbw_movie_skip.cpp b/runtime/src/product/nsmbw_movie_skip.cpp
 index bb5a62f..e9b177c 100644
 --- a/runtime/src/product/nsmbw_movie_skip.cpp
@@ -2679,7 +2879,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..5689dc4 100644
+index a63636b..4634cd7 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -39,6 +39,7 @@
@@ -2851,7 +3051,7 @@ index a63636b..5689dc4 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +794,126 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +794,128 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2923,9 +3123,11 @@ index a63636b..5689dc4 100644
 +    }
 +}
 +extern "C" void SwitchProfilerRegisterThread(int slot);
++extern "C" void SwitchThreadCacheEnable();
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
  int main() {
++    SwitchThreadCacheEnable();
 +    chdir("/switch/nsmbw2");
 +    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
 +    // The SD driver will not open one file twice, so stderr (aurora, Dawn) gets its own file.
@@ -2978,7 +3180,7 @@ index a63636b..5689dc4 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +993,7 @@ int main() {
+@@ -863,7 +995,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2987,7 +3189,7 @@ index a63636b..5689dc4 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,6 +1103,11 @@ int main() {
+@@ -973,6 +1105,11 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -2999,7 +3201,7 @@ index a63636b..5689dc4 100644
                      prevCreated = created;
                  }
                  {
-@@ -1068,11 +1203,11 @@ int main() {
+@@ -1068,11 +1205,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -3029,10 +3231,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..92796ad
+index 0000000..ab32ab3
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,218 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -3235,6 +3437,20 @@ index 0000000..92796ad
 +        pthread_t t;
 +        pthread_create(&t, nullptr, ProfilerMain, nullptr);
 +    }
++}
++
++// Thread-caching operator new/delete (see thread_cache_new.h): newlib's single malloc lock was
++// ~19% of the game thread's time, contended with the render worker.
++#include "thread_cache_new.h"
++THREAD_CACHE_NEW_DEFINE_OPERATORS
++extern "C" void SwitchThreadCacheEnable() { thread_cache_new::Enable(); }
++extern "C" void __real_free(void* p);
++extern "C" void __wrap_free(void* p) {
++    if (thread_cache_new::Owns(p)) {
++        thread_cache_new::Free(p);
++        return;
++    }
++    __real_free(p);
 +}
 +#endif
 diff --git a/runtime/src/system_bridge.cpp b/runtime/src/system_bridge.cpp
@@ -3931,3 +4147,283 @@ index fcd5795..ddc5c38 100644
  }
  
  inline float PpcFlushSingleForNiInline(float value)
+diff --git a/runtime/src/thread_cache_new.h b/runtime/src/thread_cache_new.h
+new file mode 100644
+index 0000000..cacdc76
+--- /dev/null
++++ b/runtime/src/thread_cache_new.h
+@@ -0,0 +1,274 @@
++// Thread-caching replacement for the global operator new/delete (Switch build; a stress test on
++// the Mac includes this header directly).
++//
++// newlib's malloc has one global lock. On the Switch the game thread and aurora's frame worker
++// (Dawn command recording) allocate constantly from different cores, and the game thread spent
++// ~19% of its time waiting for that lock (svcArbitrateLock under _malloc_r/_free_r). Small C++
++// allocations now come from per-thread free lists:
++//   - sizes up to kMaxSmall round up to a 16-byte class; every block has a 16-byte header that
++//     records its class (or kLargeClass for a plain malloc'd block),
++//   - a thread allocates from and frees into its own lists without locking; a block freed by a
++//     different thread than the one that allocated it simply joins the freeing thread's list,
++//   - lists exchange blocks with a per-class global pool in batches of kBatch (one lock per batch),
++//     and fresh blocks are carved from 64 KB malloc'd slabs, so malloc's lock is taken rarely.
++// Slabs are never returned to malloc. Memory from operator new is only ever released through
++// operator delete (the C++ rule), so the header is always present.
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <cstdlib>
++#include <mutex>
++#include <new>
++#include <pthread.h>
++
++namespace thread_cache_new {
++
++constexpr size_t kHeader = 16;
++constexpr size_t kGranule = 16;
++constexpr size_t kMaxSmall = 512;
++constexpr uint32_t kClasses = kMaxSmall / kGranule;  // class c holds (c + 1) * 16 bytes
++constexpr uint32_t kLargeClass = 0xFFFFFFFFu;
++constexpr uint32_t kMagic = 0x7C0FFEE1u;
++constexpr uint32_t kBatch = 32;
++constexpr uint32_t kLocalLimit = 2 * kBatch;
++constexpr size_t kSlabBytes = 64 * 1024;
++
++struct Header {
++    uint32_t sizeClass;
++    uint32_t magic;
++    uint64_t pad;
++};
++static_assert(sizeof(Header) == kHeader, "header must keep 16-byte alignment");
++
++struct FreeBlock {
++    FreeBlock* next;
++};
++
++struct GlobalPool {
++    std::mutex mutex;
++    FreeBlock* head = nullptr;
++    uint32_t count = 0;
++};
++
++inline GlobalPool* GlobalPools() {
++    // Built in static storage and never destroyed: frees can still arrive during process exit,
++    // after static destructors would have destroyed the mutexes.
++    alignas(GlobalPool) static unsigned char storage[sizeof(GlobalPool) * kClasses];
++    static GlobalPool* const pools = [] {
++        auto* first = reinterpret_cast<GlobalPool*>(storage);
++        for (uint32_t c = 0; c < kClasses; ++c) new (first + c) GlobalPool();
++        return first;
++    }();
++    return pools;
++}
++
++inline size_t BlockBytes(uint32_t c) { return kHeader + (static_cast<size_t>(c) + 1) * kGranule; }
++
++// Each thread's lists live in a malloc'd LocalCache (not in thread_local storage, which macOS can
++// release before pthread key destructors run); thread_local holds only a pointer. Trivial on
++// purpose: a thread_local with a destructor is registered through libstdc++'s __cxa_thread_atexit,
++// which itself calls operator new. Thread-exit cleanup goes through a pthread key destructor.
++struct LocalCache {
++    FreeBlock* head[kClasses];
++    uint32_t count[kClasses];
++};
++// nullptr = not set up yet; kGone = this thread's lists were returned at thread exit.
++inline LocalCache* const kGone = reinterpret_cast<LocalCache*>(uintptr_t{1});
++inline thread_local LocalCache* t_cache = nullptr;
++
++inline void PushGlobal(uint32_t c, FreeBlock* first, FreeBlock* last, uint32_t n) {
++    GlobalPool& pool = GlobalPools()[c];
++    std::lock_guard<std::mutex> lock(pool.mutex);
++    last->next = pool.head;
++    pool.head = first;
++    pool.count += n;
++}
++
++inline void FlushOnThreadExit(void* p) {
++    auto* lc = static_cast<LocalCache*>(p);
++    for (uint32_t c = 0; c < kClasses; ++c) {
++        if (lc->head[c] == nullptr) continue;
++        FreeBlock* last = lc->head[c];
++        while (last->next != nullptr) last = last->next;
++        PushGlobal(c, lc->head[c], last, lc->count[c]);
++    }
++    std::free(lc);
++    t_cache = kGone;
++}
++
++inline pthread_key_t& ExitKey() {
++    static pthread_key_t key;
++    return key;
++}
++inline void CreateExitKey() { pthread_key_create(&ExitKey(), FlushOnThreadExit); }
++
++// This thread's cache, or nullptr when it can't have one (thread exiting, or out of memory).
++inline LocalCache* Local() {
++    LocalCache* lc = t_cache;
++    if (lc != nullptr && lc != kGone) [[likely]] return lc;
++    if (lc == kGone) return nullptr;
++    lc = static_cast<LocalCache*>(std::calloc(1, sizeof(LocalCache)));
++    if (lc == nullptr) return nullptr;
++    t_cache = lc;
++    static pthread_once_t once = PTHREAD_ONCE_INIT;
++    pthread_once(&once, CreateExitKey);
++    pthread_setspecific(ExitKey(), lc);
++    return lc;
++}
++
++// Refill a thread's list for class c: a batch from the global pool, else a fresh slab.
++inline bool Refill(LocalCache& lc, uint32_t c) {
++    {
++        GlobalPool& pool = GlobalPools()[c];
++        std::lock_guard<std::mutex> lock(pool.mutex);
++        if (pool.head != nullptr) {
++            FreeBlock* first = pool.head;
++            FreeBlock* last = first;
++            uint32_t n = 1;
++            while (n < kBatch && last->next != nullptr) {
++                last = last->next;
++                ++n;
++            }
++            pool.head = last->next;
++            pool.count -= n;
++            last->next = lc.head[c];
++            lc.head[c] = first;
++            lc.count[c] += n;
++            return true;
++        }
++    }
++    const size_t blockBytes = BlockBytes(c);
++    const size_t blocks = kSlabBytes / blockBytes;
++    auto* slab = static_cast<unsigned char*>(std::malloc(blocks * blockBytes));
++    if (slab == nullptr) return false;
++    for (size_t i = 0; i < blocks; ++i) {
++        auto* block = reinterpret_cast<FreeBlock*>(slab + i * blockBytes);
++        block->next = lc.head[c];
++        lc.head[c] = block;
++    }
++    lc.count[c] += static_cast<uint32_t>(blocks);
++    return true;
++}
++
++// Off until Enable() (called at the start of main): allocations during static initialization take
++// the plain malloc path, so nothing depends on thread/TLS setup that may not exist yet.
++inline bool& EnabledFlag() {
++    static bool enabled = false;
++    return enabled;
++}
++inline void Enable() { EnabledFlag() = true; }
++
++inline void* Allocate(size_t size) {
++    if (size == 0) size = 1;
++    if (size <= kMaxSmall && EnabledFlag()) {
++        const uint32_t c = static_cast<uint32_t>((size - 1) / kGranule);
++        FreeBlock* block = nullptr;
++        if (LocalCache* lcp = Local()) {
++            LocalCache& lc = *lcp;
++            if (lc.head[c] == nullptr && !Refill(lc, c)) return nullptr;
++            block = lc.head[c];
++            lc.head[c] = block->next;
++            --lc.count[c];
++        } else {
++            // Thread is exiting: take one block straight from the pool or malloc.
++            GlobalPool& pool = GlobalPools()[c];
++            {
++                std::lock_guard<std::mutex> lock(pool.mutex);
++                if (pool.head != nullptr) {
++                    block = pool.head;
++                    pool.head = block->next;
++                    --pool.count;
++                }
++            }
++            if (block == nullptr) {
++                block = static_cast<FreeBlock*>(std::malloc(BlockBytes(c)));
++                if (block == nullptr) return nullptr;
++            }
++        }
++        auto* header = reinterpret_cast<Header*>(block);
++        header->sizeClass = c;
++        header->magic = kMagic;
++        return reinterpret_cast<unsigned char*>(header) + kHeader;
++    }
++    if (size > SIZE_MAX - kHeader) return nullptr;
++    auto* header = static_cast<Header*>(std::malloc(kHeader + size));
++    if (header == nullptr) return nullptr;
++    header->sizeClass = kLargeClass;
++    header->magic = kMagic;
++    return reinterpret_cast<unsigned char*>(header) + kHeader;
++}
++
++inline void Free(void* p) {
++    if (p == nullptr) return;
++    auto* header = reinterpret_cast<Header*>(static_cast<unsigned char*>(p) - kHeader);
++    if (header->magic != kMagic) {
++        // Not from operator new: a malloc'd block passed to delete. Plain newlib tolerated that,
++        // so keep tolerating it.
++        std::free(p);
++        return;
++    }
++    const uint32_t c = header->sizeClass;
++    if (c == kLargeClass) {
++        header->magic = 0;
++        std::free(header);
++        return;
++    }
++    if (c >= kClasses) std::abort();
++    header->magic = 0;
++    auto* block = reinterpret_cast<FreeBlock*>(header);
++    LocalCache* lcp = Local();
++    if (lcp == nullptr) {
++        PushGlobal(c, block, block, 1);
++        return;
++    }
++    LocalCache& lc = *lcp;
++    block->next = lc.head[c];
++    lc.head[c] = block;
++    if (++lc.count[c] > kLocalLimit) {
++        // Hand a batch back so a thread that mostly frees (the render worker releasing the game
++        // thread's allocations) doesn't hoard blocks.
++        FreeBlock* first = lc.head[c];
++        FreeBlock* last = first;
++        for (uint32_t i = 1; i < kBatch; ++i) last = last->next;
++        lc.head[c] = last->next;
++        lc.count[c] -= kBatch;
++        PushGlobal(c, first, last, kBatch);
++    }
++}
++
++inline void* AllocateOrThrow(size_t size) {
++    for (;;) {
++        if (void* p = Allocate(size)) return p;
++        std::new_handler handler = std::get_new_handler();
++        if (handler == nullptr) throw std::bad_alloc();
++        handler();
++    }
++}
++
++// True when p carries this allocator's header (used by the free() wrapper on the Switch so C code
++// that frees an operator-new block with free() returns it here instead of corrupting malloc).
++inline bool Owns(const void* p) {
++    if (p == nullptr || (reinterpret_cast<uintptr_t>(p) & 15u) != 0) return false;
++    const auto* header = reinterpret_cast<const Header*>(static_cast<const unsigned char*>(p) - kHeader);
++    return header->magic == kMagic;
++}
++
++}  // namespace thread_cache_new
++
++// Defines the replaceable global operators; include in exactly one translation unit.
++#define THREAD_CACHE_NEW_DEFINE_OPERATORS                                                              \
++    void* operator new(std::size_t size) { return thread_cache_new::AllocateOrThrow(size); }          \
++    void* operator new[](std::size_t size) { return thread_cache_new::AllocateOrThrow(size); }        \
++    void* operator new(std::size_t size, const std::nothrow_t&) noexcept {                            \
++        return thread_cache_new::Allocate(size);                                                      \
++    }                                                                                                 \
++    void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {                          \
++        return thread_cache_new::Allocate(size);                                                      \
++    }                                                                                                 \
++    void operator delete(void* p) noexcept { thread_cache_new::Free(p); }                             \
++    void operator delete[](void* p) noexcept { thread_cache_new::Free(p); }                           \
++    void operator delete(void* p, std::size_t) noexcept { thread_cache_new::Free(p); }                \
++    void operator delete[](void* p, std::size_t) noexcept { thread_cache_new::Free(p); }              \
++    void operator delete(void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }      \
++    void operator delete[](void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }
