@@ -39,7 +39,7 @@ index a71eb74..41f124c 100644
  #else
  void GXSetArray(GXAttr attr, const void* data, u8 stride);
 diff --git a/aurora-main/lib/aurora.cpp b/aurora-main/lib/aurora.cpp
-index 95b510e..23e4ab0 100644
+index 95b510e..4d4b03c 100644
 --- a/aurora-main/lib/aurora.cpp
 +++ b/aurora-main/lib/aurora.cpp
 @@ -1,4 +1,7 @@
@@ -80,6 +80,31 @@ index 95b510e..23e4ab0 100644
    if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
      Log.warn("Could not raise the asynchronous presenter thread priority: {}", SDL_GetError());
    }
+@@ -1711,6 +1728,11 @@ struct WorkerCycleTiming {
+ };
+ WorkerCycleTiming s_workerTiming;
+ const bool s_logWorkerTiming = AURORA_ENV("AURORA_LOG_WORKER_TIMING") != nullptr;
++#ifdef __SWITCH__
++const bool s_alwaysOverlapEncode = AURORA_ENV("AURORA_NO_OVERLAP_ENCODE") == nullptr;
++#else
++const bool s_alwaysOverlapEncode = AURORA_ENV("AURORA_OVERLAP_ENCODE") != nullptr;
++#endif
+ double ms_since(std::chrono::steady_clock::time_point t) noexcept {
+   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+ }
+@@ -1733,7 +1755,11 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+       phaseStart = std::chrono::steady_clock::now();
+     }
+     seal_frame_locked(sealedFrame, ctx);
+-    overlapEncode = ctx.interpolationActive;
++    // Without interpolation the encode used to run inside the renderer lock, before SEALED was
++    // published, so the producer (the game thread) waited for every frame's whole encode. Encoding
++    // only reads the sealed frame, so let it overlap the producer's next frame whenever the
++    // worker is the bottleneck (on the Switch it is: the game spent a third of each frame here).
++    overlapEncode = ctx.interpolationActive || s_alwaysOverlapEncode;
+     if (!overlapEncode) {
+       presentationJobs = encode_sealed_frame(sealedFrame, ctx);
+     }
 diff --git a/aurora-main/lib/dawn/BackendBinding.cpp b/aurora-main/lib/dawn/BackendBinding.cpp
 index bb8fba4..1417314 100644
 --- a/aurora-main/lib/dawn/BackendBinding.cpp
@@ -2519,7 +2544,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..cb7e99e 100644
+index a63636b..5689dc4 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -39,6 +39,7 @@
@@ -2691,7 +2716,7 @@ index a63636b..cb7e99e 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +794,125 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +794,126 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2775,6 +2800,7 @@ index a63636b..cb7e99e 100644
 +    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
 +    setenv("SDL_SWITCH_NO_EGL_SURFACE", "1", 1);
 +    setenv("NSMBW_LOG_INTERP", "1", 0);  // frame timing / idle / shader-compile stats every 2 s
++    setenv("AURORA_LOG_WORKER_TIMING", "1", 0);  // frame worker phase timings every 120 frames
 +    // The SD filesystem has no POSIX locks, so SQLite's default VFS fails every query with a disk
 +    // I/O error; the lock-free VFS is safe here (one process uses the caches).
 +    if (sqlite3_vfs* noLock = sqlite3_vfs_find("unix-none")) sqlite3_vfs_register(noLock, 1);  // Dawn creates the window's EGL surface itself
@@ -2817,7 +2843,7 @@ index a63636b..cb7e99e 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +992,7 @@ int main() {
+@@ -863,7 +993,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2826,7 +2852,19 @@ index a63636b..cb7e99e 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1197,11 @@ int main() {
+@@ -973,6 +1103,11 @@ int main() {
+                     const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
+                     std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
+                                  aurora_get_queued_pipeline_count());
++                    extern std::atomic<uint64_t> g_audioDroppedBlocks;
++                    extern std::atomic<uint64_t> g_audioPushedBlocks;
++                    std::fprintf(stderr, "[nsmbw][interp]   audio blocks: %llu queued, %llu dropped\n",
++                                 static_cast<unsigned long long>(g_audioPushedBlocks.exchange(0)),
++                                 static_cast<unsigned long long>(g_audioDroppedBlocks.exchange(0)));
+                     prevCreated = created;
+                 }
+                 {
+@@ -1068,11 +1203,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -2856,10 +2894,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..780152f
+index 0000000..38da078
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,204 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -2964,76 +3002,90 @@ index 0000000..780152f
 +}
 +
 +// Sampling profiler for hardware runs. A thread on core 2 pauses each registered thread about 500
-+// times a second (game thread = slot 0, aurora frame worker = slot 1), reads its PC, LR and the
-+// caller's return address from the frame chain, resumes it, and every 15 s rewrites
-+// /switch/nsmbw2/profile.txt with the hottest (pc, lr, caller) triples. Addresses are absolute;
-+// the file's "main=" line gives the load base (subtract main's link address).
++// times a second (game thread = slot 0, aurora frame worker = slot 1), reads its PC and LR and
++// walks four frames of the frame-pointer chain, then resumes it. Every 30 s the window's counts
++// go to /switch/nsmbw2/profile_<n>.txt (n = window index mod 40) and are cleared, so startup and
++// gameplay land in different files. Addresses are absolute; "main=" gives the load base.
++#include <array>
 +#include <atomic>
 +#include <cstdio>
 +#include <map>
-+#include <tuple>
 +#include <algorithm>
 +extern "C" int main();
 +namespace {
 +std::atomic<Handle> g_profThreads[2];
++bool ReadableWord(uint64_t addr) {
++    MemoryInfo mi{};
++    u32 pageInfo = 0;
++    return (addr & 7u) == 0 && addr != 0 && R_SUCCEEDED(svcQueryMemory(&mi, &pageInfo, addr)) &&
++           (mi.perm & Perm_R) != 0 && addr + 16 <= mi.addr + mi.size;
++}
 +void* ProfilerMain(void*) {
 +    svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
-+    using Key = std::tuple<uint64_t, uint64_t, uint64_t>;
++    using Key = std::array<uint64_t, 6>;  // pc, lr, then four frame-chain return addresses
 +    std::map<Key, uint32_t> counts[2];
 +    uint64_t totals[2] = {0, 0};
-+    uint64_t lastDump = armGetSystemTick();
-+    const uint64_t dumpTicks = armNsToTicks(15'000'000'000ull);
++    const uint64_t start = armGetSystemTick();
++    uint64_t lastDump = start;
++    const uint64_t dumpTicks = armNsToTicks(30'000'000'000ull);
++    uint32_t window = 0;
 +    for (uint32_t n = 0;; ++n) {
 +        svcSleepThread(1'000'000);  // 1 ms; two threads -> ~500 Hz each
 +        const int slot = static_cast<int>(n & 1u);
 +        const Handle h = g_profThreads[slot].load(std::memory_order_relaxed);
-+        if (h == INVALID_HANDLE) continue;
-+        ThreadContext ctx;
-+        bool ok = false;
-+        if (R_SUCCEEDED(svcSetThreadActivity(h, ThreadActivity_Paused))) {
-+            for (int tries = 0; tries < 4 && !ok; ++tries) {
-+                ok = R_SUCCEEDED(svcGetThreadContext3(&ctx, h));
-+                if (!ok) svcSleepThread(20'000);
-+            }
-+            uint64_t caller = 0;
-+            if (ok) {
-+                // Walk one frame: [fp] = previous fp, [fp+8] = return address. Only trust an fp
-+                // inside the thread's stack.
-+                const uint64_t fp = ctx.fp;
-+                MemoryInfo mi{};
-+                u32 pageInfo = 0;
-+                if ((fp & 7u) == 0 && fp != 0 && R_SUCCEEDED(svcQueryMemory(&mi, &pageInfo, fp)) &&
-+                    (mi.perm & Perm_R) != 0 && fp + 16 <= mi.addr + mi.size) {
-+                    caller = reinterpret_cast<const uint64_t*>(fp)[1];
++        if (h != INVALID_HANDLE) {
++            ThreadContext ctx;
++            Key key{};
++            bool ok = false;
++            if (R_SUCCEEDED(svcSetThreadActivity(h, ThreadActivity_Paused))) {
++                for (int tries = 0; tries < 4 && !ok; ++tries) {
++                    ok = R_SUCCEEDED(svcGetThreadContext3(&ctx, h));
++                    if (!ok) svcSleepThread(20'000);
 +                }
-+                ctx.cpu_gprs[0].x = caller;  // stash
++                if (ok) {
++                    key[0] = ctx.pc.x;
++                    key[1] = ctx.lr;
++                    uint64_t fp = ctx.fp;
++                    for (int d = 2; d < 6 && ReadableWord(fp); ++d) {
++                        const uint64_t* frame = reinterpret_cast<const uint64_t*>(fp);
++                        key[d] = frame[1];
++                        if (frame[0] <= fp) break;  // the chain must grow upwards
++                        fp = frame[0];
++                    }
++                }
++                svcSetThreadActivity(h, ThreadActivity_Runnable);
 +            }
-+            svcSetThreadActivity(h, ThreadActivity_Runnable);
-+        }
-+        if (ok) {
-+            ++counts[slot][Key{ctx.pc.x, ctx.lr, ctx.cpu_gprs[0].x}];
-+            ++totals[slot];
++            if (ok) {
++                ++counts[slot][key];
++                ++totals[slot];
++            }
 +        }
 +        const uint64_t now = armGetSystemTick();
 +        if (now - lastDump >= dumpTicks) {
 +            lastDump = now;
-+            if (FILE* f = std::fopen("/switch/nsmbw2/profile.txt", "w")) {
-+                std::fprintf(f, "main=0x%llx\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&main)));
++            char path[64];
++            std::snprintf(path, sizeof(path), "/switch/nsmbw2/profile_%02u.txt", window % 40u);
++            if (FILE* f = std::fopen(path, "w")) {
++                std::fprintf(f, "main=0x%llx\nwindow %u uptime %.0f s\n",
++                             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&main)), window,
++                             armTicksToNs(now - start) / 1e9);
 +                for (int sl = 0; sl < 2; ++sl) {
 +                    std::fprintf(f, "slot %d total %llu\n", sl, static_cast<unsigned long long>(totals[sl]));
 +                    std::vector<std::pair<uint32_t, Key>> v;
 +                    v.reserve(counts[sl].size());
 +                    for (const auto& [k, c] : counts[sl]) v.emplace_back(c, k);
-+                    std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-+                    for (size_t i = 0; i < v.size() && i < 1500; ++i) {
-+                        std::fprintf(f, "%d %u 0x%llx 0x%llx 0x%llx\n", sl, v[i].first,
-+                                     static_cast<unsigned long long>(std::get<0>(v[i].second)),
-+                                     static_cast<unsigned long long>(std::get<1>(v[i].second)),
-+                                     static_cast<unsigned long long>(std::get<2>(v[i].second)));
++                    std::sort(v.begin(), v.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
++                    for (size_t i = 0; i < v.size() && i < 2500; ++i) {
++                        std::fprintf(f, "%d %u", sl, v[i].first);
++                        for (uint64_t a : v[i].second) std::fprintf(f, " 0x%llx", static_cast<unsigned long long>(a));
++                        std::fputc('\n', f);
 +                    }
++                    counts[sl].clear();
++                    totals[sl] = 0;
 +                }
 +                std::fclose(f);
 +            }
++            ++window;
 +        }
 +    }
 +    return nullptr;
@@ -3209,10 +3261,18 @@ index 5b35e16..088d7a0 100644
  }
  
 diff --git a/runtime/src/audio_backend.cpp b/runtime/src/audio_backend.cpp
-index 7ceda4c..4b777a4 100644
+index 7ceda4c..f5babc0 100644
 --- a/runtime/src/audio_backend.cpp
 +++ b/runtime/src/audio_backend.cpp
-@@ -74,6 +74,8 @@ bool AudioBackend::EnsureInitializedLocked(uint32_t sampleRate, uint32_t channel
+@@ -8,6 +8,7 @@
+ #include <iostream>
+ 
+ #include <SDL3/SDL_init.h>
++#include <atomic>
+ 
+ AudioBackend& AudioBackend::Instance() {
+     static AudioBackend instance;
+@@ -74,6 +75,8 @@ bool AudioBackend::EnsureInitializedLocked(uint32_t sampleRate, uint32_t channel
          return false;
      }
  
@@ -3221,13 +3281,25 @@ index 7ceda4c..4b777a4 100644
      m_stream = stream;
      m_spec = spec;
      m_sampleRate = sampleRate;
-@@ -127,10 +129,13 @@ bool AudioBackend::QueueHasCapacityLocked(int incomingBytes) {
+@@ -103,6 +106,10 @@ void AudioBackend::Shutdown() {
+     m_convertBuffer.clear();
+ }
+ 
++// Read (and reset) by NSMBW_LOG_INTERP every 2 s.
++std::atomic<uint64_t> g_audioDroppedBlocks{0};
++std::atomic<uint64_t> g_audioPushedBlocks{0};
++
+ uint32_t AudioBackend::QueueLimitBytesLocked() const {
+     constexpr uint32_t queueMs = 120;
+ 
+@@ -127,13 +134,18 @@ bool AudioBackend::QueueHasCapacityLocked(int incomingBytes) {
          // stream creates an audible discontinuity (the severe crackle seen when
          // VI-batched DMA briefly outran playback).
          // A drop is audible; report the first one so it is not invisible.
 -        if (!m_reportedDroppedBlock) {
 +        static uint64_t s_droppedBlocks = 0;
 +        ++s_droppedBlocks;
++        g_audioDroppedBlocks.fetch_add(1, std::memory_order_relaxed);
 +        if (!m_reportedDroppedBlock || (s_droppedBlocks % 500u) == 0) {
              m_reportedDroppedBlock = true;
              RT_LOG(RT_TAG_AUDIO) << "output queue full (" << queued << "/" << maxQueued
@@ -3237,6 +3309,10 @@ index 7ceda4c..4b777a4 100644
          }
          return false;
      }
++    g_audioPushedBlocks.fetch_add(1, std::memory_order_relaxed);
+     return true;
+ }
+ 
 diff --git a/aurora-main/lib/webgpu/gpu_cache.cpp b/aurora-main/lib/webgpu/gpu_cache.cpp
 index 4f52738..291734a 100644
 --- a/aurora-main/lib/webgpu/gpu_cache.cpp
@@ -3278,7 +3354,7 @@ index 4f52738..291734a 100644
        Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
        return false;
 diff --git a/aurora-main/lib/gfx/pipeline_cache.cpp b/aurora-main/lib/gfx/pipeline_cache.cpp
-index ed5b68b..8a667ee 100644
+index ed5b68b..0dd78e5 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.cpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.cpp
 @@ -23,6 +23,17 @@
@@ -3299,18 +3375,19 @@ index ed5b68b..8a667ee 100644
  namespace aurora::gfx {
  static Module Log("aurora::gfx::pipeline_cache");
  
-@@ -561,6 +572,10 @@ static void pipeline_cache_abort() {
+@@ -561,6 +572,11 @@ static void pipeline_cache_abort() {
  static bool write_pipeline_cache_record(const PipelineCacheWrite& write);
  
  static std::string pipeline_cache_seed_path() {
 +#ifdef __SWITCH__
-+  // The seed ships next to the .nro on the SD card, not in its romfs.
-+  return std::string("/switch/nsmbw2/") + InitialPipelineCacheName;
++  // Seeding compiles all ~1500 seed pipelines before the first frame, ~5 per second on the Switch
++  // (5 minutes per boot: Dawn's GL backend cannot store program binaries). Compile on demand.
++  return std::string("/switch/nsmbw2/no_initial_pipeline_cache.db");
 +#endif
    if (g_config.resourcesPath == nullptr || g_config.resourcesPath[0] == '\0') {
      return InitialPipelineCacheName;
    }
-@@ -724,7 +739,7 @@ static bool prepare_pipeline_cache_db() {
+@@ -724,7 +740,7 @@ static bool prepare_pipeline_cache_db() {
      return false;
    }
  
