@@ -104,7 +104,7 @@ index bb8fba4..1417314 100644
        std::make_shared<wgpu::SurfaceSourceAndroidNativeWindow>();
    desc->window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
 diff --git a/aurora-main/lib/webgpu/gpu.cpp b/aurora-main/lib/webgpu/gpu.cpp
-index 55f54ce..e219634 100644
+index 55f54ce..965211e 100644
 --- a/aurora-main/lib/webgpu/gpu.cpp
 +++ b/aurora-main/lib/webgpu/gpu.cpp
 @@ -1,3 +1,7 @@
@@ -181,6 +181,18 @@ index 55f54ce..e219634 100644
      Log.info(
          "Using limits:"
          "\n  maxTextureDimension1D: {}"
+@@ -872,6 +904,11 @@ bool initialize(AuroraBackend auroraBackend) {
+     if (g_backendType == wgpu::BackendType::Vulkan) {
+       enableToggles.push_back("vulkan_monolithic_pipeline_cache");
+     }
++    if (g_backendType == wgpu::BackendType::OpenGL || g_backendType == wgpu::BackendType::OpenGLES) {
++      // Aurora drives the device from several threads (frame worker, presenter); a GL context is
++      // per-thread, so Dawn must bind it around each use instead of leaving it on one thread.
++      enableToggles.push_back("gl_allow_context_on_multi_threads");
++    }
+     const wgpu::DawnTogglesDescriptor togglesDescriptor({
+         .nextInChain = &cacheDescriptor,
+         .enabledToggleCount = enableToggles.size(),
 diff --git a/aurora-main/lib/webgpu/gpu.hpp b/aurora-main/lib/webgpu/gpu.hpp
 index 98a60c3..078c984 100644
 --- a/aurora-main/lib/webgpu/gpu.hpp
@@ -2482,7 +2494,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..e3f9209 100644
+index a63636b..ab655cb 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -84,12 +84,12 @@ namespace {
@@ -2646,7 +2658,7 @@ index a63636b..e3f9209 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +793,57 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +793,56 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2659,11 +2671,10 @@ index a63636b..e3f9209 100644
 +int main() {
 +    chdir("/switch/nsmbw2");
 +    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
-+    // Truncate, then reopen both streams in append mode so their lines interleave instead of
-+    // overwriting each other; unbuffered so nothing is lost when the app aborts.
++    // Unbuffered so nothing is lost when the app aborts.
++    // The SD driver will not open one file twice, so stderr (aurora, Dawn) gets its own file.
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
-+    std::freopen("/switch/nsmbw2/nsmbw.log", "a", stdout);
-+    std::freopen("/switch/nsmbw2/nsmbw.log", "a", stderr);
++    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
 +    setenv("NSMBW_UNBUFFERED_LOG", "1", 0);
 +    std::setvbuf(stdout, nullptr, _IONBF, 0);
 +    std::setvbuf(stderr, nullptr, _IONBF, 0);
@@ -2704,7 +2715,7 @@ index a63636b..e3f9209 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +923,7 @@ int main() {
+@@ -863,7 +922,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2713,7 +2724,7 @@ index a63636b..e3f9209 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1128,11 @@ int main() {
+@@ -1068,11 +1127,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
