@@ -2856,10 +2856,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..a8bc775
+index 0000000..780152f
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,190 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -2941,6 +2941,20 @@ index 0000000..a8bc775
 +                                     void* (*start)(void*), void* arg);
 +extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 +                                     void* (*start)(void*), void* arg) {
++    // libnx's default thread stack is ~128 KB; Tint's shader compiler recurses far deeper (the
++    // frame worker overflowed compiling the seeded pipeline cache). Give every thread >= 4 MB.
++    constexpr size_t kMinStack = 4u << 20;
++    pthread_attr_t local;
++    size_t stack = 0;
++    if (attr == nullptr) {
++        pthread_attr_init(&local);
++        pthread_attr_setstacksize(&local, kMinStack);
++        attr = &local;
++    } else if (pthread_attr_getstacksize(attr, &stack) == 0 && stack < kMinStack) {
++        local = *attr;
++        pthread_attr_setstacksize(&local, kMinStack);
++        attr = &local;
++    }
 +    const int r = __real_pthread_create(thread, attr, start, arg);
 +    if (r == 0 && thread != nullptr && *thread != nullptr) {
 +        Thread* t = reinterpret_cast<Thread*>(*thread);
