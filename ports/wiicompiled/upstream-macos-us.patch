@@ -39,7 +39,7 @@ index a71eb74..41f124c 100644
  #else
  void GXSetArray(GXAttr attr, const void* data, u8 stride);
 diff --git a/aurora-main/lib/aurora.cpp b/aurora-main/lib/aurora.cpp
-index 95b510e..d9b9fa8 100644
+index 95b510e..23e4ab0 100644
 --- a/aurora-main/lib/aurora.cpp
 +++ b/aurora-main/lib/aurora.cpp
 @@ -1,4 +1,7 @@
@@ -51,18 +51,25 @@ index 95b510e..d9b9fa8 100644
  #include <aurora/env.hpp>
  #include <atomic>
  #include <cstdint>
-@@ -294,6 +297,10 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept;
+@@ -293,7 +296,17 @@ bool frame_worker_requested() noexcept {
+ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept;
  #endif
  
++#ifdef __SWITCH__
++extern "C" void SwitchProfilerRegisterThread(int slot) __attribute__((weak));
++#endif
  void frame_worker_main() noexcept {
 +#ifdef __SWITCH__
 +  // libnx starts every thread on the default core (the game's); give this worker its own.
 +  svcSetThreadCoreMask(CUR_THREAD_HANDLE, 1, 1u << 1);
++  if (SwitchProfilerRegisterThread != nullptr) {
++    SwitchProfilerRegisterThread(1);
++  }
 +#endif
    {
      std::lock_guard lock(g_frameWorker.mutex);
      g_frameWorker.threadId = std::this_thread::get_id();
-@@ -1136,6 +1143,10 @@ PresenterState g_presenter;
+@@ -1136,6 +1149,10 @@ PresenterState g_presenter;
  std::atomic<bool> g_presenterStarted{false};
  
  void presenter_main() noexcept {
@@ -2512,7 +2519,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..f4d9183 100644
+index a63636b..cb7e99e 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -39,6 +39,7 @@
@@ -2684,7 +2691,7 @@ index a63636b..f4d9183 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +794,123 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +794,125 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2755,6 +2762,7 @@ index a63636b..f4d9183 100644
 +        sqlite3_close(db);
 +    }
 +}
++extern "C" void SwitchProfilerRegisterThread(int slot);
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
  int main() {
@@ -2791,6 +2799,7 @@ index a63636b..f4d9183 100644
 +    pthread_t thread;
 +    if (pthread_create(&thread, &attr, [](void*) -> void* {
 +            svcSetThreadCoreMask(CUR_THREAD_HANDLE, 0, 1u << 0);  // game on core 0; aurora workers on 1 and 2
++            SwitchProfilerRegisterThread(0);
 +            result = NsmbwMain();
 +            return nullptr;
 +        }, nullptr) != 0) {
@@ -2808,7 +2817,7 @@ index a63636b..f4d9183 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +990,7 @@ int main() {
+@@ -863,7 +992,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2817,7 +2826,7 @@ index a63636b..f4d9183 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1195,11 @@ int main() {
+@@ -1068,11 +1197,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -2847,10 +2856,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..cc7a5b4
+index 0000000..a8bc775
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,176 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -2924,20 +2933,107 @@ index 0000000..cc7a5b4
 +}
 +// libnx creates every thread on the process's default core, which is also the game's core, so
 +// audio mixing, shader compiles, the log flusher etc. all competed with the game. Move each new
-+// thread onto cores 1-2 (alternating preferred core, free to run on either). The game thread
-+// pins itself back to core 0; aurora's frame worker and presenter pin themselves to 1 and 2.
++// thread onto core 2 (free to migrate to core 1). The game thread pins itself back to core 0 and
++// aurora's frame worker to core 1, which it keeps busy; its presenter pins itself to core 2.
++// (Alternating 1/2 left half the helpers, including SDL's audio thread, queued behind the worker:
++// the audio queue overflowed thousands of times per run.)
 +extern "C" int __real_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 +                                     void* (*start)(void*), void* arg);
 +extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
 +                                     void* (*start)(void*), void* arg) {
 +    const int r = __real_pthread_create(thread, attr, start, arg);
 +    if (r == 0 && thread != nullptr && *thread != nullptr) {
-+        static unsigned s_next;
-+        const int core = 1 + static_cast<int>(__atomic_fetch_add(&s_next, 1u, __ATOMIC_RELAXED) & 1u);
 +        Thread* t = reinterpret_cast<Thread*>(*thread);
-+        svcSetThreadCoreMask(t->handle, core, (1u << 1) | (1u << 2));
++        svcSetThreadCoreMask(t->handle, 2, (1u << 1) | (1u << 2));
 +    }
 +    return r;
++}
++
++// Sampling profiler for hardware runs. A thread on core 2 pauses each registered thread about 500
++// times a second (game thread = slot 0, aurora frame worker = slot 1), reads its PC, LR and the
++// caller's return address from the frame chain, resumes it, and every 15 s rewrites
++// /switch/nsmbw2/profile.txt with the hottest (pc, lr, caller) triples. Addresses are absolute;
++// the file's "main=" line gives the load base (subtract main's link address).
++#include <atomic>
++#include <cstdio>
++#include <map>
++#include <tuple>
++#include <algorithm>
++extern "C" int main();
++namespace {
++std::atomic<Handle> g_profThreads[2];
++void* ProfilerMain(void*) {
++    svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
++    using Key = std::tuple<uint64_t, uint64_t, uint64_t>;
++    std::map<Key, uint32_t> counts[2];
++    uint64_t totals[2] = {0, 0};
++    uint64_t lastDump = armGetSystemTick();
++    const uint64_t dumpTicks = armNsToTicks(15'000'000'000ull);
++    for (uint32_t n = 0;; ++n) {
++        svcSleepThread(1'000'000);  // 1 ms; two threads -> ~500 Hz each
++        const int slot = static_cast<int>(n & 1u);
++        const Handle h = g_profThreads[slot].load(std::memory_order_relaxed);
++        if (h == INVALID_HANDLE) continue;
++        ThreadContext ctx;
++        bool ok = false;
++        if (R_SUCCEEDED(svcSetThreadActivity(h, ThreadActivity_Paused))) {
++            for (int tries = 0; tries < 4 && !ok; ++tries) {
++                ok = R_SUCCEEDED(svcGetThreadContext3(&ctx, h));
++                if (!ok) svcSleepThread(20'000);
++            }
++            uint64_t caller = 0;
++            if (ok) {
++                // Walk one frame: [fp] = previous fp, [fp+8] = return address. Only trust an fp
++                // inside the thread's stack.
++                const uint64_t fp = ctx.fp;
++                MemoryInfo mi{};
++                u32 pageInfo = 0;
++                if ((fp & 7u) == 0 && fp != 0 && R_SUCCEEDED(svcQueryMemory(&mi, &pageInfo, fp)) &&
++                    (mi.perm & Perm_R) != 0 && fp + 16 <= mi.addr + mi.size) {
++                    caller = reinterpret_cast<const uint64_t*>(fp)[1];
++                }
++                ctx.cpu_gprs[0].x = caller;  // stash
++            }
++            svcSetThreadActivity(h, ThreadActivity_Runnable);
++        }
++        if (ok) {
++            ++counts[slot][Key{ctx.pc.x, ctx.lr, ctx.cpu_gprs[0].x}];
++            ++totals[slot];
++        }
++        const uint64_t now = armGetSystemTick();
++        if (now - lastDump >= dumpTicks) {
++            lastDump = now;
++            if (FILE* f = std::fopen("/switch/nsmbw2/profile.txt", "w")) {
++                std::fprintf(f, "main=0x%llx\n", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&main)));
++                for (int sl = 0; sl < 2; ++sl) {
++                    std::fprintf(f, "slot %d total %llu\n", sl, static_cast<unsigned long long>(totals[sl]));
++                    std::vector<std::pair<uint32_t, Key>> v;
++                    v.reserve(counts[sl].size());
++                    for (const auto& [k, c] : counts[sl]) v.emplace_back(c, k);
++                    std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
++                    for (size_t i = 0; i < v.size() && i < 1500; ++i) {
++                        std::fprintf(f, "%d %u 0x%llx 0x%llx 0x%llx\n", sl, v[i].first,
++                                     static_cast<unsigned long long>(std::get<0>(v[i].second)),
++                                     static_cast<unsigned long long>(std::get<1>(v[i].second)),
++                                     static_cast<unsigned long long>(std::get<2>(v[i].second)));
++                    }
++                }
++                std::fclose(f);
++            }
++        }
++    }
++    return nullptr;
++}
++}  // namespace
++// Called on the thread to sample; the first registration starts the profiler.
++extern "C" void SwitchProfilerRegisterThread(int slot) {
++    if (slot < 0 || slot > 1) return;
++    static std::atomic<bool> s_started{false};
++    g_profThreads[slot].store(threadGetCurHandle());
++    if (!s_started.exchange(true)) {
++        pthread_t t;
++        pthread_create(&t, nullptr, ProfilerMain, nullptr);
++    }
 +}
 +#endif
 diff --git a/runtime/src/system_bridge.cpp b/runtime/src/system_bridge.cpp
@@ -3168,7 +3264,7 @@ index 4f52738..291734a 100644
        Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
        return false;
 diff --git a/aurora-main/lib/gfx/pipeline_cache.cpp b/aurora-main/lib/gfx/pipeline_cache.cpp
-index ed5b68b..98d1555 100644
+index ed5b68b..8a667ee 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.cpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.cpp
 @@ -23,6 +23,17 @@
@@ -3189,7 +3285,18 @@ index ed5b68b..98d1555 100644
  namespace aurora::gfx {
  static Module Log("aurora::gfx::pipeline_cache");
  
-@@ -724,7 +735,7 @@ static bool prepare_pipeline_cache_db() {
+@@ -561,6 +572,10 @@ static void pipeline_cache_abort() {
+ static bool write_pipeline_cache_record(const PipelineCacheWrite& write);
+ 
+ static std::string pipeline_cache_seed_path() {
++#ifdef __SWITCH__
++  // The seed ships next to the .nro on the SD card, not in its romfs.
++  return std::string("/switch/nsmbw2/") + InitialPipelineCacheName;
++#endif
+   if (g_config.resourcesPath == nullptr || g_config.resourcesPath[0] == '\0') {
+     return InitialPipelineCacheName;
+   }
+@@ -724,7 +739,7 @@ static bool prepare_pipeline_cache_db() {
      return false;
    }
  
