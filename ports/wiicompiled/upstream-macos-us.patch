@@ -2726,10 +2726,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..efc5d52
+index 0000000..47f86b0
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,60 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -2740,6 +2740,54 @@ index 0000000..efc5d52
 +int execvp(const char*, char* const[]) { errno = ENOSYS; return -1; }
 +int fchown(int, uid_t, gid_t) { return 0; }
 +uid_t geteuid(void) { return 0; }
++}
++
++// libnx leaves newlib's __syscall_thread_detach unimplemented, so pthread_detach returns ENOSYS
++// and every std::thread::detach() throws (the startup log-flush thread aborted the app).
++// A detached thread is queued here; a reaper polls each kernel handle and joins it once it
++// has exited, which frees its stack. libnx's pthread_t points at its kernel Thread.
++#include <switch.h>
++#include <pthread.h>
++#include <vector>
++extern "C" void* __syscall_thread_join(struct __pthread_t* thread);
++namespace {
++Mutex g_detachLock;
++std::vector<struct __pthread_t*>* g_detached;
++bool g_reaperStarted;
++void* ReaperMain(void*) {
++    for (;;) {
++        svcSleepThread(100'000'000);
++        std::vector<struct __pthread_t*> done;
++        mutexLock(&g_detachLock);
++        auto& list = *g_detached;
++        for (size_t i = 0; i < list.size();) {
++            Thread* t = reinterpret_cast<Thread*>(list[i]);
++            if (R_SUCCEEDED(svcWaitSynchronizationSingle(t->handle, 0))) {
++                done.push_back(list[i]);
++                list[i] = list.back();
++                list.pop_back();
++            } else {
++                ++i;
++            }
++        }
++        mutexUnlock(&g_detachLock);
++        for (auto* t : done) __syscall_thread_join(t);
++    }
++    return nullptr;
++}
++}  // namespace
++extern "C" int __syscall_thread_detach(struct __pthread_t* thread) {
++    mutexLock(&g_detachLock);
++    if (!g_detached) g_detached = new std::vector<struct __pthread_t*>();
++    g_detached->push_back(thread);
++    const bool start = !g_reaperStarted;
++    g_reaperStarted = true;
++    mutexUnlock(&g_detachLock);
++    if (start) {
++        pthread_t reaper;
++        pthread_create(&reaper, nullptr, ReaperMain, nullptr);
++    }
++    return 0;
 +}
 +#endif
 diff --git a/runtime/src/system_bridge.cpp b/runtime/src/system_bridge.cpp
