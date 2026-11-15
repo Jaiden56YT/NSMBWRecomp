@@ -2494,7 +2494,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..ab655cb 100644
+index a63636b..838c7e4 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -84,12 +84,12 @@ namespace {
@@ -2658,7 +2658,7 @@ index a63636b..ab655cb 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +793,56 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +793,65 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -2666,6 +2666,11 @@ index a63636b..ab655cb 100644
 +#include <switch.h>
 +#include <pthread.h>
 +static int NsmbwMain();
++extern "C" {
++struct sqlite3_vfs;
++sqlite3_vfs* sqlite3_vfs_find(const char* name);
++int sqlite3_vfs_register(sqlite3_vfs* vfs, int makeDefault);
++}
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
 +int main() {
@@ -2676,6 +2681,10 @@ index a63636b..ab655cb 100644
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
 +    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
 +    setenv("NSMBW_UNBUFFERED_LOG", "1", 0);
++    setenv("SDL_SWITCH_NO_EGL_SURFACE", "1", 1);
++    // The SD filesystem has no POSIX locks, so SQLite's default VFS fails every query with a disk
++    // I/O error; the lock-free VFS is safe here (one process uses the caches).
++    if (sqlite3_vfs* noLock = sqlite3_vfs_find("unix-none")) sqlite3_vfs_register(noLock, 1);  // Dawn creates the window's EGL surface itself
 +    std::setvbuf(stdout, nullptr, _IONBF, 0);
 +    std::setvbuf(stderr, nullptr, _IONBF, 0);
 +    std::set_terminate([] {
@@ -2715,7 +2724,7 @@ index a63636b..ab655cb 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +922,7 @@ int main() {
+@@ -863,7 +931,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -2724,7 +2733,7 @@ index a63636b..ab655cb 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -1068,11 +1127,11 @@ int main() {
+@@ -1068,11 +1136,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped

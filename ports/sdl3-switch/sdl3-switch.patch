@@ -1,0 +1,23 @@
+diff --git a/src/video/switch/SDL_switchvideo.c b/src/video/switch/SDL_switchvideo.c
+index 8742877..504be68 100644
+--- a/src/video/switch/SDL_switchvideo.c
++++ b/src/video/switch/SDL_switchvideo.c
+@@ -258,9 +258,15 @@ static bool SWITCH_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_
+         return SDL_SetError("Could not set NWindow dimensions: 0x%x", rc);
+     }
+ 
+-    window_data->egl_surface = SDL_EGL_CreateSurface(_this, window, nWindow);
+-    if (window_data->egl_surface == EGL_NO_SURFACE) {
+-        return SDL_SetError("Could not create GLES window surface");
++    // An app that renders through its own EGL stack (Dawn) needs the one native window free:
++    // EGL allows a single window surface per native window.
++    if (SDL_getenv("SDL_SWITCH_NO_EGL_SURFACE") != NULL) {
++        window_data->egl_surface = EGL_NO_SURFACE;
++    } else {
++        window_data->egl_surface = SDL_EGL_CreateSurface(_this, window, nWindow);
++        if (window_data->egl_surface == EGL_NO_SURFACE) {
++            return SDL_SetError("Could not create GLES window surface");
++        }
+     }
+ 
+     /* Setup driver data for this window */
