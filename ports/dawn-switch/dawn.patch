@@ -92,6 +92,30 @@ index 0bc3be5b0..c18fe22a5 100644
                  break;
              default:
                  DAWN_UNREACHABLE();
+diff --git a/src/dawn/native/opengl/DeviceGL.cpp b/src/dawn/native/opengl/DeviceGL.cpp
+index 6700d8666..451c9bd1d 100644
+--- a/src/dawn/native/opengl/DeviceGL.cpp
++++ b/src/dawn/native/opengl/DeviceGL.cpp
+@@ -26,6 +26,7 @@
+ // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include "src/dawn/native/opengl/DeviceGL.h"
++#include "src/utils/platform.h"
+ 
+ #include <utility>
+ 
+@@ -118,8 +119,10 @@ void KHRONOS_APIENTRY OnGLDebugMessage(GLenum source,
+                            << "\n    Severity: " << severityText                 //
+                            << "\n    Message: " << message;
+ 
+-        // Abort on an error when in Debug mode.
++        // Abort on an error when in Debug mode (on the Switch, log and keep going).
++#if !DAWN_PLATFORM_IS(SWITCH)
+         DAWN_UNREACHABLE();
++#endif
+     }
+ }
+ 
 diff --git a/src/dawn/native/opengl/PhysicalDeviceGL.cpp b/src/dawn/native/opengl/PhysicalDeviceGL.cpp
 index b59795972..e67b4481e 100644
 --- a/src/dawn/native/opengl/PhysicalDeviceGL.cpp
@@ -130,7 +154,7 @@ index b59795972..e67b4481e 100644
      // Workaround: Imagination EGL 1.5 drivers do not support the new robustness enum.
      // Use the pre-1.5 extension enum instead.
 diff --git a/src/dawn/native/opengl/QueueGL.cpp b/src/dawn/native/opengl/QueueGL.cpp
-index 3857ee0f0..16ddbec63 100644
+index 3857ee0f0..85190285e 100644
 --- a/src/dawn/native/opengl/QueueGL.cpp
 +++ b/src/dawn/native/opengl/QueueGL.cpp
 @@ -26,6 +26,7 @@
@@ -141,19 +165,18 @@ index 3857ee0f0..16ddbec63 100644
  
  #include <vector>
  
-@@ -66,7 +67,12 @@ ResultOrError<Ref<Queue>> Queue::Create(Device* device, const QueueDescriptor* d
+@@ -66,6 +67,11 @@ ResultOrError<Ref<Queue>> Queue::Create(Device* device, const QueueDescriptor* d
  Queue::Queue(Device* device, const QueueDescriptor* descriptor) : QueueBase(device, descriptor) {
      const auto& egl = device->GetEGL(false);
  
 +#if DAWN_PLATFORM_IS(SWITCH)
++    (void)egl;
 +    mEGLSyncType = EGL_SYNC_FENCE;  // backed by a GL fence in WrappedEGLSync
-+    if (false) {
-+#else
-     if (egl.HasExt(EGLExt::NativeFenceSync)) {
++    return;
 +#endif
+     if (egl.HasExt(EGLExt::NativeFenceSync)) {
          mEGLSyncType = EGL_SYNC_NATIVE_FENCE_ANDROID;
      } else if (egl.HasExt(EGLExt::FenceSync)) {
-         mEGLSyncType = EGL_SYNC_FENCE;
 diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
 index 15ebd666b..7f888b9b9 100644
 --- a/src/dawn/native/opengl/SwapChainEGL.cpp
