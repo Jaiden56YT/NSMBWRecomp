@@ -71,7 +71,9 @@ Crypto++, header-only Tracy, SQLite without WAL/mmap, aurora's abseil patched
 (dawn-switch/abseil-20240722-files), POSIX stubs (switch_posix_stubs.cpp). main() runs the game
 on a 64 MiB-stack thread on core 0; aurora's frame/present workers on cores 1/2.
 Build: cmake -S runtime -B build_switch -G Ninja -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/Switch.cmake
--DCMAKE_BUILD_TYPE=Release -DMKW_BUILD_NSMBW=ON; ninja nsmbw2.nro (shards ~25 min with GCC).
+-DCMAKE_BUILD_TYPE=Release -DMKW_BUILD_NSMBW=ON, plus -fno-semantic-interposition appended to the
+toolchain's CMAKE_C_FLAGS/CMAKE_CXX_FLAGS (lets GCC inline translated functions; the .nro has no
+interposition); ninja nsmbw2.nro (shards ~25 min with GCC).
 SD layout (dist/nsmbw2): switch/nsmbw2/{nsmbw2.nro, dsp_coef.bin, initial_pipeline_cache.db,
 initial_texture_preload.txt, wii_bootstrap/, WiiCompiled/Config.toml (dvd_root =
 /switch/nsmbw/extracted)}; log in switch/nsmbw2/nsmbw.log.

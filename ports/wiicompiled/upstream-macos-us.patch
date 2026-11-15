@@ -2438,7 +2438,7 @@ index 9d8157e..ed34dff 100644
 +
 +#endif  // x86-64 only: other hosts have no ISA level to check
 diff --git a/runtime/src/product/nsmbw_controls.cpp b/runtime/src/product/nsmbw_controls.cpp
-index d0b2e6f..cda92e9 100644
+index d0b2e6f..8224ec3 100644
 --- a/runtime/src/product/nsmbw_controls.cpp
 +++ b/runtime/src/product/nsmbw_controls.cpp
 @@ -15,9 +15,9 @@
@@ -2554,6 +2554,21 @@ index d0b2e6f..cda92e9 100644
  // 1 (0x200; 1 | B with a Nunchuk). So while it is open the Menu actions are used, with 2 and A
  // swapped: confirm (normally 2) is sent as A, "A button" as 2; back stays 1. ListBit applies the
  // swap to what is sent; the prompt glyphs use the same swap (it is its own inverse) to find the
+@@ -1274,6 +1308,14 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
+     const auto& defs = ActionsFor(c);
+     const auto& binds = g_bindings[chan < kPlayers ? chan : 0][size_t(c)];
+     const Device device = chan < kPlayers ? ResolveLocked()[chan] : Device{};
++    // A player with no device has nothing to read; skip the binding/combination string work
++    // (players 2-4 on a one-controller setup cost most of this function's time on the Switch).
++    if (!device.keyboard && device.pad == nullptr) {
++        auto& idleCombo = g_combo[chan < kPlayers ? chan : 0];
++        idleCombo.downFrames.clear();
++        idleCombo.latched.clear();
++        return 0;
++    }
+     int numKeys = 0;
+     const bool* keys = device.keyboard ? SDL_GetKeyboardState(&numKeys) : nullptr;
+ 
 diff --git a/runtime/src/product/nsmbw_movie_skip.cpp b/runtime/src/product/nsmbw_movie_skip.cpp
 index bb5a62f..e9b177c 100644
 --- a/runtime/src/product/nsmbw_movie_skip.cpp
@@ -3888,3 +3903,31 @@ index 3f78c82..862a7df 100644
      std::ifstream in(path, std::ios::binary);
      if (!in) return false;
      out.assign(std::istreambuf_iterator<char>(in), {});
+diff --git a/runtime/include/isa/ppc_isa_float.h b/runtime/include/isa/ppc_isa_float.h
+index fcd5795..ddc5c38 100644
+--- a/runtime/include/isa/ppc_isa_float.h
++++ b/runtime/include/isa/ppc_isa_float.h
+@@ -145,6 +145,15 @@ inline bool MkwHostNiActiveInline() noexcept
+ 
+ inline float PpcForceSingleValueInline(double value)
+ {
++#if defined(__aarch64__)
++    // Same result as the SSE version below, without the SSE-on-NEON emulation (several NEON ops
++    // per intrinsic; ~17% of the Switch game thread ran under this helper). Values whose
++    // magnitude is below the NI flush threshold become a signed zero; NaN compares false and is
++    // converted normally; the conversion uses the current rounding mode like CVTSD2SS.
++    if (__builtin_fabs(value) < g_mkwNiFlushThreshold) [[unlikely]]
++        return __builtin_signbit(value) ? -0.0f : 0.0f;
++    return static_cast<float>(value);
++#else
+     // FPSCR[NI] flushes an exact pre-round single-subnormal even when rounding would promote it
+     // to the smallest normal. g_mkwNiFlushThreshold (2^-126 active, 0.0 inactive) turns the
+     // flush into a branchless mask: a set compare lane keeps just the sign bit, a clear lane
+@@ -156,6 +165,7 @@ inline float PpcForceSingleValueInline(double value)
+     const __m128d flush = _mm_cmplt_sd(magnitude, _mm_set_sd(g_mkwNiFlushThreshold));
+     const __m128d kept = _mm_andnot_pd(_mm_andnot_pd(signMask, flush), v);
+     return static_cast<float>(_mm_cvtsd_f64(kept));
++#endif
+ }
+ 
+ inline float PpcFlushSingleForNiInline(float value)
