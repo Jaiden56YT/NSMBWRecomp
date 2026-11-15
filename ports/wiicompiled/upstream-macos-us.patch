@@ -39,7 +39,7 @@ index a71eb74..41f124c 100644
  #else
  void GXSetArray(GXAttr attr, const void* data, u8 stride);
 diff --git a/aurora-main/lib/aurora.cpp b/aurora-main/lib/aurora.cpp
-index 95b510e..ca5eb2f 100644
+index 95b510e..9d66523 100644
 --- a/aurora-main/lib/aurora.cpp
 +++ b/aurora-main/lib/aurora.cpp
 @@ -1,4 +1,7 @@
@@ -51,7 +51,15 @@ index 95b510e..ca5eb2f 100644
  #include <aurora/env.hpp>
  #include <atomic>
  #include <cstdint>
-@@ -293,7 +296,17 @@ bool frame_worker_requested() noexcept {
+@@ -10,6 +13,7 @@ extern std::atomic<uint64_t> g_finalizeInterpolationMaxNanos;
+ #ifdef AURORA_ENABLE_GX
+ #include "gfx/common.hpp"
+ #include "gfx/efb_ram_copy.hpp"
++#include "gfx/pipeline_cache.hpp"
+ #include "gfx/texture_replacement.hpp"
+ #include "gx/fifo.hpp"
+ #include "gx/shader_info.hpp"
+@@ -293,7 +297,17 @@ bool frame_worker_requested() noexcept {
  bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept;
  #endif
  
@@ -69,7 +77,7 @@ index 95b510e..ca5eb2f 100644
    {
      std::lock_guard lock(g_frameWorker.mutex);
      g_frameWorker.threadId = std::this_thread::get_id();
-@@ -1136,6 +1149,10 @@ PresenterState g_presenter;
+@@ -1136,6 +1150,10 @@ PresenterState g_presenter;
  std::atomic<bool> g_presenterStarted{false};
  
  void presenter_main() noexcept {
@@ -80,7 +88,17 @@ index 95b510e..ca5eb2f 100644
    if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
      Log.warn("Could not raise the asynchronous presenter thread priority: {}", SDL_GetError());
    }
-@@ -1710,7 +1727,16 @@ struct WorkerCycleTiming {
+@@ -1510,6 +1528,9 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx) {
+ // without the renderer GPU mutex while the producer records the next frame.
+ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx) {
+   ZoneScopedN("Encode sealed frame");
++  // OpenGL: build pipelines first seen while recording this frame (bounded), outside the renderer
++  // mutex so the game thread keeps running; draws still waiting on theirs are skipped this frame.
++  gfx::compile_deferred_pipelines();
+   auto encoder = std::move(ctx.encoder);
+   const auto encoderDescriptor = wgpu::CommandEncoderDescriptor{
+       .label = "Redraw encoder",
+@@ -1710,7 +1731,16 @@ struct WorkerCycleTiming {
    uint32_t cycles = 0;
  };
  WorkerCycleTiming s_workerTiming;
@@ -98,7 +116,7 @@ index 95b510e..ca5eb2f 100644
  double ms_since(std::chrono::steady_clock::time_point t) noexcept {
    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
  }
-@@ -1728,12 +1754,16 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+@@ -1728,12 +1758,16 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
    auto phaseStart = std::chrono::steady_clock::now();
    {
      std::lock_guard gpuLock(g_rendererGpuMutex);
@@ -117,7 +135,7 @@ index 95b510e..ca5eb2f 100644
      if (!overlapEncode) {
        presentationJobs = encode_sealed_frame(sealedFrame, ctx);
      }
-@@ -1741,7 +1771,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+@@ -1741,7 +1775,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
    if (!overlapEncode) {
      publish_presentations(std::move(presentationJobs), ctx.interpolationActive);
    }
@@ -126,7 +144,7 @@ index 95b510e..ca5eb2f 100644
      note_worker_phase(s_workerTiming.seal, s_workerTiming.sealMax, ms_since(phaseStart));
      phaseStart = std::chrono::steady_clock::now();
    }
-@@ -1758,14 +1788,14 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+@@ -1758,14 +1792,14 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
    // Preparing the next frame belongs to the SEALED phase: without a fresh pass 0 and mapped
    // staging buffers the producer's drain has nowhere to put its commands.
    bool imguiNewFrameOwed = false;
@@ -143,7 +161,7 @@ index 95b510e..ca5eb2f 100644
      note_worker_phase(s_workerTiming.prepare, s_workerTiming.prepareMax, ms_since(phaseStart));
      phaseStart = std::chrono::steady_clock::now();
    }
-@@ -1797,7 +1827,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
+@@ -1797,7 +1831,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
      g_frameWorker.cv.notify_all();
    }
  
@@ -152,6 +170,24 @@ index 95b510e..ca5eb2f 100644
      note_worker_phase(s_workerTiming.encode, s_workerTiming.encodeMax, ms_since(phaseStart));
      if (++s_workerTiming.cycles == 120) {
        const auto& t = s_workerTiming;
+@@ -2037,6 +2071,8 @@ bool aurora_flush_efb_copies_to_ram() {
+   };
+   auto encoder = aurora::webgpu::g_device.CreateCommandEncoder(&encoderDescriptor);
+   aurora::gfx::end_batch(encoder);
++  // The CPU reads this result back right away, so no draw may be skipped for a missing pipeline.
++  aurora::gfx::compile_deferred_pipelines(true);
+   aurora::gfx::render(encoder);
+   aurora::gfx::efb_ram::encode_downloads(encoder);
+   const wgpu::CommandBufferDescriptor commandDescriptor{
+@@ -2074,6 +2110,8 @@ bool aurora_flush_efb_copy_to_ram(void* dest) {
+   };
+   auto encoder = aurora::webgpu::g_device.CreateCommandEncoder(&encoderDescriptor);
+   aurora::gfx::end_batch(encoder);
++  // The CPU reads this result back right away, so no draw may be skipped for a missing pipeline.
++  aurora::gfx::compile_deferred_pipelines(true);
+   aurora::gfx::render(encoder);
+   aurora::gfx::efb_ram::encode_downloads(encoder, dest);
+   const wgpu::CommandBufferDescriptor commandDescriptor{
 diff --git a/aurora-main/lib/dawn/BackendBinding.cpp b/aurora-main/lib/dawn/BackendBinding.cpp
 index bb8fba4..1417314 100644
 --- a/aurora-main/lib/dawn/BackendBinding.cpp
@@ -2201,10 +2237,45 @@ index 62c4411..365fa9c 100644
      if (!Memory::Contains(kProductCodeAddress, sizeof(kProductCode))) {
          return 0;
 diff --git a/runtime/src/hle/storage/dvd.cpp b/runtime/src/hle/storage/dvd.cpp
-index 5ea4232..4b4cd18 100644
+index 5ea4232..adc9560 100644
 --- a/runtime/src/hle/storage/dvd.cpp
 +++ b/runtime/src/hle/storage/dvd.cpp
-@@ -788,7 +788,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
+@@ -497,10 +497,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
+             return;
+         }
+ 
+-        const fs::path relative = fs::relative(entry.path(), root, entryEc);
++        // The iterator builds every entry path as root/..., so the relative part is a plain string
++        // suffix. fs::relative canonicalizes both paths, which stats every component of each: on
++        // the Switch SD card that is one filesystem IPC per component and took ~9 s of boot for
++        // the disc index. Fall back to it only if the prefix somehow doesn't match.
++        fs::path relative;
++#if !defined(_WIN32)
++        {
++            const std::string& full = entry.path().native();
++            const std::string& base = root.native();
++            if (!base.empty() && full.size() > base.size() && full.compare(0, base.size(), base) == 0 &&
++                (base.back() == '/' || full[base.size()] == '/')) {
++                size_t start = base.size();
++                while (start < full.size() && full[start] == '/') ++start;
++                relative = fs::path(full.substr(start));
++            } else {
++                relative = fs::relative(entry.path(), root, entryEc);
++                if (entryEc) {
++                    return;
++                }
++            }
++        }
++#else
++        relative = fs::relative(entry.path(), root, entryEc);
+         if (entryEc) {
+             return;
+         }
++#endif
+ 
+         std::string prefix = virtualPrefix.empty() ? "/" : virtualPrefix;
+         if (prefix.back() != '/' && prefix.back() != '\\') {
+@@ -788,7 +811,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
  
  static void InitDvdWaitingQueues()
  {
@@ -2213,7 +2284,7 @@ index 5ea4232..4b4cd18 100644
      for (uint32_t i = 0; i < 4; ++i) {
          const uint32_t queue = kQueueBase + (i * 8);
          Memory::Write32(queue + 0, queue);
-@@ -802,12 +802,12 @@ static void CompleteDvdCancelState()
+@@ -802,12 +825,12 @@ static void CompleteDvdCancelState()
  
      // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
      // The actual drive work is HLE'd, so complete pending cancel/reset waits.
@@ -2232,7 +2303,7 @@ index 5ea4232..4b4cd18 100644
  }
  
  // 0x8015EA1C -> DVDInit
-@@ -824,14 +824,14 @@ extern "C" void DVDInit_8015EA1C()
+@@ -824,14 +847,14 @@ extern "C" void DVDInit_8015EA1C()
  
      // 1. Initialize Global Flags (Emulate OS state)
      // These addresses are standard OS globals for DVD context
@@ -2252,7 +2323,7 @@ index 5ea4232..4b4cd18 100644
      constexpr uint32_t kMagicValue = 0xFEEBDAED;
      for (int i = 0; i < 4; i++) {
          uint32_t ctx = kContextBase + i * 0x20;
-@@ -883,7 +883,7 @@ extern "C" void DVDInit_8015EA1C()
+@@ -883,7 +906,7 @@ extern "C" void DVDInit_8015EA1C()
      BuildAndPublishRuntimeFst();
  
      // Initialize the translated DVD filesystem so it can use the published FST.
@@ -2261,7 +2332,7 @@ index 5ea4232..4b4cd18 100644
      if (TranslatedFunctionRegistry::FindByAddressPtr(kDvdFsInitAddress)) {
          InvokeIndirectCpu(kDvdFsInitAddress, &GetPersistentCpuContext());
      }
-@@ -1196,7 +1196,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
+@@ -1196,7 +1219,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
      CopyToGuestAsDma(buffer, tempBuf.data(), tempBuf.size());
      return finish(true);
  }
@@ -3720,10 +3791,18 @@ index 4f52738..291734a 100644
        Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
        return false;
 diff --git a/aurora-main/lib/gfx/pipeline_cache.cpp b/aurora-main/lib/gfx/pipeline_cache.cpp
-index ed5b68b..c041315 100644
+index ed5b68b..73d1160 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.cpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.cpp
-@@ -23,6 +23,17 @@
+@@ -9,6 +9,7 @@
+ #include <algorithm>
+ #include <atomic>
+ #include <chrono>
++#include <cstdlib>
+ #include <condition_variable>
+ #include <deque>
+ #include <filesystem>
+@@ -23,6 +24,17 @@
  #include <fmt/format.h>
  #include <tracy/Tracy.hpp>
  
@@ -3741,7 +3820,48 @@ index ed5b68b..c041315 100644
  namespace aurora::gfx {
  static Module Log("aurora::gfx::pipeline_cache");
  
-@@ -561,6 +572,11 @@ static void pipeline_cache_abort() {
+@@ -77,6 +89,30 @@ constexpr size_t BuildPipelinesPerFrame = 1;
+ static std::vector<std::thread> g_pipelineThreads;
+ static bool g_pipelineThreadEnd = false;
+ static size_t g_activeBackgroundPipelineWorkers = 0;
++
++// OpenGL has no pipeline threads, so a GX pipeline first seen mid-frame used to compile right
++// where the game thread recorded the draw: a level load's ~60 new pipelines at ~35 ms each froze
++// the game (and starved its audio) for seconds. With skip-unready on (the default setting), GL now
++// queues them like the threaded backends do; the frame worker compiles queued pipelines for a
++// bounded time before encoding each frame (compile_deferred_pipelines), draws whose pipeline isn't
++// built yet are skipped for that frame, and a persistent-texture pass builds its own inline.
++// AURORA_GL_SYNC_PIPELINES=1 restores the old behavior; AURORA_GL_PIPELINE_BUDGET_MS sets the
++// per-frame budget (default 10 ms; at least one pipeline is always built per frame).
++static bool gl_deferral_allowed() {
++  static const bool allowed = std::getenv("AURORA_GL_SYNC_PIPELINES") == nullptr;
++  return allowed;
++}
++static bool gl_defers_gx_pipelines() {
++  return !g_hasPipelineThread && gl_deferral_allowed() && g_skipUnreadyGxPipelines.load(std::memory_order_relaxed);
++}
++static double gl_pipeline_budget_ms() {
++  static const double budget = [] {
++    const char* v = std::getenv("AURORA_GL_PIPELINE_BUDGET_MS");
++    const double parsed = v != nullptr ? std::strtod(v, nullptr) : 10.0;
++    return parsed >= 0.0 ? parsed : 10.0;
++  }();
++  return budget;
++}
+ static std::condition_variable g_pipelineCv;
+ static absl::flat_hash_map<PipelineRef, CachedPipeline> g_pipelines;
+ static std::deque<PendingPipeline> g_priorityPipelines;
+@@ -447,7 +483,8 @@ static PipelineRef find_pipeline_impl(ShaderType type, const PipelineConfig& con
+   std::optional<PipelineCacheWrite> cacheWrite;
+   {
+     std::scoped_lock guard{g_pipelineMutex};
+-    const bool deferGxPipeline = g_hasPipelineThread && g_pipelineFrameActive && type == ShaderType::GX;
++    const bool deferGxPipeline =
++        g_pipelineFrameActive && type == ShaderType::GX && (g_hasPipelineThread || gl_defers_gx_pipelines());
+     const bool skipUnreadyGxPipeline = deferGxPipeline && g_skipUnreadyGxPipelines.load(std::memory_order_relaxed);
+     auto pipelineIt = g_pipelines.find(hash);
+     if (pipelineIt != g_pipelines.end()) {
+@@ -561,6 +598,11 @@ static void pipeline_cache_abort() {
  static bool write_pipeline_cache_record(const PipelineCacheWrite& write);
  
  static std::string pipeline_cache_seed_path() {
@@ -3753,7 +3873,7 @@ index ed5b68b..c041315 100644
    if (g_config.resourcesPath == nullptr || g_config.resourcesPath[0] == '\0') {
      return InitialPipelineCacheName;
    }
-@@ -724,7 +740,7 @@ static bool prepare_pipeline_cache_db() {
+@@ -724,7 +766,7 @@ static bool prepare_pipeline_cache_db() {
      return false;
    }
  
@@ -3762,7 +3882,7 @@ index ed5b68b..c041315 100644
    if (ret != SQLITE_OK) {
      Log.error("Failed to set pipeline cache pragmas: {}", sqlite3_errmsg(g_pipelineCacheDb));
      pipeline_cache_abort();
-@@ -1115,8 +1131,12 @@ static void load_pipeline_cache() {
+@@ -1115,8 +1157,12 @@ static void load_pipeline_cache() {
    }
    load_pipeline_cache_entries<clear::PipelineConfig>(ShaderType::Clear, clear::ClearPipelineConfigVersion,
                                                       clear::create_pipeline);
@@ -3775,7 +3895,7 @@ index ed5b68b..c041315 100644
    const auto queued = queuedPipelines.load();
    if (queued > 0) {
      g_prewarmCount = queued;
-@@ -1155,6 +1175,18 @@ PipelineRef find_pipeline(ShaderType type, const clear::PipelineConfig& config,
+@@ -1155,6 +1201,18 @@ PipelineRef find_pipeline(ShaderType type, const clear::PipelineConfig& config,
    return find_pipeline_impl(type, config, std::move(cb), true, std::nullopt);
  }
  
@@ -3794,11 +3914,96 @@ index ed5b68b..c041315 100644
  template <>
  PipelineRef find_pipeline(ShaderType type, const gx::PipelineConfig& config, NewPipelineCallback&& cb) {
    return find_pipeline_impl(type, config, std::move(cb), true, std::nullopt);
+@@ -1168,7 +1226,9 @@ void initialize_pipeline_cache() {
+   g_activeBackgroundPipelineWorkers = 0;
+ 
+   if (webgpu::g_backendType == wgpu::BackendType::OpenGL || webgpu::g_backendType == wgpu::BackendType::OpenGLES ||
+-      webgpu::g_backendType == wgpu::BackendType::WebGPU) {
++      webgpu::g_backendType == wgpu::BackendType::WebGPU ||
++      std::getenv("AURORA_NO_PIPELINE_THREADS") != nullptr) {
++    // AURORA_NO_PIPELINE_THREADS: test the OpenGL (thread-less) paths on another backend.
+     g_hasPipelineThread = false;
+   } else {
+     g_hasPipelineThread = true;
+@@ -1230,11 +1290,39 @@ void begin_pipeline_frame() {
+ 
+ void end_pipeline_frame() {
+   g_pipelineFrameActive = false;
+-  if (!g_hasPipelineThread) {
++  // Deferred GL pipelines are built by compile_deferred_pipelines on the frame worker instead:
++  // this runs while the worker holds the renderer mutex, which would block the game thread.
++  if (!g_hasPipelineThread && !gl_defers_gx_pipelines()) {
+     build_synchronous_pipelines_for_frame();
+   }
+ }
+ 
++void compile_deferred_pipelines(bool all) {
++  if (g_hasPipelineThread || !gl_defers_gx_pipelines()) {
++    return;
++  }
++  const auto start = std::chrono::steady_clock::now();
++  const double budgetMs = gl_pipeline_budget_ms();
++  for (;;) {
++    PendingPipeline pending;
++    {
++      std::lock_guard lock{g_pipelineMutex};
++      if (g_priorityPipelines.empty() && g_backgroundPipelines.empty()) {
++        return;
++      }
++      auto& source = !g_priorityPipelines.empty() ? g_priorityPipelines : g_backgroundPipelines;
++      pending = std::move(source.front());
++      source.pop_front();
++    }
++    compile_pending_pipeline(std::move(pending));
++    const double elapsedMs =
++        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
++    if (!all && elapsedMs >= budgetMs) {
++      return;
++    }
++  }
++}
++
+ void set_skip_unready_pipelines(bool enabled) noexcept {
+   g_skipUnreadyGxPipelines.store(enabled, std::memory_order_relaxed);
+ }
+@@ -1262,6 +1350,22 @@ bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
+ static bool wait_pipeline_impl(PipelineRef ref, wgpu::RenderPipeline& pipeline, bool fatalIfMissing,
+                                bool persistentPass) {
+   std::unique_lock lock{g_pipelineMutex};
++  if (!g_hasPipelineThread && !g_pipelines.contains(ref) && g_pendingPipelines.contains(ref)) {
++    // No pipeline threads (OpenGL): nothing else will build a queued pipeline, so build it here.
++    std::deque<PendingPipeline>* queues[] = {&g_priorityPipelines, &g_backgroundPipelines};
++    for (auto* queue : queues) {
++      const auto it = find_pending_pipeline(*queue, ref);
++      if (it == queue->end()) {
++        continue;
++      }
++      PendingPipeline pending = std::move(*it);
++      queue->erase(it);
++      lock.unlock();
++      compile_pending_pipeline(std::move(pending));
++      lock.lock();
++      break;
++    }
++  }
+   if (!g_pipelines.contains(ref) && g_pendingPipelines.contains(ref)) {
+     ZoneScopedN("wait_pipeline");
+     const auto finished = [ref] {
 diff --git a/aurora-main/lib/gfx/pipeline_cache.hpp b/aurora-main/lib/gfx/pipeline_cache.hpp
-index 6d76b7f..8b6ea22 100644
+index 6d76b7f..4d5ee83 100644
 --- a/aurora-main/lib/gfx/pipeline_cache.hpp
 +++ b/aurora-main/lib/gfx/pipeline_cache.hpp
-@@ -27,6 +27,9 @@ uint32_t queued_pipeline_count() noexcept;
+@@ -21,12 +21,19 @@ void shutdown_pipeline_cache();
+ void flush_pipeline_cache();
+ void begin_pipeline_frame();
+ void end_pipeline_frame();
++// OpenGL only (no pipeline threads): build queued pipelines for a bounded time (or all of them, for
++// an encode whose result the CPU reads back right away). Called before encoding; a no-op on
++// threaded backends.
++void compile_deferred_pipelines(bool all = false);
+ void set_skip_unready_pipelines(bool enabled) noexcept;
+ bool skip_unready_pipelines() noexcept;
+ uint32_t queued_pipeline_count() noexcept;
  
  template <typename Config>
  PipelineRef find_pipeline(ShaderType type, const Config& config, NewPipelineCallback&& cb);
