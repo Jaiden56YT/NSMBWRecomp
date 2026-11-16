@@ -2950,7 +2950,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..6b12479 100644
+index a63636b..8364ae1 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -39,6 +39,7 @@
@@ -3345,7 +3345,7 @@ index a63636b..6b12479 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1190,16 @@ int main() {
+@@ -973,7 +1190,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -3355,6 +3355,11 @@ index a63636b..6b12479 100644
 +                                 static_cast<unsigned long long>(g_audioPushedBlocks.exchange(0)),
 +                                 static_cast<unsigned long long>(g_audioDroppedBlocks.exchange(0)));
                      prevCreated = created;
++                    extern std::atomic<uint64_t> g_auroraCommandListGrows;
++                    extern std::atomic<uint64_t> g_auroraCommandListGrowBytes;
++                    std::fprintf(stderr, "[nsmbw][interp]   command lists: %llu regrows, %llu KB copied\n",
++                                 static_cast<unsigned long long>(g_auroraCommandListGrows.exchange(0)),
++                                 static_cast<unsigned long long>(g_auroraCommandListGrowBytes.exchange(0) / 1024));
 +#if defined(__SWITCH__)
 +                    extern void SwitchCpuClockMaintain();
 +                    SwitchCpuClockMaintain();
@@ -3362,7 +3367,7 @@ index a63636b..6b12479 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1294,11 @@ int main() {
+@@ -1068,11 +1299,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -3392,10 +3397,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..afece19
+index 0000000..db44feb
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,218 @@
+@@ -0,0 +1,222 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -3520,6 +3525,10 @@ index 0000000..afece19
 +}
 +void* ProfilerMain(void*) {
 +    svcSetThreadCoreMask(CUR_THREAD_HANDLE, 2, 1u << 2);
++    // Above aurora's presenter (also on core 2, raised to SDL's HIGH priority): if the presenter
++    // preempts this thread while it holds a thread paused, that thread stays frozen. Run 23 showed
++    // 2 s game frames and a 44 s profile window with no samples. It sleeps 1 ms per sample anyway.
++    svcSetThreadPriority(CUR_THREAD_HANDLE, 0x20);
 +    using Key = std::array<uint64_t, 18>;  // pc, lr, then sixteen frame-chain return addresses
 +    std::map<Key, uint32_t> counts[2];
 +    uint64_t totals[2] = {0, 0};
@@ -4197,7 +4206,7 @@ index 6d76b7f..7787eda 100644
  bool wait_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
  bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
 diff --git a/aurora-main/lib/gfx/common.cpp b/aurora-main/lib/gfx/common.cpp
-index d7492a9..8d60c76 100644
+index d7492a9..cad3006 100644
 --- a/aurora-main/lib/gfx/common.cpp
 +++ b/aurora-main/lib/gfx/common.cpp
 @@ -1,4 +1,5 @@
@@ -4206,7 +4215,17 @@ index d7492a9..8d60c76 100644
  #include <aurora/env.hpp>
  #include "../gx/shader_info.hpp"
  
-@@ -107,10 +108,26 @@ inline HashType xxh3_hash(const wgpu::SamplerDescriptor& input, HashType seed) {
+@@ -78,6 +79,9 @@ struct Command {
+ };
+ } // namespace aurora::gfx
+ 
++std::atomic<uint64_t> g_auroraCommandListGrows{0};
++std::atomic<uint64_t> g_auroraCommandListGrowBytes{0};
++
+ void aurora_set_guest_write_hooks(AuroraGuestWriteGenerationCallback generation,
+                                   AuroraGuestWriteNotifyCallback notify) {
+   aurora::g_guestWriteGenerationHook = generation;
+@@ -107,10 +111,26 @@ inline HashType xxh3_hash(const wgpu::SamplerDescriptor& input, HashType seed) {
  } // namespace aurora
  
  namespace aurora::gfx {
@@ -4233,7 +4252,43 @@ index d7492a9..8d60c76 100644
  };
  
  constexpr uint32_t BindGroupCacheRetainFrames = 32;
-@@ -517,6 +534,11 @@ void push_draw_command(clear::DrawData data) {
+@@ -200,6 +220,7 @@ static u32 g_currentRenderPass = UINT32_MAX;
+ using CommandListPool = std::vector<CommandList>;
+ static CommandListPool g_commandListPool;
+ static constexpr size_t MaxPooledCommandLists = 32;
++static constexpr size_t MinPassCommands = 256;
+ // The pool is the only recording storage both sides touch, a few pointer moves per frame, so a
+ // plain mutex is cheaper than the alternatives and keeps the vector's invariants.
+ static std::mutex g_commandListPoolMutex;
+@@ -250,6 +271,11 @@ static RenderPass& push_render_pass(RenderPass&& pass) {
+   if (out.commands.capacity() == 0) {
+     out.commands = acquire_command_list();
+   }
++  // A pass that starts from an empty (or small pooled) list would otherwise regrow 1, 2, 4, ...
++  // on the game thread, each step a malloc under newlib's global lock. 256 commands is 30 KB.
++  if (out.commands.capacity() < MinPassCommands) {
++    out.commands.reserve(MinPassCommands);
++  }
+   return out;
+ }
+ // The producer may build the next frame's GX stream while the worker prepares the target, and
+@@ -441,6 +467,15 @@ static inline void push_command(CommandType type, const Command::Data& data) {
+       Log.warn("Dropping command {}", magic_enum::enum_name(type));
+       return;
+     }
++  {
++    // Counted for the run log ([nsmbw][interp] command lists): the Switch profile showed draws
++    // reallocating their pass's list under newlib's malloc lock.
++    const auto& list = g_renderPasses[g_currentRenderPass].commands;
++    if (list.size() == list.capacity()) {
++      g_auroraCommandListGrows.fetch_add(1, std::memory_order_relaxed);
++      g_auroraCommandListGrowBytes.fetch_add(list.capacity() * sizeof(Command), std::memory_order_relaxed);
++    }
++  }
+   g_renderPasses[g_currentRenderPass].commands.push_back({
+       .type = type,
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+@@ -517,6 +552,11 @@ void push_draw_command(clear::DrawData data) {
  
  template <>
  PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
@@ -4245,7 +4300,7 @@ index d7492a9..8d60c76 100644
    return find_pipeline(ShaderType::Clear, config, [=] { return create_pipeline(config); });
  }
  
-@@ -862,6 +884,9 @@ void push_draw_command(gx::DrawData data) {
+@@ -862,6 +902,9 @@ void push_draw_command(gx::DrawData data) {
  
  template <>
  PipelineRef pipeline_ref(const gx::PipelineConfig& config) {
@@ -4255,7 +4310,7 @@ index d7492a9..8d60c76 100644
    return find_pipeline(ShaderType::GX, config, [=] { return create_pipeline(config); });
  }
  
-@@ -2060,9 +2085,55 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
+@@ -2060,9 +2103,55 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
  wgpu::BindGroup& find_bind_group(BindGroupRef id) {
    const auto it = g_cachedBindGroups.find(id);
    CHECK(it != g_cachedBindGroups.end(), "get_bind_group: failed to locate {:x}", id);

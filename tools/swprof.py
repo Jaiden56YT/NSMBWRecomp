@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Symbolize Switch sampling profiles (sdmc:/switch/nsmbw2/profile_NN.txt).
 
-Usage: tools/swprof.py ELF profile_NN.txt [more windows...] [--top N]
+Usage: tools/swprof.py ELF profile_NN.txt [more windows...] [--top N] [--callers SUBSTRING]
+
+--callers lists, for samples whose stack contains a function matching SUBSTRING, the chain of
+the next callers above the first match (who is driving that function).
 
 Each file: "main=0x...", "window W uptime T s", per slot "slot S total T" and
 rows "S count pc lr ret1 ret2 ret3 ret4" (older files: "S count pc lr caller").
@@ -23,6 +26,11 @@ def main():
     if "--top" in argv:
         i = argv.index("--top")
         top = int(argv[i + 1])
+        del argv[i:i + 2]
+    callers = None
+    if "--callers" in argv:
+        i = argv.index("--callers")
+        callers = argv[i + 1]
         del argv[i:i + 2]
     elf, files = argv[0], argv[1:]
 
@@ -78,6 +86,8 @@ def main():
         self_t = collections.Counter()
         incl = collections.Counter()
         stacks = collections.defaultdict(collections.Counter)
+        callers_of = collections.Counter()
+        callers_total = 0
         for s, c, addrs in rows:
             if s != slot:
                 continue
@@ -86,6 +96,11 @@ def main():
             for f in set(f for f in fns if f != "-"):
                 incl[f] += c
             stacks[fns[0]][" <= ".join(f for f in fns[1:] if f != "-")] += c
+            if callers:
+                hit = next((i for i, f in enumerate(fns) if callers in f), None)
+                if hit is not None:
+                    callers_total += c
+                    callers_of[" <= ".join(f for f in fns[hit:hit + 6] if f != "-")] += c
         print("\n-- self time --")
         for f, c in self_t.most_common(top):
             print("%6.2f%%  %s" % (100.0 * c / tot, f))
@@ -97,6 +112,11 @@ def main():
             print("%s  (%.1f%%)" % (f, 100.0 * c / tot))
             for k, kc in stacks[f].most_common(4):
                 print("      %5.1f%%  %s" % (100.0 * kc / tot, k[:220]))
+
+        if callers:
+            print("\n-- callers of %r: %.2f%% of samples --" % (callers, 100.0 * callers_total / tot))
+            for k, kc in callers_of.most_common(top):
+                print("      %5.2f%%  %s" % (100.0 * kc / tot, k[:300]))
 
 
 if __name__ == "__main__":
