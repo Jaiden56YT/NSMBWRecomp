@@ -219,18 +219,103 @@ index bb8fba4..1417314 100644
        std::make_shared<wgpu::SurfaceSourceAndroidNativeWindow>();
    desc->window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
 diff --git a/aurora-main/lib/webgpu/gpu.cpp b/aurora-main/lib/webgpu/gpu.cpp
-index 55f54ce..965211e 100644
+index 55f54ce..fe3d574 100644
 --- a/aurora-main/lib/webgpu/gpu.cpp
 +++ b/aurora-main/lib/webgpu/gpu.cpp
-@@ -1,3 +1,7 @@
+@@ -1,3 +1,8 @@
 +#ifdef __SWITCH__
 +#include <EGL/egl.h>
++#include <EGL/eglext.h>
 +#include <dawn/native/OpenGLBackend.h>
 +#endif
  #include "gpu.hpp"
  #include <aurora/env.hpp>
  
-@@ -49,6 +53,7 @@ wgpu::Device g_device;
+@@ -24,6 +29,83 @@
+ #include "../window.hpp"
+ #include "../dolphin/vi/vi_internal.hpp"
+ 
++#ifdef __SWITCH__
++namespace {
++// Mesa's GLSL shader cache (switch-mesa rebuilt with it on; see ports/mesa-switch) has no
++// directory on the Switch and goes through EGL_ANDROID_blob_cache into aurora's SQLite cache
++// instead, so a GL program compiled once (GLSL compile, link, TGSI) is reused on later launches.
++// Keys get a "mesa" prefix so they can't meet Dawn's. Android get semantics: return the size,
++// fill the buffer only when it fits; the SQLite loader fills only on an exact size, so probe first.
++std::atomic<uint32_t> g_mesaBlobHits{0}, g_mesaBlobMisses{0}, g_mesaBlobStores{0};
++void log_mesa_blob_stats() {
++  const uint32_t h = g_mesaBlobHits.load(), m = g_mesaBlobMisses.load(), s = g_mesaBlobStores.load();
++  if (((h + m + s) & 63u) == 0) {
++    std::fprintf(stderr, "[dawn-gl] mesa shader cache: hits %u, misses %u, stored %u\n", h, m, s);
++  }
++}
++struct MesaKey {
++  unsigned char bytes[4 + 64];
++  size_t size;
++};
++bool mesa_key(const void* key, EGLsizeiANDROID keySize, MesaKey& out) {
++  if (key == nullptr || keySize <= 0 || static_cast<size_t>(keySize) > sizeof(out.bytes) - 4) {
++    return false;
++  }
++  std::memcpy(out.bytes, "mesa", 4);
++  std::memcpy(out.bytes + 4, key, static_cast<size_t>(keySize));
++  out.size = 4 + static_cast<size_t>(keySize);
++  return true;
++}
++void mesa_blob_set(const void* key, EGLsizeiANDROID keySize, const void* value, EGLsizeiANDROID valueSize) {
++  MesaKey k;
++  if (!mesa_key(key, keySize, k) || value == nullptr || valueSize <= 0) {
++    return;
++  }
++  aurora::webgpu::store_to_cache(k.bytes, k.size, value, static_cast<size_t>(valueSize), nullptr);
++  g_mesaBlobStores.fetch_add(1, std::memory_order_relaxed);
++  log_mesa_blob_stats();
++}
++EGLsizeiANDROID mesa_blob_get(const void* key, EGLsizeiANDROID keySize, void* value, EGLsizeiANDROID valueSize) {
++  MesaKey k;
++  if (!mesa_key(key, keySize, k)) {
++    return 0;
++  }
++  const size_t found = aurora::webgpu::load_from_cache(k.bytes, k.size, nullptr, 0, nullptr);
++  if (found == 0 || value == nullptr || valueSize <= 0 || found > static_cast<size_t>(valueSize) ||
++      aurora::webgpu::load_from_cache(k.bytes, k.size, value, found, nullptr) != found) {
++    g_mesaBlobMisses.fetch_add(1, std::memory_order_relaxed);
++    log_mesa_blob_stats();
++    return 0;
++  }
++  g_mesaBlobHits.fetch_add(1, std::memory_order_relaxed);
++  log_mesa_blob_stats();
++  return static_cast<EGLsizeiANDROID>(found);
++}
++void install_mesa_blob_cache(EGLDisplay display) {
++  const char* exts = display != EGL_NO_DISPLAY ? eglQueryString(display, EGL_EXTENSIONS) : nullptr;
++  if (exts == nullptr || std::strstr(exts, "EGL_ANDROID_blob_cache") == nullptr) {
++    std::fprintf(stderr, "[dawn-gl] mesa shader cache: unavailable (EGL_ANDROID_blob_cache missing)\n");
++    return;
++  }
++  if (std::getenv("AURORA_NO_MESA_SHADER_CACHE") != nullptr) {
++    std::fprintf(stderr, "[dawn-gl] mesa shader cache: off (AURORA_NO_MESA_SHADER_CACHE)\n");
++    return;
++  }
++  const auto setFuncs =
++      reinterpret_cast<PFNEGLSETBLOBCACHEFUNCSANDROIDPROC>(eglGetProcAddress("eglSetBlobCacheFuncsANDROID"));
++  if (setFuncs == nullptr) {
++    std::fprintf(stderr, "[dawn-gl] mesa shader cache: eglSetBlobCacheFuncsANDROID not found\n");
++    return;
++  }
++  setFuncs(display, mesa_blob_set, mesa_blob_get);
++  // Mesa now exposes a program binary format too; Dawn's own binary cache (keyed by GLSL) would
++  // store every program a second time, so it stays off unless env.txt sets it explicitly.
++  setenv("DAWN_GL_NO_PROGRAM_BINARY", "1", 0);
++  std::fprintf(stderr, "[dawn-gl] mesa shader cache: on (stored in the graphics cache database)\n");
++}
++} // namespace
++#endif
++
+ #if defined(WEBGPU_DAWN) && !defined(__MINGW32__)
+ #include "../dawn/BackendBinding.hpp"
+ #include <dawn/native/DawnNative.h>
+@@ -49,6 +131,7 @@ wgpu::Device g_device;
  wgpu::Queue g_queue;
  wgpu::Surface g_surface;
  wgpu::BackendType g_backendType;
@@ -238,7 +323,7 @@ index 55f54ce..965211e 100644
  GraphicsConfig g_graphicsConfig;
  TextureWithSampler g_frameBuffer;
  TextureWithSampler g_frameBufferResolved;
-@@ -736,11 +741,24 @@ bool initialize(AuroraBackend auroraBackend) {
+@@ -736,11 +819,29 @@ bool initialize(AuroraBackend auroraBackend) {
      }
    }
    {
@@ -259,12 +344,17 @@ index 55f54ce..965211e 100644
 +    s_glProc.getProc = reinterpret_cast<dawn::native::opengl::EGLGetProcProc>(eglGetProcAddress);
 +    s_glProc.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 +    options.nextInChain = &s_glProc;
++    static bool s_mesaBlobCacheInstalled = false;
++    if (!s_mesaBlobCacheInstalled) {
++      s_mesaBlobCacheInstalled = true;
++      install_mesa_blob_cache(s_glProc.display);
++    }
 +#endif
 +    Log.info("Requesting a {} adapter{}", magic_enum::enum_name(backend), g_compatMode ? " (compatibility mode)" : "");
      const auto future = g_instance.RequestAdapter(
          &options, wgpu::CallbackMode::WaitAnyOnly,
          [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message) {
-@@ -778,9 +796,11 @@ bool initialize(AuroraBackend auroraBackend) {
+@@ -778,9 +879,11 @@ bool initialize(AuroraBackend auroraBackend) {
    uint32_t maxTextureDimension2D = 0;
    {
      wgpu::Limits supportedLimits{};
@@ -277,7 +367,7 @@ index 55f54ce..965211e 100644
          // Use "best" supported limits
          .maxTextureDimension1D = supportedLimits.maxTextureDimension1D == 0 ? WGPU_LIMIT_U32_UNDEFINED
                                                                              : supportedLimits.maxTextureDimension1D,
-@@ -801,6 +821,18 @@ bool initialize(AuroraBackend auroraBackend) {
+@@ -801,6 +904,18 @@ bool initialize(AuroraBackend auroraBackend) {
          .minStorageBufferOffsetAlignment =
              supportedLimits.minStorageBufferOffsetAlignment < 16 ? 16 : supportedLimits.minStorageBufferOffsetAlignment,
      };
@@ -296,7 +386,7 @@ index 55f54ce..965211e 100644
      Log.info(
          "Using limits:"
          "\n  maxTextureDimension1D: {}"
-@@ -872,6 +904,11 @@ bool initialize(AuroraBackend auroraBackend) {
+@@ -872,6 +987,11 @@ bool initialize(AuroraBackend auroraBackend) {
      if (g_backendType == wgpu::BackendType::Vulkan) {
        enableToggles.push_back("vulkan_monolithic_pipeline_cache");
      }
@@ -689,7 +779,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..415d1ce 100644
+index ec62546..5e7086b 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,7 +8,6 @@
@@ -745,12 +835,23 @@ index ec62546..415d1ce 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +231,13 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +231,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
 +    if(NINTENDO_SWITCH)
 +        # Mesa (EGL/GL via glapi, nouveau) for Dawn and SDL3's Switch video driver, then libnx.
++        # switch-mesa rebuilt with its shader cache on (NSMBWRecomp ports/mesa-switch) comes first
++        # when present; otherwise devkitPro's stock Mesa.
++        set(NSMBW_SWITCH_MESA_LIB_DIR "${CMAKE_SOURCE_DIR}/../../mesa-switch/install/lib" CACHE PATH
++            "Directory with a rebuilt switch-mesa libEGL.a/libglapi.a (empty = devkitPro's)")
++        # The devkitPro toolchain puts portlibs/switch/lib at the front of CMAKE_EXE_LINKER_FLAGS,
++        # and SDL adds its own -lEGL, so the rebuilt Mesa's directory has to go in front of that
++        # for every -lEGL/-lglapi to resolve to it (a mix of the two Mesas would be broken).
++        if(NSMBW_SWITCH_MESA_LIB_DIR AND EXISTS "${NSMBW_SWITCH_MESA_LIB_DIR}/libEGL.a")
++            message(STATUS "Switch Mesa: ${NSMBW_SWITCH_MESA_LIB_DIR}")
++            string(PREPEND CMAKE_EXE_LINKER_FLAGS "-L${NSMBW_SWITCH_MESA_LIB_DIR} ")
++        endif()
 +        target_link_libraries(NSMBWCompiled PRIVATE
 +            -L$ENV{DEVKITPRO}/portlibs/switch/lib EGL glapi drm_nouveau png z stdc++ nx m)
 +        nx_generate_nacp(nsmbw2.nacp NAME "NSMBW Recomp 2" AUTHOR "NSMBWRecomp" VERSION "0.2.0")

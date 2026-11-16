@@ -25,10 +25,16 @@ def main():
     lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
 
     print("== startup")
+    last_mesa = None
     for line in lines:
+        if line.startswith("[dawn-gl] mesa shader cache: hits"):
+            last_mesa = line  # running totals; only the last one matters
+            continue
         if (line.startswith("[switch]") or line.startswith("[audio] SDL audio driver")
                 or line.startswith("[dawn-gl]")):
             print("  " + line[:160])
+    if last_mesa:
+        print("  " + last_mesa[:160] + "  (last)")
 
     windows = []
     cur = None
