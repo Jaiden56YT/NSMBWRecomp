@@ -944,22 +944,29 @@ index d1fff5e..d29c1db 100644
 +
 +endif()  # NOT MKW_NSMBW_ONLY
 diff --git a/runtime/include/abi_bridge.h b/runtime/include/abi_bridge.h
-index a654b92..f12f6f5 100644
+index a654b92..b1a9ee4 100644
 --- a/runtime/include/abi_bridge.h
 +++ b/runtime/include/abi_bridge.h
-@@ -41,7 +41,12 @@ inline std::array<uint32_t, kCapacity> g_addrs{};
+@@ -41,8 +41,18 @@ inline std::array<uint32_t, kCapacity> g_addrs{};
  // literal InvokeDirectCpu<addr> call site (which doesn't exist for computed/indirect targets).
  inline std::array<uint32_t, kCapacity> g_lrs{};
  inline std::atomic<uint32_t> g_next{0};
 +inline std::atomic<int> g_traceBudget{0};  // >0: also print that many calls (debugging)
  inline void Push(uint32_t addr, uint32_t lr) {
+-    const uint32_t slot = g_next.fetch_add(1, std::memory_order_relaxed) % static_cast<uint32_t>(kCapacity);
 +    if (g_traceBudget.load(std::memory_order_relaxed) > 0) {
 +        g_traceBudget.fetch_sub(1, std::memory_order_relaxed);
 +        std::fprintf(stderr, "[trace] call %08X from %08X\n", addr, lr);
 +    }
-     const uint32_t slot = g_next.fetch_add(1, std::memory_order_relaxed) % static_cast<uint32_t>(kCapacity);
++    // Plain load + store, not fetch_add: this runs on every fast-path guest call, and on the
++    // Switch's Cortex-A57 (no LSE atomics) an atomic add is an out-of-line exclusive-load/store
++    // loop. Only the game thread pushes in practice; a lost slot under a race is harmless here.
++    const uint32_t next = g_next.load(std::memory_order_relaxed);
++    g_next.store(next + 1u, std::memory_order_relaxed);
++    const uint32_t slot = next % static_cast<uint32_t>(kCapacity);
      g_addrs[slot] = addr;
      g_lrs[slot] = lr;
+ }
 diff --git a/runtime/include/guest_flat_memory.h b/runtime/include/guest_flat_memory.h
 index e33573a..72a073d 100644
 --- a/runtime/include/guest_flat_memory.h
@@ -5786,7 +5793,7 @@ index a58f46f..c5fd063 100644
  PPC_NATIVE_OVERRIDE_VOID(8016f0f0, GX__Begin_8016f0f0, (uint32_t t, uint32_t vf, uint32_t nv), (t, vf, nv));
  
 diff --git a/aurora-main/lib/gx/command_processor.cpp b/aurora-main/lib/gx/command_processor.cpp
-index 1b8d4b2..122b21d 100644
+index 1b8d4b2..7505301 100644
 --- a/aurora-main/lib/gx/command_processor.cpp
 +++ b/aurora-main/lib/gx/command_processor.cpp
 @@ -1,3 +1,4 @@
@@ -5822,16 +5829,33 @@ index 1b8d4b2..122b21d 100644
  
    switch (addr) {
    // VCD low (0x50)
-@@ -2347,6 +2355,12 @@ static int s_nsmbwArmedDraws = 0;
+@@ -2346,7 +2354,28 @@ static const CachedPipelineState& resolve_pipeline_state(GXPrimitive prim, GXVtx
+ static int s_nsmbwArmedDraws = 0;
  static int s_nsmbwArmedTotal = 0;
  
- static void nsmbw_log_draw_texgen(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, u16 vtxCount, u32 vtxSize) {
-+// Called for every draw: leave before the statics below when neither trigger can fire (run 28
-+// profile: ~1% of the Switch game thread in this function with logging off).
-+if (s_nsmbwArmedDraws <= 0) {
-+  static const bool tgEnvSet = AURORA_ENV("NSMBW_LOG_DRAW_TEXGEN") != nullptr;
-+  if (!tgEnvSet) return;
+-static void nsmbw_log_draw_texgen(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, u16 vtxCount, u32 vtxSize) {
++// NSMBW_LOG_DRAW_TEXGEN, read on first use (env.txt is applied after static init on the Switch):
++// -1 unknown, 0 unset, 1 set.
++static int8_t s_nsmbwTexgenEnv = -1;
++
++[[gnu::noinline]] static void nsmbw_log_draw_texgen_impl(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices,
++                                                         u16 vtxCount, u32 vtxSize);
++
++// Called for every draw: the check stays inline at the call site so the common case (logging off)
++// does not pay the large body's prologue (run 41 profile: ~0.3% of the Switch game thread).
++static inline void nsmbw_log_draw_texgen(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, u16 vtxCount,
++                                         u32 vtxSize) {
++  if (s_nsmbwArmedDraws <= 0) [[likely]] {
++    if (s_nsmbwTexgenEnv < 0) [[unlikely]] {
++      s_nsmbwTexgenEnv = AURORA_ENV("NSMBW_LOG_DRAW_TEXGEN") != nullptr ? 1 : 0;
++    }
++    if (s_nsmbwTexgenEnv == 0) return;
++  }
++  nsmbw_log_draw_texgen_impl(prim, fmt, vertices, vtxCount, vtxSize);
 +}
++
++[[gnu::noinline]] static void nsmbw_log_draw_texgen_impl(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices,
++                                                         u16 vtxCount, u32 vtxSize) {
  // draw their I8 gradient strips stretched across whole panes even though NSMBW_DUMP_TEXTURES
  // shows the textures decode correctly, so this prints, per draw in that scene, the texgen
  // config each active TEV stage samples through (type/src/mtx/postMtx), the texture matrix
