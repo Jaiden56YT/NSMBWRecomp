@@ -1822,7 +1822,7 @@ index 8b27db1..913b6a3 100644
  GX_FATAL_STUB(80173958, "GX__SetGPMetric_caseD_13_80173958") PPC_NATIVE_OVERRIDE_VOID(80173958, gx_stub_80173958, (CpuContext* ctx), (ctx));
  GX_FATAL_STUB(80173974, "GX__SetGPMetric_caseD_14_80173974") PPC_NATIVE_OVERRIDE_VOID(80173974, gx_stub_80173974, (CpuContext* ctx), (ctx));
 diff --git a/runtime/src/hle/gx/gx_fifo.cpp b/runtime/src/hle/gx/gx_fifo.cpp
-index 1c518b9..dd9f167 100644
+index 1c518b9..11283a9 100644
 --- a/runtime/src/hle/gx/gx_fifo.cpp
 +++ b/runtime/src/hle/gx/gx_fifo.cpp
 @@ -89,9 +89,15 @@ void FifoDesyncHistPush(u32 value, uint32_t count) {
@@ -1868,7 +1868,31 @@ index 1c518b9..dd9f167 100644
  static bool TryGetRawDirectFifoVertexSize(GXVtxFmt fmt, uint32_t& vertexSize) {
      vertexSize = 0;
      if (fmt >= GX_MAX_VTXFMT) {
-@@ -1117,6 +1131,13 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+@@ -928,6 +942,23 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+         return;
+     }
+ 
++    // Fast path for the words of a raw draw packet whose header is already buffered: the command
++    // loop below would only find that same header at the front, see the packet still incomplete
++    // and stop, so append and return (particles and water draw thousands of these words a frame).
++    // The word that completes the packet takes the full path.
++    if (g_rawDrawWaitBytes != 0 && (sizeBytes == 4 || sizeBytes == 0) && !g_hleGxState.inBegin) {
++        const size_t count = g_hleGxState.fifoByteCount;
++        const size_t writeOffset = g_hleGxState.fifoReadOffset + count;
++        const uint8_t* front = g_hleGxState.fifoBytes.data() + g_hleGxState.fifoReadOffset;
++        if (count + 4u < g_rawDrawWaitBytes && writeOffset + 4u <= g_hleGxState.fifoBytes.size() &&
++            count >= 3u && front[0] == g_rawDrawWaitHeader[0] && front[1] == g_rawDrawWaitHeader[1] &&
++            front[2] == g_rawDrawWaitHeader[2] && !FifoDesyncEnabled()) {
++            BigEndian::Write32(g_hleGxState.fifoBytes.data() + writeOffset, val);
++            g_hleGxState.fifoByteCount = count + 4u;
++            return;
++        }
++    }
++
+     auto resetFifoBuffer = [&]() {
+         g_hleGxState.fifoReadOffset = 0;
+         g_hleGxState.fifoByteCount = 0;
+@@ -1117,6 +1148,13 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
  
          if (IsDrawOpcode(opcode)) {
              if (g_hleGxState.fifoByteCount < 3) break;
@@ -1882,7 +1906,7 @@ index 1c518b9..dd9f167 100644
              const uint16_t vtxCount = ReadBE16(data + 1);
              const GXVtxFmt vtxFmt = static_cast<GXVtxFmt>(cmd & GX_VAT_MASK_CMD);
              const GXPrimitive prim = OpcodeToGXPrimitive(cmd);
-@@ -1124,6 +1145,8 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+@@ -1124,6 +1162,8 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
              if (TryGetRawDirectFifoVertexSize(vtxFmt, rawVertexSize)) {
                  const uint32_t packetBytes = 3u + static_cast<uint32_t>(vtxCount) * rawVertexSize;
                  if (g_hleGxState.fifoByteCount < packetBytes) {
