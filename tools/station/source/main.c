@@ -299,6 +299,11 @@ int main(int argc, char* argv[]) {
     // anything else goes straight to the real menu.
     const AppletType type = appletGetAppletType();
     if (!file_exists(ACTIVE_FLAG) || (type != AppletType_Application && type != AppletType_SystemApplication)) {
+        FILE* why = fopen(LOG_PATH, "a");
+        if (why) {
+            fprintf(why, "menu instead of station: active=%d applet_type=%d\n", file_exists(ACTIVE_FLAG) ? 1 : 0, (int)type);
+            fclose(why);
+        }
         if (file_exists(REAL_MENU)) chain(REAL_MENU);
         return 0;
     }

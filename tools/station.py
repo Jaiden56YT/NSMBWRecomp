@@ -60,7 +60,16 @@ def ping(host, timeout=5):
 def put(host, data, remote):
     with connect(host) as s:
         s.sendall(f"PUT {remote} {len(data)}\n".encode())
-        s.sendall(data)
+        # Python's sendall timeout covers the whole call; send in pieces so only a real stall fails.
+        view = memoryview(data)
+        step = 1 << 20
+        started = time.time()
+        for off in range(0, len(data), step):
+            s.sendall(view[off:off + step])
+            if len(data) > 16 * step and (off // step) % 16 == 15:
+                done = off + step
+                rate = done / max(time.time() - started, 1e-3) / 1e6
+                print(f"  {done >> 20}/{len(data) >> 20} MB, {rate:.1f} MB/s", flush=True)
         reply = read_line(s)
     if not reply.startswith("OK"):
         raise RuntimeError(f"PUT {remote}: {reply}")
