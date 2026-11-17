@@ -3116,7 +3116,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..8364ae1 100644
+index a63636b..d4c2cb5 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -39,6 +39,7 @@
@@ -3288,7 +3288,7 @@ index a63636b..8364ae1 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +794,213 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +794,249 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -3296,6 +3296,40 @@ index a63636b..8364ae1 100644
 +#include <switch.h>
 +#include <pthread.h>
 +static int NsmbwMain();
++// Remote test station (tools/station): with NSMBW_STATION_RUN_SECONDS=<n> in env.txt the game plays
++// unattended for n seconds and then relaunches the application. Atmosphere's override config sends
++// that relaunch to hbl, whose sdmc:/hbmenu.nro is the station, which waits for the next build. A
++// relaunch ends every thread, which returning to hbl from here could not. Errors that reach
++// std::terminate or abort() restart the same way so an overnight run keeps going.
++static void SwitchCpuClockRestore();
++static bool g_switchStationMode = false;
++[[noreturn]] static void SwitchStationRestart(const char* why) {
++    std::fprintf(stderr, "[station] %s: relaunching to the station\n", why);
++    std::fflush(nullptr);
++    SwitchCpuClockRestore();
++    const Result rc = appletRestartProgram(nullptr, 0);
++    std::fprintf(stderr, "[station] appletRestartProgram failed: 0x%x\n", rc);
++    std::fflush(nullptr);
++    std::_Exit(1);
++}
++static void SwitchStationStart() {
++    const char* value = std::getenv("NSMBW_STATION_RUN_SECONDS");
++    const long seconds = value ? std::strtol(value, nullptr, 10) : 0;
++    if (seconds <= 0) return;
++    g_switchStationMode = true;
++    appletSetAutoSleepDisabled(true);  // unattended: no auto-sleep, no screen dimming
++    appletSetMediaPlaybackState(true);
++    std::signal(SIGABRT, +[](int) { SwitchStationRestart("abort"); });
++    std::fprintf(stderr, "[station] unattended run: %ld s\n", seconds);
++    std::thread([seconds] {
++        std::this_thread::sleep_for(std::chrono::seconds(seconds));
++        // The GPU cache journal is appended every 2 s; give the last batch time to land.
++        std::fprintf(stderr, "[station] run time up\n");
++        std::fflush(nullptr);
++        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
++        SwitchStationRestart("run time up");
++    }).detach();
++}
 +extern "C" {
 +struct sqlite3_vfs;
 +sqlite3_vfs* sqlite3_vfs_find(const char* name);
@@ -3431,7 +3465,7 @@ index a63636b..8364ae1 100644
 +}
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
-+int main() {
+ int main() {
 +    SwitchThreadCacheEnable();
 +    chdir("/switch/nsmbw2");
 +    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
@@ -3463,6 +3497,7 @@ index a63636b..8364ae1 100644
 +    if (sqlite3_vfs* noLock = sqlite3_vfs_find("unix-none")) sqlite3_vfs_register(noLock, 1);  // Dawn creates the window's EGL surface itself
 +    SwitchSqliteSelfTest();
 +    SwitchCpuClockBoost();
++    SwitchStationStart();
 +    std::set_terminate([] {
 +        const char* what = "(no exception)";
 +        if (auto e = std::current_exception()) {
@@ -3472,6 +3507,7 @@ index a63636b..8364ae1 100644
 +        }
 +        std::fprintf(stderr, "[switch] std::terminate: %s\n", what);
 +        std::fflush(nullptr);
++        if (g_switchStationMode) SwitchStationRestart("std::terminate");
 +        SwitchCpuClockRestore();
 +        std::abort();
 +    });
@@ -3497,12 +3533,12 @@ index a63636b..8364ae1 100644
 +}
 +static int NsmbwMain() {
 +#else
- int main() {
++int main() {
 +#endif
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1080,7 @@ int main() {
+@@ -863,7 +1116,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -3511,7 +3547,7 @@ index a63636b..8364ae1 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1190,21 @@ int main() {
+@@ -973,7 +1226,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -3533,7 +3569,7 @@ index a63636b..8364ae1 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1299,11 @@ int main() {
+@@ -1068,11 +1335,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
