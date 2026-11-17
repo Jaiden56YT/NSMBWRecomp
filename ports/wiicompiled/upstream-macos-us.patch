@@ -1822,7 +1822,7 @@ index 8b27db1..913b6a3 100644
  GX_FATAL_STUB(80173958, "GX__SetGPMetric_caseD_13_80173958") PPC_NATIVE_OVERRIDE_VOID(80173958, gx_stub_80173958, (CpuContext* ctx), (ctx));
  GX_FATAL_STUB(80173974, "GX__SetGPMetric_caseD_14_80173974") PPC_NATIVE_OVERRIDE_VOID(80173974, gx_stub_80173974, (CpuContext* ctx), (ctx));
 diff --git a/runtime/src/hle/gx/gx_fifo.cpp b/runtime/src/hle/gx/gx_fifo.cpp
-index 1c518b9..af78f38 100644
+index 1c518b9..bb51767 100644
 --- a/runtime/src/hle/gx/gx_fifo.cpp
 +++ b/runtime/src/hle/gx/gx_fifo.cpp
 @@ -108,7 +108,7 @@ void FifoDesyncRecordDraw(uint8_t cmd, uint16_t count, uint32_t rawVertexSize, b
@@ -1834,6 +1834,44 @@ index 1c518b9..af78f38 100644
      uint32_t gd = 0;
      if (Memory::TryRead32(kGxDataPtrAddr, gd) && gd != 0) {
          Memory::TryRead32(gd + 0x14u, rec.guestVcdLo);
+@@ -216,6 +216,14 @@ static uint32_t GetDirectAttrByteSizeForFifo(GXAttr attr, const VtxAttrFmt& fmt)
+     return DirectAttrByteSize(attr, fmt, /*matrixAttrIsOneByte=*/true, /*fallbackComps=*/1u);
+ }
+ 
++// A raw draw packet arrives 4 bytes per HleFifoWrite; until all of it is buffered the command loop
++// used to re-read its header and re-run TryGetRawDirectFifoVertexSize (26 attributes) on every
++// write, ~7% of the Switch game thread in busy levels (run 27). Remember the size the packet at the
++// read head needs, keyed by its 3 header bytes, and stop early until that many bytes are buffered.
++static uint32_t g_rawDrawWaitBytes = 0;
++static uint8_t g_rawDrawWaitHeader[3] = {};
++void HleFifoForgetPendingRawDraw() { g_rawDrawWaitBytes = 0; }
++
+ static bool TryGetRawDirectFifoVertexSize(GXVtxFmt fmt, uint32_t& vertexSize) {
+     vertexSize = 0;
+     if (fmt >= GX_MAX_VTXFMT) {
+@@ -1117,6 +1125,13 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+ 
+         if (IsDrawOpcode(opcode)) {
+             if (g_hleGxState.fifoByteCount < 3) break;
++            if (g_rawDrawWaitBytes != 0) {
++                if (std::memcmp(data, g_rawDrawWaitHeader, 3) == 0 &&
++                    g_hleGxState.fifoByteCount < g_rawDrawWaitBytes) {
++                    break;
++                }
++                g_rawDrawWaitBytes = 0;
++            }
+             const uint16_t vtxCount = ReadBE16(data + 1);
+             const GXVtxFmt vtxFmt = static_cast<GXVtxFmt>(cmd & GX_VAT_MASK_CMD);
+             const GXPrimitive prim = OpcodeToGXPrimitive(cmd);
+@@ -1124,6 +1139,8 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+             if (TryGetRawDirectFifoVertexSize(vtxFmt, rawVertexSize)) {
+                 const uint32_t packetBytes = 3u + static_cast<uint32_t>(vtxCount) * rawVertexSize;
+                 if (g_hleGxState.fifoByteCount < packetBytes) {
++                    g_rawDrawWaitBytes = packetBytes;
++                    std::memcpy(g_rawDrawWaitHeader, data, 3);
+                     break;
+                 }
+                 if (FifoDesyncEnabled()) FifoDesyncRecordDraw(cmd, vtxCount, rawVertexSize, true);
 diff --git a/runtime/src/hle/gx/gx_init.cpp b/runtime/src/hle/gx/gx_init.cpp
 index d3edcab..e37e293 100644
 --- a/runtime/src/hle/gx/gx_init.cpp
@@ -1938,7 +1976,7 @@ index d3edcab..e37e293 100644
                  Memory::Write32(gd + 0x08u, savedWord8);
                  OS__RestoreInterrupts_801a65d4(interruptLevel);
 diff --git a/runtime/src/hle/gx/gx_internal.h b/runtime/src/hle/gx/gx_internal.h
-index 89c5465..f970c48 100644
+index 89c5465..54ea25f 100644
 --- a/runtime/src/hle/gx/gx_internal.h
 +++ b/runtime/src/hle/gx/gx_internal.h
 @@ -60,13 +60,13 @@ bool is_offscreen() noexcept;
@@ -1972,6 +2010,14 @@ index 89c5465..f970c48 100644
  #endif
  
  // --- External Declarations ---
+@@ -417,6 +417,7 @@ void MarkTlutObjsDirtyForRange(uint32_t addr, uint32_t size);
+ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+ 
+ void HleFifoWrite(u32 val, uint32_t sizeBytes);
++void HleFifoForgetPendingRawDraw();
+ void SubmitAttribute(GXAttr attr, float* comps, const VtxAttrFmt& fmt, const u32* rawComps = nullptr);
+ void SubmitIndexedAttribute(GXAttr attr, uint32_t index);
+ 
 diff --git a/runtime/src/hle/gx/gx_stream_common.h b/runtime/src/hle/gx/gx_stream_common.h
 index 006ab47..0547f7f 100644
 --- a/runtime/src/hle/gx/gx_stream_common.h
@@ -5460,3 +5506,15 @@ index 89fcb4b..130d6df 100644
  }
  
  // A render-scale change leaves the atlas holding `key` at the old scale. queue_paste rejects every new
+diff --git a/runtime/src/hle/gx/gx_vertex.cpp b/runtime/src/hle/gx/gx_vertex.cpp
+index a58f46f..c5fd063 100644
+--- a/runtime/src/hle/gx/gx_vertex.cpp
++++ b/runtime/src/hle/gx/gx_vertex.cpp
+@@ -297,6 +297,7 @@ extern "C" void GX__Begin_8016f0f0(uint32_t t, uint32_t vf, uint32_t nv) {
+     g_hleGxState.vertsRemaining=nv; g_hleGxState.inBegin=true; g_hleGxState.auroraBeginCalled=false;
+     g_hleGxState.fifoReadOffset = 0;
+     g_hleGxState.fifoByteCount=0; g_hleGxState.ResetVertex();
++    HleFifoForgetPendingRawDraw();
+ }
+ PPC_NATIVE_OVERRIDE_VOID(8016f0f0, GX__Begin_8016f0f0, (uint32_t t, uint32_t vf, uint32_t nv), (t, vf, nv));
+ 
