@@ -1822,10 +1822,29 @@ index 8b27db1..913b6a3 100644
  GX_FATAL_STUB(80173958, "GX__SetGPMetric_caseD_13_80173958") PPC_NATIVE_OVERRIDE_VOID(80173958, gx_stub_80173958, (CpuContext* ctx), (ctx));
  GX_FATAL_STUB(80173974, "GX__SetGPMetric_caseD_14_80173974") PPC_NATIVE_OVERRIDE_VOID(80173974, gx_stub_80173974, (CpuContext* ctx), (ctx));
 diff --git a/runtime/src/hle/gx/gx_fifo.cpp b/runtime/src/hle/gx/gx_fifo.cpp
-index 1c518b9..bb51767 100644
+index 1c518b9..dd9f167 100644
 --- a/runtime/src/hle/gx/gx_fifo.cpp
 +++ b/runtime/src/hle/gx/gx_fifo.cpp
-@@ -108,7 +108,7 @@ void FifoDesyncRecordDraw(uint8_t cmd, uint16_t count, uint32_t rawVertexSize, b
+@@ -89,9 +89,15 @@ void FifoDesyncHistPush(u32 value, uint32_t count) {
+     }
+ }
+ 
+-bool FifoDesyncEnabled() {
+-    static const bool enabled = AURORA_ENV("NSMBW_LOG_FIFO_DESYNC") != nullptr;
+-    return enabled;
++// Read on every FIFO write (run 28 profile: ~1% of the Switch game thread as an out-of-line call).
++// Resolved lazily, not at static init, because env.txt overrides are applied in main().
++static int8_t s_fifoDesyncState = -1;
++__attribute__((noinline)) static bool FifoDesyncResolve() {
++    s_fifoDesyncState = AURORA_ENV("NSMBW_LOG_FIFO_DESYNC") != nullptr ? 1 : 0;
++    return s_fifoDesyncState != 0;
++}
++inline bool FifoDesyncEnabled() {
++    return __builtin_expect(s_fifoDesyncState < 0, 0) ? FifoDesyncResolve() : s_fifoDesyncState != 0;
+ }
+ 
+ void FifoDesyncRecordDraw(uint8_t cmd, uint16_t count, uint32_t rawVertexSize, bool rawPath) {
+@@ -108,7 +114,7 @@ void FifoDesyncRecordDraw(uint8_t cmd, uint16_t count, uint32_t rawVertexSize, b
          rec.pc = static_cast<uint32_t>(cc->pc);
      }
      const uint32_t fmt = cmd & GX_VAT_MASK_CMD;
@@ -1834,7 +1853,7 @@ index 1c518b9..bb51767 100644
      uint32_t gd = 0;
      if (Memory::TryRead32(kGxDataPtrAddr, gd) && gd != 0) {
          Memory::TryRead32(gd + 0x14u, rec.guestVcdLo);
-@@ -216,6 +216,14 @@ static uint32_t GetDirectAttrByteSizeForFifo(GXAttr attr, const VtxAttrFmt& fmt)
+@@ -216,6 +222,14 @@ static uint32_t GetDirectAttrByteSizeForFifo(GXAttr attr, const VtxAttrFmt& fmt)
      return DirectAttrByteSize(attr, fmt, /*matrixAttrIsOneByte=*/true, /*fallbackComps=*/1u);
  }
  
@@ -1849,7 +1868,7 @@ index 1c518b9..bb51767 100644
  static bool TryGetRawDirectFifoVertexSize(GXVtxFmt fmt, uint32_t& vertexSize) {
      vertexSize = 0;
      if (fmt >= GX_MAX_VTXFMT) {
-@@ -1117,6 +1125,13 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+@@ -1117,6 +1131,13 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
  
          if (IsDrawOpcode(opcode)) {
              if (g_hleGxState.fifoByteCount < 3) break;
@@ -1863,7 +1882,7 @@ index 1c518b9..bb51767 100644
              const uint16_t vtxCount = ReadBE16(data + 1);
              const GXVtxFmt vtxFmt = static_cast<GXVtxFmt>(cmd & GX_VAT_MASK_CMD);
              const GXPrimitive prim = OpcodeToGXPrimitive(cmd);
-@@ -1124,6 +1139,8 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
+@@ -1124,6 +1145,8 @@ void HleFifoWrite(u32 val, uint32_t sizeBytes) {
              if (TryGetRawDirectFifoVertexSize(vtxFmt, rawVertexSize)) {
                  const uint32_t packetBytes = 3u + static_cast<uint32_t>(vtxCount) * rawVertexSize;
                  if (g_hleGxState.fifoByteCount < packetBytes) {
@@ -5457,7 +5476,7 @@ index 0000000..cacdc76
 +    void operator delete(void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }      \
 +    void operator delete[](void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }
 diff --git a/aurora-main/lib/gx/scaled_tile_cache.cpp b/aurora-main/lib/gx/scaled_tile_cache.cpp
-index 89fcb4b..130d6df 100644
+index 89fcb4b..a61a063 100644
 --- a/aurora-main/lib/gx/scaled_tile_cache.cpp
 +++ b/aurora-main/lib/gx/scaled_tile_cache.cpp
 @@ -15,6 +15,10 @@
@@ -5483,26 +5502,29 @@ index 89fcb4b..130d6df 100644
    if (info) {
      const u32 blocksPerRow = (atlas.width + info->width - 1) / info->width;
      for (auto it = s_slots.lower_bound(base); it != s_slots.end() && it->first < base + atlas.bytes; ++it) {
-@@ -178,17 +185,15 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
+@@ -178,17 +185,18 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
      }
      std::sort(skip.begin(), skip.end());
    }
 -  XXH64_state_t* state = XXH64_createState();
 -  XXH64_reset(state, 0);
-+  XXH64_state_t state;
-+  XXH64_reset(&state, 0);
++  // XXH3 rather than XXH64: several times faster on the Switch's NEON cores (run 28 profile: ~3% of
++  // the game thread hashing tileset atlases). The value is only compared with an earlier result of
++  // this same function, so the algorithm is free to change.
++  XXH3_state_t state;
++  XXH3_64bits_reset(&state);
    u32 cursor = 0;
    for (const auto& [start, end] : skip) {
 -    if (start > cursor) XXH64_update(state, data + cursor, start - cursor);
-+    if (start > cursor) XXH64_update(&state, data + cursor, start - cursor);
++    if (start > cursor) XXH3_64bits_update(&state, data + cursor, start - cursor);
      cursor = std::max(cursor, end);
    }
 -  if (cursor < atlas.bytes) XXH64_update(state, data + cursor, atlas.bytes - cursor);
 -  const u64 hash = XXH64_digest(state);
 -  XXH64_freeState(state);
 -  return hash;
-+  if (cursor < atlas.bytes) XXH64_update(&state, data + cursor, atlas.bytes - cursor);
-+  return XXH64_digest(&state);
++  if (cursor < atlas.bytes) XXH3_64bits_update(&state, data + cursor, atlas.bytes - cursor);
++  return XXH3_64bits_digest(&state);
  }
  
  // A render-scale change leaves the atlas holding `key` at the old scale. queue_paste rejects every new
@@ -5518,3 +5540,20 @@ index a58f46f..c5fd063 100644
  }
  PPC_NATIVE_OVERRIDE_VOID(8016f0f0, GX__Begin_8016f0f0, (uint32_t t, uint32_t vf, uint32_t nv), (t, vf, nv));
  
+diff --git a/aurora-main/lib/gx/command_processor.cpp b/aurora-main/lib/gx/command_processor.cpp
+index 1b8d4b2..43378b4 100644
+--- a/aurora-main/lib/gx/command_processor.cpp
++++ b/aurora-main/lib/gx/command_processor.cpp
+@@ -2347,6 +2347,12 @@ static int s_nsmbwArmedDraws = 0;
+ static int s_nsmbwArmedTotal = 0;
+ 
+ static void nsmbw_log_draw_texgen(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, u16 vtxCount, u32 vtxSize) {
++// Called for every draw: leave before the statics below when neither trigger can fire (run 28
++// profile: ~1% of the Switch game thread in this function with logging off).
++if (s_nsmbwArmedDraws <= 0) {
++  static const bool tgEnvSet = AURORA_ENV("NSMBW_LOG_DRAW_TEXGEN") != nullptr;
++  if (!tgEnvSet) return;
++}
+ // draw their I8 gradient strips stretched across whole panes even though NSMBW_DUMP_TEXTURES
+ // shows the textures decode correctly, so this prints, per draw in that scene, the texgen
+ // config each active TEV stage samples through (type/src/mtx/postMtx), the texture matrix
