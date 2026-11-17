@@ -50,6 +50,7 @@
 // keeps returning null forever for the same m_nextScene value, that reopens the exact
 // already-documented fProfListMg_c::m_data_p / REL-restoration bug class - just for a profile
 // RestoreRelImages() apparently doesn't (yet) cover, rather than a new bug.
+#include "gx_guest_write.h"
 #include "hle_stubs.h"
 #include "ppc_runtime.h"
 #include "abi_bridge.h"
@@ -232,6 +233,9 @@ extern "C" uint32_t CreateNextScene_Diag_800E1ED0()
     sameFailureStreak = 0;
     g_nsmbwCurrentSceneProfile = nextScene;
     g_nsmbwCurrentScenePtr = newScene;
+    // A new scene unpacks its resources (tilesets, models) over the old scene's memory without
+    // DC range ops; re-check every cached texture digest (gx_guest_write.h).
+    GxGuestWrite::InvalidateAll();
 
     const uint16_t oldNowScene = Memory::Read16(kNowSceneAddr);
     Memory::Write16(kOldSceneAddr, oldNowScene);

@@ -2038,10 +2038,31 @@ index 89c5465..54ea25f 100644
  void SubmitIndexedAttribute(GXAttr attr, uint32_t index);
  
 diff --git a/runtime/src/hle/gx/gx_stream_common.h b/runtime/src/hle/gx/gx_stream_common.h
-index 006ab47..0547f7f 100644
+index 006ab47..5f6bc2e 100644
 --- a/runtime/src/hle/gx/gx_stream_common.h
 +++ b/runtime/src/hle/gx/gx_stream_common.h
-@@ -333,7 +333,7 @@ inline bool ApplyIndexedXfArrayForPacket(uint8_t cmd, uint32_t value) {
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <cstring>
+ #include "isa/big_endian.h"
+ #include "gx_internal.h"
+ 
+@@ -8,6 +9,13 @@
+ // Header-inline throughout: the shipped clang/llvm-mingw build has no LTO across runtime shards,
+ // so a non-inline hot helper becomes a real call on the per-vertex path.
+ 
++// aurora (dolphin/gx/GXGeometry.cpp, gx/fifo.hpp): vertex-state change counter and whether aurora
++// is recording a display list (its setters then always re-emit).
++extern "C" uint32_t aurora_gx_vtx_state_serial();
++namespace aurora::gx::fifo {
++bool in_display_list();
++}
++
+ namespace GxCmd {
+ 
+ constexpr uint8_t GX_NOP_CMD         = 0x00;
+@@ -333,7 +341,7 @@ inline bool ApplyIndexedXfArrayForPacket(uint8_t cmd, uint32_t value) {
          return false;
      }
  
@@ -2050,6 +2071,62 @@ index 006ab47..0547f7f 100644
      return true;
  }
  
+@@ -361,7 +369,45 @@ struct AuroraVtxPublishOptions {
+     int fmtLoopLast;
+ };
+ 
++// What one publish handed aurora, so an identical republish (every raw-FIFO and immediate-mode
++// draw republishes, and particle-heavy scenes draw thousands of times a frame) can be skipped
++// while aurora's own vertex state has not moved since (aurora_gx_vtx_state_serial).
++struct AuroraVtxPublishKey {
++    uint8_t desc[26];
++    uint8_t fmtRows[26][3];
++    uint8_t fmt;
++    uint8_t includeNbt;
++    uint8_t fmtLoopFirst;
++    uint8_t fmtLoopLast;
++};
++
+ inline void PublishAuroraVtxState(GXVtxFmt fmt, const AuroraVtxPublishOptions& options) {
++    static AuroraVtxPublishKey s_last{};
++    static uint32_t s_lastSerial = 0;
++    static bool s_lastValid = false;
++    AuroraVtxPublishKey key{};
++    for (int attr = 0; attr < 26; ++attr) {
++        GXAttrType type = g_hleGxState.vtxDesc[attr];
++        if (type == GX_INDEX8 || type == GX_INDEX16) {
++            type = GX_DIRECT;
++        }
++        key.desc[attr] = static_cast<uint8_t>(type);
++    }
++    for (int attr = options.fmtLoopFirst; attr <= options.fmtLoopLast; ++attr) {
++        const auto& f = g_hleGxState.vtxAttrFmt[fmt][attr];
++        key.fmtRows[attr][0] = static_cast<uint8_t>(f.cnt);
++        key.fmtRows[attr][1] = static_cast<uint8_t>(f.type);
++        key.fmtRows[attr][2] = static_cast<uint8_t>(f.frac);
++    }
++    key.fmt = static_cast<uint8_t>(fmt);
++    key.includeNbt = options.includeNbt ? 1 : 0;
++    key.fmtLoopFirst = static_cast<uint8_t>(options.fmtLoopFirst);
++    key.fmtLoopLast = static_cast<uint8_t>(options.fmtLoopLast);
++    if (s_lastValid && s_lastSerial == aurora_gx_vtx_state_serial() &&
++        std::memcmp(&s_last, &key, sizeof(key)) == 0 && !aurora::gx::fifo::in_display_list()) {
++        return;
++    }
++
+     for (int attr = 0; attr < 26; ++attr) {
+         if (!options.includeNbt && attr == GX_VA_NBT) {
+             continue;
+@@ -385,6 +431,9 @@ inline void PublishAuroraVtxState(GXVtxFmt fmt, const AuroraVtxPublishOptions& o
+         const auto& f = g_hleGxState.vtxAttrFmt[fmt][attr];
+         GXSetVtxAttrFmt(fmt, gxAttr, f.cnt, f.type, f.frac);
+     }
++    s_last = key;
++    s_lastSerial = aurora_gx_vtx_state_serial();
++    s_lastValid = true;
+ }
+ 
+ } // namespace GxStream
 diff --git a/runtime/src/hle/gx/gx_tev.cpp b/runtime/src/hle/gx/gx_tev.cpp
 index d09fe64..74558a1 100644
 --- a/runtime/src/hle/gx/gx_tev.cpp
@@ -2588,10 +2665,15 @@ index dc4810d..f73edb7 100644
              }
          }
 diff --git a/runtime/src/hle/vi.cpp b/runtime/src/hle/vi.cpp
-index 6eca8f7..65628a5 100644
+index 6eca8f7..98431de 100644
 --- a/runtime/src/hle/vi.cpp
 +++ b/runtime/src/hle/vi.cpp
-@@ -136,12 +136,12 @@ ViState g_vi;
+@@ -1,3 +1,4 @@
++#include "gx_guest_write.h"
+ #include "hle_stubs.h"
+ #include "memory.h"
+ #include "abi_bridge.h"
+@@ -136,12 +137,12 @@ ViState g_vi;
  
  
  // Guest-side state addresses used by the SDK's VI globals.
@@ -2610,7 +2692,7 @@ index 6eca8f7..65628a5 100644
  // Verified against this build's actual VIWaitForRetrace (0x801BCE30) disassembly: it polls
  // lwz r30, -0x4e34(r13), and this project's manifest (nsmbw.yml) pins sda_base to 0x8042f980,
  // so the guest-visible counter is 0x8042f980 - 0x4e34 = 0x8042ab4c, not the address below - the
-@@ -150,8 +150,8 @@ constexpr uint32_t kViXfbHeightAddr         = 0x8035087c;
+@@ -150,8 +151,8 @@ constexpr uint32_t kViXfbHeightAddr         = 0x8035087c;
  // it was actually looking. Confirmed the fix's target address independently against the same
  // function's second SDA-relative operand (r13-0x4e58, the retrace thread queue) landing on the
  // same +0xa3f68 correction, before touching only the address actually proven to block execution.
@@ -2621,7 +2703,7 @@ index 6eca8f7..65628a5 100644
  // NSMBW's pre/post retrace callback slots, read off its own VISetPreRetraceCallback
  // (0x801BC520) and VISetPostRetraceCallback (0x801BC570): each loads the old value, calls
  // OSDisableInterrupts, stores the new one, restores, and returns the old. They swap
-@@ -159,14 +159,14 @@ constexpr uint32_t kViTimingGuardAddr       = 0x80386b44;
+@@ -159,14 +160,14 @@ constexpr uint32_t kViTimingGuardAddr       = 0x80386b44;
  // bytes above the post slot in both titles, and the two setters appear in the same order,
  // which is the cross-check that they have not been transposed.
  #ifdef MKW_RUNTIME_PRODUCT_NSMBW
@@ -2642,7 +2724,7 @@ index 6eca8f7..65628a5 100644
  // BISECT D1: temporarily reverted to 0x80386bc0 to find which post-GXInitTexObj change moved the
  // stall earlier. (Candidate correct value is 0x8042ab28 - r13-0x4E58 via func_801B5DD0.)
  // Thread queue for VIWaitForRetrace. NSMBW's is the queue its own VIWaitForRetrace
-@@ -174,13 +174,13 @@ constexpr uint32_t kViNextFrameBufferHwAddr = 0x80350890;
+@@ -174,13 +175,13 @@ constexpr uint32_t kViNextFrameBufferHwAddr = 0x80350890;
  // same function polls the retrace counter at r13-0x4E34 = 0x8042AB4C, which matches
  // kViRetraceCountAddr above and confirms the pair came from the same title.
  #ifdef MKW_RUNTIME_PRODUCT_NSMBW
@@ -2659,6 +2741,18 @@ index 6eca8f7..65628a5 100644
  
  std::chrono::microseconds IntervalForFormat(uint32_t tvFormat) {
      // NTSC-ish defaults to 60 Hz; PAL uses 50 Hz.
+@@ -760,6 +761,11 @@ void VI_HLE_SetXfbReady(uint32_t xfbAddr) {
+     // screen even with a perfectly healthy CPU/scheduler loop).
+     static uint64_t callCount = 0;
+     ++callCount;
++    // Guest write tracking safety net (gx_guest_write.h InvalidateAll): GPU-visible writes that
++    // skip the DC range ops show up within 20 frames at the latest.
++    if ((callCount % 20) == 0) {
++        GxGuestWrite::InvalidateAll();
++    }
+     if (callCount <= 20 || (callCount % 500) == 0) {
+         RT_LOGF(RT_TAG_VI, "[nsmbw][diag] VI_HLE_SetXfbReady: call #%llu xfbAddr=0x%08X\n",
+                 static_cast<unsigned long long>(callCount), xfbAddr);
 diff --git a/runtime/src/host_cpu_baseline.cpp b/runtime/src/host_cpu_baseline.cpp
 index 9d8157e..ed34dff 100644
 --- a/runtime/src/host_cpu_baseline.cpp
@@ -5668,10 +5762,43 @@ index a58f46f..c5fd063 100644
  PPC_NATIVE_OVERRIDE_VOID(8016f0f0, GX__Begin_8016f0f0, (uint32_t t, uint32_t vf, uint32_t nv), (t, vf, nv));
  
 diff --git a/aurora-main/lib/gx/command_processor.cpp b/aurora-main/lib/gx/command_processor.cpp
-index 1b8d4b2..43378b4 100644
+index 1b8d4b2..122b21d 100644
 --- a/aurora-main/lib/gx/command_processor.cpp
 +++ b/aurora-main/lib/gx/command_processor.cpp
-@@ -2347,6 +2347,12 @@ static int s_nsmbwArmedDraws = 0;
+@@ -1,3 +1,4 @@
++#include <atomic>
+ #include "command_processor.hpp"
+ #include <aurora/env.hpp>
+ 
+@@ -111,6 +112,9 @@ extern "C" void NsmbwInvalidateMergeStateForTextureUpload() {
+ }
+ }
+ 
++// Defined in dolphin/gx/GXGeometry.cpp (global scope).
++extern std::atomic<u32> g_auroraVtxStateSerial;
++
+ namespace aurora::gx::fifo {
+ static Module Log("aurora::gx::fifo");
+ 
+@@ -1633,6 +1637,7 @@ static std::array<u32, 0x100> s_cpRegisterCache{};
+ static std::array<bool, 0x100> s_cpRegisterCacheValid{};
+ 
+ void reset_cp_register_cache() {
++  g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
+   s_cpRegisterCache.fill(0);
+   s_cpRegisterCacheValid.fill(false);
+ }
+@@ -1651,6 +1656,9 @@ static bool cp_register_write_unchanged(u8 addr, u32 value) {
+ // CP register handler - decodes CP register writes and updates g_gxState
+ static void handle_cp(u8 addr, u32 value, bool bigEndian) {
+   if (cp_register_write_unchanged(addr, value)) return;
++  if (addr == 0x50 || addr == 0x60 || (addr >= 0x70 && addr <= 0x9F)) {
++    g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
++  }
+ 
+   switch (addr) {
+   // VCD low (0x50)
+@@ -2347,6 +2355,12 @@ static int s_nsmbwArmedDraws = 0;
  static int s_nsmbwArmedTotal = 0;
  
  static void nsmbw_log_draw_texgen(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, u16 vtxCount, u32 vtxSize) {
@@ -5748,3 +5875,95 @@ index 315526c..5bc4c0f 100644
  }
  
  } // namespace GxGuestWrite
+diff --git a/aurora-main/lib/dolphin/gx/GXGeometry.cpp b/aurora-main/lib/dolphin/gx/GXGeometry.cpp
+index 2e54e10..9471eb6 100644
+--- a/aurora-main/lib/dolphin/gx/GXGeometry.cpp
++++ b/aurora-main/lib/dolphin/gx/GXGeometry.cpp
+@@ -1,3 +1,4 @@
++#include <atomic>
+ #include "gx.hpp"
+ #include "__gx.h"
+ #include "dolphin/gd/GDGeometry.h"
+@@ -153,6 +154,12 @@ static inline void SETVAT(u32* va, u32* vb, u32* vc, GXAttr attr, GXCompCnt cnt,
+   }
+ }
+ 
++// Bumped whenever the vertex descriptor or attribute formats may have changed (these setters, or a
++// VCD/VAT write decoded by the command processor). The runtime's per-draw republish
++// (GxStream::PublishAuroraVtxState) skips its ~50 setter calls when neither this nor its inputs
++// moved since its last publish.
++std::atomic<u32> g_auroraVtxStateSerial{0};
++
+ static inline bool AuroraVtxDescDiffers(GXAttr attr, GXAttrType type) {
+   return attr >= GX_VA_PNMTXIDX && attr < GX_VA_MAX_ATTR && g_gxState.vtxDesc[attr] != type;
+ }
+@@ -167,6 +174,8 @@ static inline bool AuroraVtxAttrFmtDiffers(GXVtxFmt vtxfmt, GXAttr attr, GXCompC
+ 
+ extern "C" {
+ 
++u32 aurora_gx_vtx_state_serial() { return g_auroraVtxStateSerial.load(std::memory_order_relaxed); }
++
+ void GXSetVtxDesc(GXAttr attr, GXAttrType type) {
+   const u32 oldVcdLo = __gx->vcdLo;
+   const u32 oldVcdHi = __gx->vcdHi;
+@@ -185,6 +194,7 @@ void GXSetVtxDesc(GXAttr attr, GXAttrType type) {
+       __gx->vcdHi != oldVcdHi || __gx->hasNrms != oldHasNrms || __gx->hasBiNrms != oldHasBiNrms ||
+       __gx->nrmType != oldNrmType) {
+     __gx->dirtyState |= 8;
++    g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
+   }
+ }
+ 
+@@ -216,6 +226,7 @@ void GXSetVtxDescv(GXVtxDescList* list) {
+       __gx->vcdHi != oldVcdHi || __gx->hasNrms != oldHasNrms || __gx->hasBiNrms != oldHasBiNrms ||
+       __gx->nrmType != oldNrmType) {
+     __gx->dirtyState |= 8;
++    g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
+   }
+ }
+ 
+@@ -226,6 +237,7 @@ void GXClearVtxDesc() {
+   __gx->hasNrms = 0;
+   __gx->hasBiNrms = 0;
+   __gx->dirtyState |= 8;
++  g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
+ }
+ 
+ void GXSetVtxAttrFmt(GXVtxFmt vtxfmt, GXAttr attr, GXCompCnt cnt, GXCompType type, u8 frac) {
+@@ -244,6 +256,7 @@ void GXSetVtxAttrFmt(GXVtxFmt vtxfmt, GXAttr attr, GXCompCnt cnt, GXCompType typ
+       *vc != oldVc) {
+     __gx->dirtyState |= 0x10;
+     __gx->dirtyVAT |= static_cast<u8>(1 << vtxfmt);
++    g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
+   }
+ }
+ 
+@@ -270,6 +283,7 @@ void GXSetVtxAttrFmtv(GXVtxFmt vtxfmt, const GXVtxAttrFmtList* list) {
+       *vc != oldVc) {
+     __gx->dirtyState |= 0x10;
+     __gx->dirtyVAT |= static_cast<u8>(1 << vtxfmt);
++    g_auroraVtxStateSerial.fetch_add(1, std::memory_order_relaxed);
+   }
+ }
+ 
+diff --git a/runtime/include/gx_guest_write.h b/runtime/include/gx_guest_write.h
+index f12c21f..69b11c0 100644
+--- a/runtime/include/gx_guest_write.h
++++ b/runtime/include/gx_guest_write.h
+@@ -126,6 +126,16 @@ inline bool HostRangeToGuest(const void* hostBase, uint64_t hostSize, uint32_t g
+     return true;
+ }
+ 
++// Bumps every granule, so every cached digest is re-checked once. NSMBW writes some GPU-visible
++// data without any DC range op (a new level's tileset is unpacked over the old one's memory, which
++// left the ghost house drawn with the grassland tiles in Switch run 36), so the NSMBW product calls
++// this on every scene change and every few frames as a safety net.
++inline void InvalidateAll() noexcept {
++    for (auto& generation : g_generations) {
++        generation.fetch_add(1u, std::memory_order_relaxed);
++    }
++}
++
+ // Installs the generation/notification hooks into aurora. Called once after
+ // aurora_initialize; until then (and if guest RAM cannot be resolved) aurora
+ // digests its source bytes on every validation, which is the old behaviour.
