@@ -3116,18 +3116,21 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..d4c2cb5 100644
+index a63636b..e61b1c4 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
-@@ -39,6 +39,7 @@
+@@ -37,8 +37,10 @@
+ #include <chrono>
+ #include <csignal>
  #include <cstdio>
++#include "gx_guest_write.h"
  #include <cerrno>
  #include <exception>
 +#include <sys/stat.h>
  #include <filesystem>
  #include <iomanip>
  #include <ios>
-@@ -84,12 +85,12 @@ namespace {
+@@ -84,12 +86,12 @@ namespace {
  //     retail disc image header (New Super Mario Bros. Wii (Europe) (Rev 1).rvz, offset 0x58 in
  //     the RVZ container - "SMNP" + "01" + disc 0 + version 1), not guessed or copied from MKW.
  //   - MEM1 arena lo: derived from wiimj2d.dol's own BSS end (its header's bss_addr+bss_size =
@@ -3142,7 +3145,7 @@ index a63636b..d4c2cb5 100644
  //     which is conservative but not derived from NSMBW's own arena-init code).
  void SeedLowMemDefaults() {
      struct SeedEntry { uint32_t address; uint32_t value; const char* label; };
-@@ -97,13 +98,13 @@ void SeedLowMemDefaults() {
+@@ -97,13 +99,13 @@ void SeedLowMemDefaults() {
      const uint32_t mem2Size = static_cast<uint32_t>(Memory::kMem2Size);
      const uint32_t mem1End = Memory::kMem1CachedBase + mem1Size;
      // _stack_addr, read from __init_registers (0x80004234-0x80004238: lis r1,-0x7fbd;
@@ -3160,7 +3163,7 @@ index a63636b..d4c2cb5 100644
      const uint32_t physicalMem2End = Memory::kMem2CachedBase + mem2Size;
      constexpr uint32_t kIosReservedSize = 0x20000u;
      constexpr uint32_t kIPCArenaSize = 0x20000u;
-@@ -117,8 +118,8 @@ void SeedLowMemDefaults() {
+@@ -117,8 +119,8 @@ void SeedLowMemDefaults() {
      constexpr uint32_t kDvdFstReserveSize = 0x200000u;
      g_dvdFstReservedSize = kDvdFstReserveSize;
      g_dvdFstReservedBase = ipcBufLo - kDvdFstReserveSize;
@@ -3171,7 +3174,7 @@ index a63636b..d4c2cb5 100644
      // Same retail-vs-NDEV test as OS__GetConsoleType_8019f33c (os_init.cpp) - kept in sync so a
      // guest read of this field and a guest call to OSGetConsoleType() never disagree.
      constexpr uint32_t kRetailMem2Size = 64u * 1024u * 1024u;
-@@ -137,10 +138,10 @@ void SeedLowMemDefaults() {
+@@ -137,10 +139,10 @@ void SeedLowMemDefaults() {
          // func_801AA940 itself gets a chance to run, so without this the cache is seen as NULL and
          // that read permanently fails - the actual root cause of the OSSleepThread hang traced this
          // session. This isn't a guess: it's the exact value func_801AA940 would itself store here.
@@ -3184,7 +3187,7 @@ index a63636b..d4c2cb5 100644
          {0x80003180u, kGameCode, "OS app game code"},
          {0x80003194u, kGameCode, "OS app gamename"},
          {0x800000F8u, static_cast<uint32_t>(TimeBaseContract::kBusClockHz), "__OSBusClock"},
-@@ -179,23 +180,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
+@@ -179,23 +181,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
  
  // Mirrors main.cpp's SeedCpuContext(): r1 is the initial stack pointer. NSMBW's manifest
  // (projects/nsmbw/nsmbw.yml) declares memory.base=0x80000000, memory.size=0x01800000, so guest
@@ -3214,7 +3217,7 @@ index a63636b..d4c2cb5 100644
  // d_en_bossNP was excluded for two stacked reasons this session, both now fixed:
  //   1. RelFile.cs's ApplyRelocations mis-resolved cross-module relocations (reusing the
  //      currently-relocating module's own baseAddress/Sections instead of the target module's),
-@@ -206,8 +207,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -206,8 +208,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  //      Decomp's real loader (DynamicModuleControl::do_link, source/dol/cLib/c_dylink.cpp) reads
  //      the whole file, links it, then shrinks the heap block to fixSize+bssSize - discarding that
  //      tail. Using the full file length as "resident size" inflated every REL's footprint enough
@@ -3225,7 +3228,7 @@ index a63636b..d4c2cb5 100644
  //      total resident size - is now placed right after the last real section, matching
  //      do_link()'s actual behavior. With that fix, all four RELs' real footprints are
  //      non-overlapping and pack contiguously (small gaps of a few hundred bytes between them,
-@@ -222,14 +223,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -222,14 +224,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  // the retail .rel headers: prologSection is 1 and prologOffset is 0 for all four, and section 1
  // starts at file offset 0xF0 (0xE0 for d_profileNP), just past each header and section table.
  // Cross-checked against the translated bodies: func_80768680 is d_profileNP's real _prolog (it
@@ -3245,7 +3248,7 @@ index a63636b..d4c2cb5 100644
  };
  
  // A bad guest constructor must not take down the whole boot sequence - matches
-@@ -239,7 +240,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
+@@ -239,7 +241,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
      MkwJmpBuf jumpBuf;
      g_sehJumpTarget = &jumpBuf;
      if (MKW_SETJMP(jumpBuf) == 0) {
@@ -3254,7 +3257,7 @@ index a63636b..d4c2cb5 100644
          InvokeIndirectCpu(address, &cpu);
      } else {
          std::fprintf(stderr,
-@@ -271,6 +272,12 @@ void RunGuestConstructors(CpuContext& cpu) {
+@@ -271,6 +273,12 @@ void RunGuestConstructors(CpuContext& cpu) {
  
      std::printf("[nsmbw] Running REL _prolog (static constructors) for each of the 4 RELs...\n");
      for (uint32_t prolog : kRelPrologAddresses) {
@@ -3267,7 +3270,7 @@ index a63636b..d4c2cb5 100644
          InvokeGuestCallGuarded(prolog, cpu, "REL _prolog");
      }
  
-@@ -338,7 +345,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+@@ -338,7 +346,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
      config.logLevel = LOG_INFO;
      config.windowWidth = 640;
      config.windowHeight = 480;
@@ -3279,7 +3282,21 @@ index a63636b..d4c2cb5 100644
      config.allowJoystickBackgroundEvents = true;
      // Mirror main.cpp's MKW init: skip the display copy's vertical deflicker filter (default on,
      // as in Dolphin). Left zero-initialised, the filter ran on every frame while the F10 checkbox
-@@ -733,7 +744,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -358,6 +370,13 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+     config.mem2Size = 0;
+ 
+     outInfo = aurora_initialize(0, nullptr, &config);
++    // Guest write generations (gx_guest_write.h): main.cpp's MKW path installs these right after
++    // its aurora_initialize, this one never did, so every texture digest and the scaled tile
++    // cache re-hashed their whole source every frame. The US DC*Range overrides
++    // (native/nsmbw_dc_range_overrides.cpp) are what bump the generations.
++    if (AURORA_ENV("NSMBW_NO_GUEST_WRITE_TRACKING") == nullptr) {
++        GxGuestWrite::InstallAuroraHooks();
++    }
+     // Apply the render scale saved by the F10 menu (Config.toml video.resolution_multiplier; 0 =
+     // match window size). Unlike MKW's main.cpp path, this init never called VISetFrameBufferScale,
+     // so the saved value only took effect after re-selecting it in the menu. NSMBW_RES_SCALE=<n>
+@@ -733,7 +752,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
      }
      std::error_code ec;
  
@@ -3288,7 +3305,7 @@ index a63636b..d4c2cb5 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +794,249 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +802,249 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -3538,7 +3555,7 @@ index a63636b..d4c2cb5 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1116,7 @@ int main() {
+@@ -863,7 +1124,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -3547,7 +3564,7 @@ index a63636b..d4c2cb5 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1226,21 @@ int main() {
+@@ -973,7 +1234,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -3569,7 +3586,7 @@ index a63636b..d4c2cb5 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1335,11 @@ int main() {
+@@ -1068,11 +1343,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -5512,7 +5529,7 @@ index 0000000..cacdc76
 +    void operator delete(void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }      \
 +    void operator delete[](void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }
 diff --git a/aurora-main/lib/gx/scaled_tile_cache.cpp b/aurora-main/lib/gx/scaled_tile_cache.cpp
-index 89fcb4b..f728e17 100644
+index 89fcb4b..88e6802 100644
 --- a/aurora-main/lib/gx/scaled_tile_cache.cpp
 +++ b/aurora-main/lib/gx/scaled_tile_cache.cpp
 @@ -1,5 +1,6 @@
@@ -5549,12 +5566,17 @@ index 89fcb4b..f728e17 100644
    // lookup_unchanged's once-per-frame verdict.
    u32 checkedFrame = ~0u;
    bool unchangedThisFrame = false;
-@@ -161,10 +175,13 @@ void queue_build(uintptr_t base, Atlas& atlas) noexcept {
+@@ -161,10 +175,18 @@ void queue_build(uintptr_t base, Atlas& atlas) noexcept {
    }
  }
  
 -// XXH64 of the atlas bytes outside every slot's block rows.
 -u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
++// Chunk digests reused / redone after a write / redone because the range is untracked, logged
++// every 600 frames.
++u64 s_chunkStats[3] = {};
++u32 s_chunkStatsFrame = 0;
++
 +// Digest of the atlas bytes outside every slot's block rows.
 +u64 masked_hash(uintptr_t base, Atlas& atlas, const u8* data) noexcept {
    const auto info = block_info(atlas.format);
@@ -5566,7 +5588,7 @@ index 89fcb4b..f728e17 100644
    if (info) {
      const u32 blocksPerRow = (atlas.width + info->width - 1) / info->width;
      for (auto it = s_slots.lower_bound(base); it != s_slots.end() && it->first < base + atlas.bytes; ++it) {
-@@ -178,17 +195,45 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
+@@ -178,17 +200,56 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
      }
      std::sort(skip.begin(), skip.end());
    }
@@ -5597,7 +5619,11 @@ index 89fcb4b..f728e17 100644
 +    const u64 generation = guest_write_generation(data + c0, c1 - c0);
 +    auto& chunk = atlas.chunks[c];
 +    while (skipIt != skip.end() && skipIt->second <= c0) ++skipIt;
-+    if (guest_write_generation_matches(chunk.generation, generation)) continue;
++    if (guest_write_generation_matches(chunk.generation, generation)) {
++      ++s_chunkStats[0];
++      continue;
++    }
++    ++s_chunkStats[generation == kGuestWriteUntracked ? 2 : 1];
 +    XXH3_state_t state;
 +    XXH3_64bits_reset(&state);
 +    u32 cursor = c0;
@@ -5609,6 +5635,13 @@ index 89fcb4b..f728e17 100644
 +    if (cursor < c1) XXH3_64bits_update(&state, data + cursor, c1 - cursor);
 +    chunk.hash = XXH3_64bits_digest(&state);
 +    chunk.generation = generation;
++  }
++  if (const u32 now = gfx::current_frame(); now - s_chunkStatsFrame >= 600) {
++    s_chunkStatsFrame = now;
++    std::fprintf(stderr, "[scaled_tile_cache] chunks reused %llu, rehashed after write %llu, untracked %llu\n",
++                 static_cast<unsigned long long>(s_chunkStats[0]), static_cast<unsigned long long>(s_chunkStats[1]),
++                 static_cast<unsigned long long>(s_chunkStats[2]));
++    s_chunkStats[0] = s_chunkStats[1] = s_chunkStats[2] = 0;
    }
 -  if (cursor < atlas.bytes) XXH64_update(state, data + cursor, atlas.bytes - cursor);
 -  const u64 hash = XXH64_digest(state);
@@ -5668,3 +5701,50 @@ index 86649c9..bc02611 100644
    TRY(SDL_InitSubSystem(SDL_INIT_EVENTS | SDL_INIT_VIDEO), "Error initializing SDL: {}", SDL_GetError());
  
  #if !defined(_WIN32) && !defined(__APPLE__)
+diff --git a/runtime/src/hle/gx/gx_guest_write_hooks.cpp b/runtime/src/hle/gx/gx_guest_write_hooks.cpp
+index 315526c..5bc4c0f 100644
+--- a/runtime/src/hle/gx/gx_guest_write_hooks.cpp
++++ b/runtime/src/hle/gx/gx_guest_write_hooks.cpp
+@@ -39,10 +39,23 @@ bool TooLargeForGuestRange(size_t size) noexcept {
+ 
+ uint64_t GuestWriteGenerationHook(const void* hostPtr, size_t size) noexcept {
+     uint32_t addr = 0;
++    static int s_reported = 0;
+     if (TooLargeForGuestRange(size) || !HostToGuest(hostPtr, size, addr)) {
++        if (s_reported < 4) {
++            ++s_reported;
++            std::fprintf(stderr, "[gx-guest-write] untracked host %p size 0x%zx (mem1 %p+0x%llx, mem2 %p+0x%llx)\n",
++                         hostPtr, size, g_aliases[0].hostBase, (unsigned long long)g_aliases[0].size,
++                         g_aliases[1].hostBase, (unsigned long long)g_aliases[1].size);
++        }
+         return kUntracked;
+     }
+-    return GenerationForRange(addr, static_cast<uint32_t>(size));
++    const uint64_t g = GenerationForRange(addr, static_cast<uint32_t>(size));
++    if (g == kUntracked && s_reported < 8) {
++        ++s_reported;
++        std::fprintf(stderr, "[gx-guest-write] range untracked guest 0x%08x size 0x%zx canon 0x%08x\n", addr, size,
++                     CanonicalizeGxMainRamAddress(addr));
++    }
++    return g;
+ }
+ 
+ void GuestWriteNotifyHook(const void* hostPtr, size_t size) noexcept {
+@@ -72,12 +85,17 @@ void InstallAuroraHooks() {
+         // Without both banks a host pointer cannot be classified, so leaving the
+         // hooks uninstalled is the only safe answer: aurora then digests every
+         // source on every validation, exactly as it did before.
++        std::fprintf(stderr, "[gx-guest-write] host aliases unavailable: mem1 %p mem2 %p\n",
++                     g_aliases[0].hostBase, g_aliases[1].hostBase);
+         RT_LOGF(RT_TAG_GX,
+                 "guest RAM host aliases unavailable; texture source write tracking "
+                 "disabled\n");
+         return;
+     }
+     aurora_set_guest_write_hooks(&GuestWriteGenerationHook, &GuestWriteNotifyHook);
++    std::fprintf(stderr, "[gx-guest-write] hooks installed: mem1 %p+0x%llx guest 0x%08x, mem2 %p+0x%llx guest 0x%08x\n",
++                 g_aliases[0].hostBase, (unsigned long long)g_aliases[0].size, g_aliases[0].guestBase,
++                 g_aliases[1].hostBase, (unsigned long long)g_aliases[1].size, g_aliases[1].guestBase);
+ }
+ 
+ } // namespace GxGuestWrite
