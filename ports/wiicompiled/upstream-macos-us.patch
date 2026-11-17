@@ -5512,10 +5512,17 @@ index 0000000..cacdc76
 +    void operator delete(void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }      \
 +    void operator delete[](void* p, const std::nothrow_t&) noexcept { thread_cache_new::Free(p); }
 diff --git a/aurora-main/lib/gx/scaled_tile_cache.cpp b/aurora-main/lib/gx/scaled_tile_cache.cpp
-index 89fcb4b..a61a063 100644
+index 89fcb4b..f728e17 100644
 --- a/aurora-main/lib/gx/scaled_tile_cache.cpp
 +++ b/aurora-main/lib/gx/scaled_tile_cache.cpp
-@@ -15,6 +15,10 @@
+@@ -1,5 +1,6 @@
+ #include "scaled_tile_cache.hpp"
+ 
++#include "../gfx/common.hpp"
+ #include "../gfx/texture.hpp"
+ #include "../internal.hpp"
+ 
+@@ -15,6 +16,10 @@
  #include <map>
  #include <vector>
  
@@ -5526,9 +5533,30 @@ index 89fcb4b..a61a063 100644
  #include <xxhash.h>
  
  namespace aurora::gx::scaled_tile_cache {
-@@ -164,7 +168,10 @@ void queue_build(uintptr_t base, Atlas& atlas) noexcept {
- // XXH64 of the atlas bytes outside every slot's block rows.
- u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
+@@ -52,6 +57,15 @@ struct Atlas {
+   // native write-back); a change means a new tileset, so the upscaled base must be rebuilt.
+   u64 contentHash = 0;
+   u32 lastUsedFrame = 0;
++  // masked_hash keeps one digest per 64 KiB chunk with the guest write generation it was taken at;
++  // a chunk the game has not written since is not hashed again (a tileset is up to ~1 MiB, and only
++  // the few chunks holding animated tiles change from frame to frame).
++  struct Chunk {
++    u64 generation = kGuestWriteUntracked;
++    u64 hash = 0;
++  };
++  std::vector<Chunk> chunks;
++  u64 skipHash = 0;
+   // lookup_unchanged's once-per-frame verdict.
+   u32 checkedFrame = ~0u;
+   bool unchangedThisFrame = false;
+@@ -161,10 +175,13 @@ void queue_build(uintptr_t base, Atlas& atlas) noexcept {
+   }
+ }
+ 
+-// XXH64 of the atlas bytes outside every slot's block rows.
+-u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
++// Digest of the atlas bytes outside every slot's block rows.
++u64 masked_hash(uintptr_t base, Atlas& atlas, const u8* data) noexcept {
    const auto info = block_info(atlas.format);
 -  std::vector<std::pair<u32, u32>> skip; // [start, end) byte ranges
 +  // Reused across calls (this runs for every sampled atlas every frame): a fresh vector here was a
@@ -5538,29 +5566,59 @@ index 89fcb4b..a61a063 100644
    if (info) {
      const u32 blocksPerRow = (atlas.width + info->width - 1) / info->width;
      for (auto it = s_slots.lower_bound(base); it != s_slots.end() && it->first < base + atlas.bytes; ++it) {
-@@ -178,17 +185,18 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
+@@ -178,17 +195,45 @@ u64 masked_hash(uintptr_t base, const Atlas& atlas, const u8* data) noexcept {
      }
      std::sort(skip.begin(), skip.end());
    }
 -  XXH64_state_t* state = XXH64_createState();
 -  XXH64_reset(state, 0);
+-  u32 cursor = 0;
+-  for (const auto& [start, end] : skip) {
+-    if (start > cursor) XXH64_update(state, data + cursor, start - cursor);
+-    cursor = std::max(cursor, end);
++  // Skipped ranges move without any RAM write (a slot appears or goes away), so a different skip
++  // set invalidates every cached chunk digest.
++  const u64 skipHash = skip.empty() ? 0 : XXH3_64bits(skip.data(), skip.size() * sizeof(skip[0]));
++  constexpr u32 kChunkBytes = 64 * 1024;
++  const size_t chunkCount = (atlas.bytes + kChunkBytes - 1) / kChunkBytes;
++  if (atlas.chunks.size() != chunkCount || atlas.skipHash != skipHash) {
++    atlas.chunks.assign(chunkCount, Atlas::Chunk{});
++    atlas.skipHash = skipHash;
++  }
 +  // XXH3 rather than XXH64: several times faster on the Switch's NEON cores (run 28 profile: ~3% of
 +  // the game thread hashing tileset atlases). The value is only compared with an earlier result of
 +  // this same function, so the algorithm is free to change.
-+  XXH3_state_t state;
-+  XXH3_64bits_reset(&state);
-   u32 cursor = 0;
-   for (const auto& [start, end] : skip) {
--    if (start > cursor) XXH64_update(state, data + cursor, start - cursor);
-+    if (start > cursor) XXH3_64bits_update(&state, data + cursor, start - cursor);
-     cursor = std::max(cursor, end);
++  auto skipIt = skip.begin();
++  for (size_t c = 0; c < chunkCount; ++c) {
++    const u32 c0 = static_cast<u32>(c) * kChunkBytes;
++    const u32 c1 = std::min(atlas.bytes, c0 + kChunkBytes);
++    // Generation first, digest second: a write landing in between bumps it again, and the next
++    // call re-digests.
++    const u64 generation = guest_write_generation(data + c0, c1 - c0);
++    auto& chunk = atlas.chunks[c];
++    while (skipIt != skip.end() && skipIt->second <= c0) ++skipIt;
++    if (guest_write_generation_matches(chunk.generation, generation)) continue;
++    XXH3_state_t state;
++    XXH3_64bits_reset(&state);
++    u32 cursor = c0;
++    for (auto it = skipIt; it != skip.end() && it->first < c1; ++it) {
++      const u32 start = std::max(it->first, c0);
++      if (start > cursor) XXH3_64bits_update(&state, data + cursor, start - cursor);
++      cursor = std::max(cursor, std::min(it->second, c1));
++    }
++    if (cursor < c1) XXH3_64bits_update(&state, data + cursor, c1 - cursor);
++    chunk.hash = XXH3_64bits_digest(&state);
++    chunk.generation = generation;
    }
 -  if (cursor < atlas.bytes) XXH64_update(state, data + cursor, atlas.bytes - cursor);
 -  const u64 hash = XXH64_digest(state);
 -  XXH64_freeState(state);
 -  return hash;
-+  if (cursor < atlas.bytes) XXH3_64bits_update(&state, data + cursor, atlas.bytes - cursor);
-+  return XXH3_64bits_digest(&state);
++  static thread_local std::vector<u64> digests;
++  digests.clear();
++  for (const auto& chunk : atlas.chunks) digests.push_back(chunk.hash);
++  digests.push_back(skipHash);
++  return XXH3_64bits(digests.data(), digests.size() * sizeof(u64));
  }
  
  // A render-scale change leaves the atlas holding `key` at the old scale. queue_paste rejects every new
@@ -5593,3 +5651,20 @@ index 1b8d4b2..43378b4 100644
  // draw their I8 gradient strips stretched across whole panes even though NSMBW_DUMP_TEXTURES
  // shows the textures decode correctly, so this prints, per draw in that scene, the texgen
  // config each active TEV stage samples through (type/src/mtx/postMtx), the texture matrix
+diff --git a/aurora-main/lib/window.cpp b/aurora-main/lib/window.cpp
+index 86649c9..bc02611 100644
+--- a/aurora-main/lib/window.cpp
++++ b/aurora-main/lib/window.cpp
+@@ -481,6 +481,12 @@ bool initialize() {
+   /* We don't want to initialize anything input related here, otherwise the add events will get lost to the void */
+   TRY(SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight"), "Error setting {}: {}", SDL_HINT_ORIENTATIONS,
+       SDL_GetError());
++#ifdef __SWITCH__
++  // Full checks validate every SDL object through a hash table behind a rwlock; on the Switch each
++  // unlock is a condvar-broadcast syscall, and PADRead asks for every button separately (run 29: ~2%
++  // of the game thread). Quick NULL checks are enough for objects aurora itself owns.
++  SDL_SetHint(SDL_HINT_INVALID_PARAM_CHECKS, "1");
++#endif
+   TRY(SDL_InitSubSystem(SDL_INIT_EVENTS | SDL_INIT_VIDEO), "Error initializing SDL: {}", SDL_GetError());
+ 
+ #if !defined(_WIN32) && !defined(__APPLE__)
