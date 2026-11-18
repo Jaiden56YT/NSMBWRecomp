@@ -968,7 +968,7 @@ index a654b92..b1a9ee4 100644
      g_lrs[slot] = lr;
  }
 diff --git a/runtime/include/guest_flat_memory.h b/runtime/include/guest_flat_memory.h
-index e33573a..72a073d 100644
+index e33573a..d757027 100644
 --- a/runtime/include/guest_flat_memory.h
 +++ b/runtime/include/guest_flat_memory.h
 @@ -19,6 +19,25 @@ inline constexpr uintptr_t kFixedFlatGuestBase = 0x0000'1000'0000'0000ull;
@@ -979,15 +979,15 @@ index e33573a..72a073d 100644
 +// The Switch has no address-space reservation with aliased views, so guest memory is one
 +// block addressed through a 16-entry table, one entry per top address nibble: MEM1's
 +// physical/cached/uncached views (0x0, 0x8, 0xC) share a slot, MEM2's (0x1, 0x9, 0xD) another,
-+// the locked cache (0xE) a third; every other nibble maps to a small scratch area (mask 0).
-+struct SwitchSegment {
-+    uint8_t* host;
-+    uint32_t mask;
-+};
-+extern SwitchSegment g_switchSegments[16];
++// the locked cache (0xE) a third; every other nibble maps to a scratch area.
++// Every slot uses the same mask (MEM2's 128 MiB), so an access is one table load, an AND with a
++// constant, the load and a byte swap (a per-slot mask cost a dependent load and two more
++// instructions on every guest access). The layout (guest_flat_memory_switch.cpp) keeps
++// slot + 128 MiB inside the allocation for every slot. Hidden: a direct reference, no GOT load.
++inline constexpr uint32_t kSwitchSegmentMask = 0x07FFFFFFu;
++extern uint8_t* g_switchSegmentHost[16] __attribute__((visibility("hidden")));
 +inline uint8_t* SwitchFlatHost(uint32_t address) {
-+    const SwitchSegment& seg = g_switchSegments[address >> 28];
-+    return seg.host + (address & seg.mask);
++    return g_switchSegmentHost[address >> 28] + (address & kSwitchSegmentMask);
 +}
 +#define MKW_FLAT_HOST(address) (GuestFlat::SwitchFlatHost(static_cast<uint32_t>(address)))
 +#else
@@ -1388,98 +1388,6 @@ index 43f8b7b..eb73921 100644
  } // namespace GuestFlat
 +
 +#endif  // !__SWITCH__
-diff --git a/runtime/src/guest_flat_memory_switch.cpp b/runtime/src/guest_flat_memory_switch.cpp
-new file mode 100644
-index 0000000..a1354eb
---- /dev/null
-+++ b/runtime/src/guest_flat_memory_switch.cpp
-@@ -0,0 +1,86 @@
-+// Guest memory on the Nintendo Switch (libnx).
-+//
-+// The PC builds reserve a 4 GiB address range and map each guest region into it twice (a
-+// protected guest view plus a host alias), with page protections driving MMIO, deferred EFB
-+// reads and executable-write guards. Horizon offers none of that to homebrew, so here guest
-+// memory is one heap block and translated code reaches it through a 16-entry table indexed by
-+// the top address nibble (see SwitchFlatHost in guest_flat_memory.h):
-+//   0x0/0x8/0xC -> MEM1 slot (32 MiB: 24 MiB MEM1 + the 2 MiB Kamek overlay at 0x81800000)
-+//   0x1/0x9/0xD -> MEM2 slot (Memory::kMem2Size)
-+//   0xE         -> locked cache slot (2 MiB, as the PC build backs it)
-+//   anything else -> a 64-byte scratch area with mask 0 (stray accesses land there harmlessly)
-+// MMIO never reaches this path: FlatMmioNeedsPolicy sends it to the checked accessors first.
-+// Page-protection features are no-ops: there is no fault interception on the Switch.
-+#if defined(__SWITCH__)
-+#include "guest_flat_memory.h"
-+#include "memory.h"
-+
-+#include <cstdio>
-+#include <cstdlib>
-+#include <cstring>
-+#include <stdexcept>
-+
-+namespace GuestFlat {
-+
-+SwitchSegment g_switchSegments[16];
-+
-+namespace {
-+constexpr uint32_t kMem1Slot = 0x02000000u;
-+constexpr uint32_t kLockedCacheSlot = 0x00200000u;
-+uint8_t* g_block = nullptr;
-+size_t g_blockSize = 0;
-+alignas(64) uint8_t g_scratch[64];
-+bool g_active = false;
-+
-+uint32_t SlotFor(uint32_t address, uint32_t& slotSize) {
-+    switch (address >> 28) {
-+    case 0x0: case 0x8: case 0xC: slotSize = kMem1Slot; return 0;
-+    case 0x1: case 0x9: case 0xD: slotSize = static_cast<uint32_t>(Memory::kMem2Size); return kMem1Slot;
-+    case 0xE: slotSize = kLockedCacheSlot; return kMem1Slot + static_cast<uint32_t>(Memory::kMem2Size);
-+    default: slotSize = 0; return 0;
-+    }
-+}
-+}  // namespace
-+
-+bool IsActive() { return g_active; }
-+
-+void Initialize(const std::vector<RegionRequest>& regions) {
-+    if (!g_block) {
-+        g_blockSize = kMem1Slot + Memory::kMem2Size + kLockedCacheSlot;
-+        g_block = static_cast<uint8_t*>(aligned_alloc(0x10000, g_blockSize));
-+        if (!g_block) throw std::runtime_error("Switch: could not allocate guest memory");
-+    }
-+    std::memset(g_block, 0, g_blockSize);
-+    for (int i = 0; i < 16; i++) g_switchSegments[i] = SwitchSegment{g_scratch, 0u};
-+    for (uint32_t nib = 0; nib < 16; nib++) {
-+        uint32_t size = 0;
-+        const uint32_t offset = SlotFor(nib << 28, size);
-+        if (size) g_switchSegments[nib] = SwitchSegment{g_block + offset, size - 1u};
-+    }
-+    for (const auto& r : regions) {
-+        uint32_t size = 0;
-+        SlotFor(r.base, size);
-+        if (!size || (r.base & 0x0FFFFFFFu) + r.size > size)
-+            std::fprintf(stderr, "[memory] Switch: region 0x%08X (+0x%llX) does not fit its slot\n", r.base,
-+                         static_cast<unsigned long long>(r.size));
-+    }
-+    std::printf("[memory] Switch guest memory: %zu MiB block, %zu regions\n", g_blockSize >> 20, regions.size());
-+    g_active = true;
-+}
-+
-+uint8_t* HostPointer(uint32_t guestAddress) {
-+    uint32_t size = 0;
-+    const uint32_t offset = SlotFor(guestAddress, size);
-+    if (!size || (guestAddress & 0x0FFFFFFFu) >= size) return nullptr;
-+    return g_block + offset + (guestAddress & 0x0FFFFFFFu);
-+}
-+
-+void ProtectDeferredRange(uint32_t, size_t) {}
-+void UnprotectDeferredRange(uint32_t, size_t) {}
-+void RegisterExecutableRange(uint32_t, uint32_t) {}
-+FaultCounters Counters() { return {}; }
-+void LogFaultSummary() noexcept {}
-+bool HandleAccessViolation(void*, bool) noexcept { return false; }
-+
-+}  // namespace GuestFlat
-+#endif  // __SWITCH__
 diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
 index 421ca42..e471353 100644
 --- a/runtime/src/hle/audio/audio.cpp
@@ -6216,3 +6124,104 @@ index 156ba23..3ea5814 100644
  void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
      if (size == 0) {
          return;
+diff --git a/runtime/src/guest_flat_memory_switch.cpp b/runtime/src/guest_flat_memory_switch.cpp
+new file mode 100644
+index 0000000..acaa978
+--- /dev/null
++++ b/runtime/src/guest_flat_memory_switch.cpp
+@@ -0,0 +1,95 @@
++// Guest memory on the Nintendo Switch (libnx).
++//
++// The PC builds reserve a 4 GiB address range and map each guest region into it twice (a
++// protected guest view plus a host alias), with page protections driving MMIO, deferred EFB
++// reads and executable-write guards. Horizon offers none of that to homebrew, so here guest
++// memory is one heap block and translated code reaches it through a 16-entry table indexed by
++// the top address nibble (see SwitchFlatHost in guest_flat_memory.h):
++//   0x0/0x8/0xC -> MEM1 slot (32 MiB: 24 MiB MEM1 + the 2 MiB Kamek overlay at 0x81800000)
++//   0x1/0x9/0xD -> MEM2 slot (Memory::kMem2Size)
++//   0xE         -> locked cache slot (2 MiB, as the PC build backs it)
++//   anything else -> a 128 MiB scratch area (stray accesses land there harmlessly)
++// Every slot is addressed with the same 128 MiB mask, so the block is laid out
++// [locked cache][MEM1][MEM2] and each slot's start + 128 MiB stays inside it. An offset past a
++// slot's own size (a wild pointer; it faults on a Wii) reaches the next slot instead of
++// wrapping inside its own.
++// MMIO never reaches this path: FlatMmioNeedsPolicy sends it to the checked accessors first.
++// Page-protection features are no-ops: there is no fault interception on the Switch.
++#if defined(__SWITCH__)
++#include "guest_flat_memory.h"
++#include "memory.h"
++
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <stdexcept>
++
++namespace GuestFlat {
++
++uint8_t* g_switchSegmentHost[16];
++static_assert(Memory::kMem2Size == size_t{kSwitchSegmentMask} + 1u, "slots use MEM2's mask");
++
++namespace {
++constexpr uint32_t kMem1Slot = 0x02000000u;
++constexpr uint32_t kLockedCacheSlot = 0x00200000u;
++constexpr uint32_t kSlotSpan = kSwitchSegmentMask + 1u;
++uint8_t* g_block = nullptr;
++size_t g_blockSize = 0;
++uint8_t* g_scratch = nullptr;
++bool g_active = false;
++
++uint32_t SlotFor(uint32_t address, uint32_t& slotSize) {
++    switch (address >> 28) {
++    case 0xE: slotSize = kLockedCacheSlot; return 0;
++    case 0x0: case 0x8: case 0xC: slotSize = kMem1Slot; return kLockedCacheSlot;
++    case 0x1: case 0x9: case 0xD: slotSize = static_cast<uint32_t>(Memory::kMem2Size); return kLockedCacheSlot + kMem1Slot;
++    default: slotSize = 0; return 0;
++    }
++}
++}  // namespace
++
++bool IsActive() { return g_active; }
++
++void Initialize(const std::vector<RegionRequest>& regions) {
++    if (!g_block) {
++        g_blockSize = kMem1Slot + Memory::kMem2Size + kLockedCacheSlot;
++        g_block = static_cast<uint8_t*>(aligned_alloc(0x10000, g_blockSize));
++        if (!g_block) throw std::runtime_error("Switch: could not allocate guest memory");
++        g_scratch = static_cast<uint8_t*>(aligned_alloc(0x10000, kSlotSpan));
++        if (!g_scratch) throw std::runtime_error("Switch: could not allocate the guest scratch area");
++    }
++    std::memset(g_block, 0, g_blockSize);
++    for (uint32_t nib = 0; nib < 16; nib++) {
++        uint32_t size = 0;
++        const uint32_t offset = SlotFor(nib << 28, size);
++        if (size && offset + size_t{kSlotSpan} > g_blockSize)
++            throw std::runtime_error("Switch: guest slot layout leaves a slot's mask outside the block");
++        g_switchSegmentHost[nib] = size ? g_block + offset : g_scratch;
++    }
++    for (const auto& r : regions) {
++        uint32_t size = 0;
++        SlotFor(r.base, size);
++        if (!size || (r.base & 0x0FFFFFFFu) + r.size > size)
++            std::fprintf(stderr, "[memory] Switch: region 0x%08X (+0x%llX) does not fit its slot\n", r.base,
++                         static_cast<unsigned long long>(r.size));
++    }
++    std::printf("[memory] Switch guest memory: %zu MiB block, %zu regions\n", g_blockSize >> 20, regions.size());
++    g_active = true;
++}
++
++uint8_t* HostPointer(uint32_t guestAddress) {
++    uint32_t size = 0;
++    const uint32_t offset = SlotFor(guestAddress, size);
++    if (!size || (guestAddress & 0x0FFFFFFFu) >= size) return nullptr;
++    return g_block + offset + (guestAddress & 0x0FFFFFFFu);
++}
++
++void ProtectDeferredRange(uint32_t, size_t) {}
++void UnprotectDeferredRange(uint32_t, size_t) {}
++void RegisterExecutableRange(uint32_t, uint32_t) {}
++FaultCounters Counters() { return {}; }
++void LogFaultSummary() noexcept {}
++bool HandleAccessViolation(void*, bool) noexcept { return false; }
++
++}  // namespace GuestFlat
++#endif  // __SWITCH__

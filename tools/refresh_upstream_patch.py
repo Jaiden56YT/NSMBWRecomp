@@ -30,8 +30,15 @@ def sections(text):
 def main():
     head, secs = sections(PATCH.read_text())
     for f in sys.argv[1:]:
-        new = subprocess.run(["git", "-C", str(UP), "diff", "HEAD", "--", f],
-                             check=True, capture_output=True, text=True).stdout
+        tracked = subprocess.run(["git", "-C", str(UP), "ls-files", "--error-unmatch", "--", f],
+                                 capture_output=True).returncode == 0
+        if tracked or not (UP / f).exists():
+            new = subprocess.run(["git", "-C", str(UP), "diff", "HEAD", "--", f],
+                                 check=True, capture_output=True, text=True).stdout
+        else:
+            # Untracked (a file the patch adds): diff it as a new file, with the patch's a/ b/ paths.
+            new = subprocess.run(["git", "-C", str(UP), "diff", "--no-index", "--", "/dev/null", f],
+                                 capture_output=True, text=True).stdout
         idx = [i for i, (name, _) in enumerate(secs) if name == f]
         if idx:
             if new:
