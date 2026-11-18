@@ -12,6 +12,7 @@
 // globbed by MKW's own mkw_runtime_common too, and every symbol defined here already exists in
 // MKW's main.cpp/music_attenuation.cpp/base_product.cpp - putting it under runtime/src would
 // duplicate-symbol MKW's real build the same way nsmbw_product.cpp's main() would have.
+#include <cstdio>
 #include "abi_bridge.h"
 #include "memory.h"
 #include "music_attenuation.h"
@@ -83,6 +84,16 @@ void WriteCrashArtifacts(std::string_view reason, std::string_view extraDetails,
             << " was called but is not translated or registered (caller LR=0x"
             << (cpu ? cpu->lr : 0u) << ")" << std::dec;
     WriteCrashArtifacts("missing_target", message.str(), &target);
+    // Register file at the failing call: the usual cause is a call through a bad object or vtable
+    // pointer, which r3 (this) and the GPRs that loaded the target show.
+    if (cpu) {
+        for (int i = 0; i < 32; i += 4) {
+            std::fprintf(stderr, "[nsmbw] r%-2d %08X  r%-2d %08X  r%-2d %08X  r%-2d %08X\n", i, cpu->gpr[i],
+                         i + 1, cpu->gpr[i + 1], i + 2, cpu->gpr[i + 2], i + 3, cpu->gpr[i + 3]);
+        }
+        std::fprintf(stderr, "[nsmbw] lr %08X ctr %08X cr %08X\n", cpu->lr, cpu->ctr, cpu->cr);
+        std::fflush(stderr);
+    }
     ShowRuntimeFatalPopup("Missing translated function", message.str());
     MarkFatalErrorReported();
     std::exit(EXIT_FAILURE);

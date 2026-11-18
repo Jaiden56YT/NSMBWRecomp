@@ -12,7 +12,7 @@ each kind, the design for code mods, and what is left.
 | Data memory patches (strings, tables, constants) | `<memory offset value original>` | **Works** (tested: the save-name patch moves the save to `NASDemo.sav`) |
 | Multi-region XMLs | the same patch listed per region with `original=` | **Works**: only the patch whose `original` matches US Rev 2 is applied |
 | Code memory patches (instructions in main.dol/RELs) | `<memory>` into `.text` | **Works in a mod build**: `tools/mod_build.py` bakes them in and re-translates (~2 min + build) |
-| New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build** with a hand-made test mod (section 5); not yet tried with NewerSMBW itself |
+| New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build**: NewerSMBW 1.30 boots to its title, its own world map (Koopatlas) and plays 1-1 at 60 fps on the Mac. Known issue: the title's attract-mode replay crashes (section 5) |
 | New code, Kamek 2 binaries (`.kmk` + kamekLoader) | Kamek 2 loader + binary | **Not yet** (same pipeline, different file format) |
 | Dolphin texture packs | `Load/Textures/SMN/` | Already supported (`nsmbw_data/texture_replacements/SMN`) |
 | Ocarina/Gecko codes (`ocarina="true"`) | `<memory ocarina>` | Not supported (logged and skipped) |
@@ -157,7 +157,9 @@ takes 19 s, see `ports/wiicompiled/translate_dol.log`) and it handles every case
 already handles, including control flow the patch changes. Since shard file names are content
 hashes, a patch only rebuilds the shards whose functions changed when the build dir is reused.
 
-`tools/mod_build.py <mod dir>`:
+`tools/mod_build.py <mod dir>` (it runs `third_party/NSMBWiicompiled/translator/.../Translator.Cli.dll`;
+rebuild it after applying `upstream-macos-us.patch` with `dotnet build -c Release` in
+`translator/src/Translator.Cli`, or point `MOD_BUILD_TRANSLATOR` at another build):
 
 1. reads the mod's XMLs with the runtime's option rules;
 2. applies each active patch inside a `.text` section to copies of `code/main.dol` and
@@ -240,16 +242,65 @@ In a normal build the same mod still loads its files, and the runtime refuses th
 because it points into the `Loader.bin` blob, so the game runs unmodded instead of stopping on
 untranslated code.
 
-### Open points for NewerSMBW itself
+### NewerSMBW 1.30 (2026-11-17, Mac)
 
-- DLCode mixes code and data. Function entry points are taken from relocation targets that look
-  like functions (prologue, or right after `blr`/`b`), plus everything reachable from the hooks.
-  A callback only reached through a pointer computed some other way would be missed
-  (`missing_target` at run time); add its address to the build's function map.
-- Data patches that guest constructors later rewrite: on a console the loader runs after
-  constructors, here the patches are baked in before them. Not seen yet.
-- The code's size: Newer's DLCode is far bigger than the test module. The arena loses that much
-  memory, as it does on a console, where the code sits in the game heap.
+Source: the official release, `Newer_W_1.30.zip` from the MEGA link on newerteam.com's download
+page (496,257,877 bytes, MD5 `bc1edbf1782d5004e13d69826e28af58`, matching the page). Installed by
+unzipping into `mods/NewerSMBW/` (it already has the SD layout: `riivolution/NewerSMBW.xml`,
+`NewerSMBW/...`). Not committed (game mod content).
+
+`mod_build.py`: 9 US XML patches baked (save name `NerSMBW`, the loader's boot-table entry at
+`0x80328130`, heap sizes, font, title and debug fixes; the other regions' copies are skipped by
+`original`), DLCode 463,252 bytes linked at `0x8176EE60` (code `0x59484` bytes, then data),
+945 game patches (673 code patches baked, 281 data patches applied by the native loader),
+211 REL relocations dropped under baked patches, ~2,000 Newer functions translated
+(42,541 unique functions in total). Translation ~3 min, fresh build ~8 min.
+
+Result: boots (Newer's loader replaced natively), Newer's fonts, messages, layouts, sound archive
+and `.arc.LZ` files load through the mods folder (decompressed by Newer's own code), the Newer
+title screen renders at 60 fps, a new file goes through the opening to Newer's world map
+(Koopatlas: "Yoshi's Island", "Palm Beach 1-1", the shop) and World 1-1 plays at 60 fps (150 s in
+the level with the self-test, no errors). The save is `NerSMBW.sav`, separate from the game's.
+
+What it took, in order of discovery:
+
+1. **Code/data split of DLCode.** Seeding every relocation target as a function seeded data
+   (`0x48495000`, "HIP\0", decoded as a branch). Old Kamek links code first and data after:
+   instruction relocations (HA/LO/REL24) only occur in code and pointer relocations only in data,
+   so the code ends at the last `blr`/`b` before the first in-module ADDR32 site. The module goes
+   into main.dol as a text section plus a data section; only targets in the code are entry points.
+2. **Loader timing for data patches.** Newer's data patches are written by the native loader in the
+   boot scene (after the RELs' static constructors), as on a console; only code patches are baked.
+3. **REL `.bss` placement (translator).** The translator put each REL's `.bss` right after its last
+   section; the game's `DynamicModuleControl::do_link()` puts it at `module + ROUND_UP(fixSize,
+   0x20)`. d_basesNP's `.bss` sat 0x8F8 bytes lower than on a console, so Newer, linked against
+   console addresses, passed state IDs that pointed at other objects (crash calling `0x90010014`
+   in the title scene). `RelFile.cs` now uses `fixSize`; the differences are d_profileNP 0x1718,
+   d_basesNP 0x8F8, d_enemiesNP 0x348, d_en_bossNP 0x8D8. This also matters for any address taken
+   from the PAL decomp table (one native diagnostic, `NSMBW_WATCH_WMOBJ` at `0x8099FE3C`, read the
+   wrong word before). **The vanilla translation must be re-run with the fixed translator**
+   (`translate_all.sh`); see the vanilla check below.
+4. **Conditional branch-and-link (translator).** Newer's assembly uses `beql`/`blel`; the lifter
+   only knew `bcl`, and treated it as "set LR and jump within the function" (the get-PC idiom).
+   The simplified mnemonics now reach that case, and a target outside the function is lowered as a
+   real call (`link_call_` block: LR = return address, call, continue).
+
+Known issue: about 17 s on the title, Newer starts its attract-mode replay (the title scene
+restarts with a recorded play, `/Replay/title` from Newer's `TitleReplay`). It stops with
+`missing_target 0x0` from `0x800D4164`: `func_800D40F0` indexes an array with a signed byte at
+`this+1904` that reads -32 (r27 = 0xFFFFF000), so the object it calls through is not one. Pressing
+2 before then avoids it. Not investigated further yet.
+
+Other notes:
+
+- The XML's "title screen fix" (`0x8015D710` = `blr`) is overwritten by Newer's own System.bin
+  (`li r3,0`), as on a console where the loader runs later; the runtime's "needs a mod build" line
+  for it is therefore expected.
+- DLCode mixes hand-written assembly with compiled code; entry points come from relocation
+  targets inside the code part plus everything reachable from the hooks. A callback reached some
+  other way would show as `missing_target` into `0x8176EE60`..`0x817C82E4`; add it to the map.
+- `TRANSLATOR_LOG_SKIPS_FROM=<hex>` makes the translator list every map entry it could not
+  translate at or above that address (the default log shows only the first 20, all REL entries).
 - Kamek 2 binaries (`.kmk`, used by newer projects) need a parser for their command list
   (upstream's `KamekChunk` handles the Pulsar variant); the rest of the pipeline is the same.
 
@@ -300,10 +351,12 @@ Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>
 
 ## 7. Next steps
 
-1. Try NewerSMBW itself (needs its files: the user's call to download) and fix what it finds.
-   Kamek 2 `.kmk` support.
-2. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the
+1. NewerSMBW: the title attract-mode replay crash; play further worlds (bosses, Koopatlas
+   features, the credits) to find what else breaks. Kamek 2 `.kmk` support.
+2. Re-run the vanilla translation with the fixed translator (REL `.bss` layout) in the main
+   checkout and rebuild.
+3. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the
    patched functions are re-translated.
-3. In-game mod menu: list `mods/`, toggle `enabled` and options (writes `mod.toml`); code mods
+4. In-game mod menu: list `mods/`, toggle `enabled` and options (writes `mod.toml`); code mods
    would show "needs a mod build".
-4. Partial `<file offset length>` patches; `<savegame>` test.
+5. Partial `<file offset length>` patches; `<savegame>` test.

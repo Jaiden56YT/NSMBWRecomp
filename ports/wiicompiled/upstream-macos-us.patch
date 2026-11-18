@@ -6525,7 +6525,7 @@ index 7fddf83..c3f5c0a 100644
      std::call_once(g_riivoOnce, RiivoInitialize);
      return g_riivoState.overlays;
 diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
-index ff7c71c..40880cd 100644
+index ff7c71c..7e8196f 100644
 --- a/runtime/src/hle/storage/riivolution.h
 +++ b/runtime/src/hle/storage/riivolution.h
 @@ -6,6 +6,7 @@
@@ -6568,7 +6568,7 @@ index ff7c71c..40880cd 100644
      // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
      // overlay directory.
      std::optional<PatchSet> patches;
-@@ -57,4 +74,45 @@ const std::vector<Overlay>& Overlays();
+@@ -57,4 +74,49 @@ const std::vector<Overlay>& Overlays();
  // /title/<id>/data directory is redirected there).
  const std::optional<SaveRedirect>& GetSaveRedirect();
  
@@ -6596,8 +6596,9 @@ index ff7c71c..40880cd 100644
 +const MemoryPatchReport& ApplyMemoryPatches();
 +
 +// Code mods built by tools/mod_build.py: a Kamek module linked ahead of time at a fixed guest
-+// address (translated with the game), and patches the build could not bake into main.dol/RELs
-+// (low memory, .bss). The generated mod source registers both from a static constructor.
++// address (translated with the game), and the loader's data patches, which must be written when
++// the game calls the loader (after the RELs' static constructors), not at boot. The generated mod
++// source registers both from a static constructor.
 +struct ModImage {
 +    uint32_t base = 0;
 +    const uint8_t* data = nullptr;
@@ -6609,17 +6610,20 @@ index ff7c71c..40880cd 100644
 +const std::vector<ModImage>& ModImages();
 +// Lowest base of any registered image (0 if none): the product keeps the MEM1 arena below it.
 +uint32_t ModImagesLowestBase();
-+// Copies the images and the registered patches into guest RAM. Call once the OS has finished
-+// clearing the arena (the images sit at its top) and before the game creates its heaps.
++// Copies the images into guest RAM. Call once the OS has finished clearing the arena (the images
++// sit at its top) and before the game creates its heaps.
 +void InstallModImages();
++// Writes the registered loader patches; called by the product's native Kamek loader. Returns the
++// number of patches written.
++uint32_t ApplyModLoaderPatches();
 +
  } // namespace RuntimeRiivolution
 diff --git a/runtime/src/hle/storage/riivolution_memory.cpp b/runtime/src/hle/storage/riivolution_memory.cpp
 new file mode 100644
-index 0000000..f8eba37
+index 0000000..d054fe7
 --- /dev/null
 +++ b/runtime/src/hle/storage/riivolution_memory.cpp
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,314 @@
 +// Riivolution <memory> patches for a statically translated game.
 +//
 +// Riivolution writes its memory patches into RAM after the main executable is
@@ -6906,15 +6910,20 @@ index 0000000..f8eba37
 +        RT_LOG(RT_TAG_RIIVOLUTION) << "mod code " << image.name << ": " << image.size << " bytes at "
 +                  << Hex(image.base) << " (translated ahead of time)" << std::endl;
 +    }
++}
++
++uint32_t ApplyModLoaderPatches() {
++    uint32_t written = 0;
 +    for (const ModPatch& patch : ModPatchList()) {
 +        if (void* pointer = Memory::Contains(patch.address, patch.size) ? Memory::GetPointer(patch.address, patch.size) : nullptr) {
 +            std::memcpy(pointer, patch.data, patch.size);
++            ++written;
++        } else {
++            RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: loader patch at " << Hex(patch.address)
++                      << " is outside guest memory" << std::endl;
 +        }
 +    }
-+    if (!ModPatchList().empty()) {
-+        RT_LOG(RT_TAG_RIIVOLUTION) << "mod build: " << ModPatchList().size()
-+                  << " patch(es) outside main.dol/RELs written" << std::endl;
-+    }
++    return written;
 +}
 +
 +void RegisterCodeRange(uint32_t start, uint32_t end, const char* name) {
@@ -6929,3 +6938,131 @@ index 0000000..f8eba37
 +}
 +
 +} // namespace RuntimeRiivolution
+diff --git a/translator/src/Translator.Core/Parsing/Rel/RelFile.cs b/translator/src/Translator.Core/Parsing/Rel/RelFile.cs
+index 6a71078..6cbd703 100644
+--- a/translator/src/Translator.Core/Parsing/Rel/RelFile.cs
++++ b/translator/src/Translator.Core/Parsing/Rel/RelFile.cs
+@@ -65,7 +65,7 @@ public sealed class RelFile
+         var sectionTableOffset = reader.ReadUInt32();
+ 
+         reader.Seek(0x1C, SeekOrigin.Begin);
+-        _ = reader.ReadUInt32(); // version (unused for now)
++        var version = reader.ReadUInt32();
+         var bssSize = reader.ReadUInt32();
+ 
+         reader.Seek(0x28, SeekOrigin.Begin);
+@@ -84,6 +84,8 @@ public sealed class RelFile
+ 
+         _ = reader.ReadUInt32(); // align (0x40)
+         var bssAlign = reader.ReadUInt32(); // 0x44
++        // fixSize (0x48) exists from header version 3 on.
++        var fixSize = version >= 3 && raw.Length >= 0x4C ? reader.ReadUInt32() : 0u;
+ 
+         // Basic validation
+         if (sectionTableOffset + sectionCount * 8 > raw.Length)
+@@ -110,8 +112,19 @@ public sealed class RelFile
+         // size - included that discarded tail, inflating every REL's memory footprint far beyond
+         // its real one. With 4 RELs placed back-to-back at their real observed addresses, that
+         // inflation is exactly what made each one's computed range run into the next REL's start.
++        //
++        // Where in that block: NSMBW's DynamicModuleControl::do_link() (c_dylink.cpp) links every
++        // fixed REL with bssStart = module + ROUND_UP(fixSize, 0x20), i.e. after the part of the file
++        // OSLinkFixed keeps, not right after the last section. Code built against the console's
++        // layout (Kamek mods such as NewerSMBW, PAL-derived addresses in native overrides) uses
++        // those addresses directly: with BSS at the section end, d_basesNP's BSS sat 0x8F8 bytes
++        // lower than on a console, and NewerSMBW passed a state ID at its console address
++        // (0x809A1DA8) that held a different object here. The section-end rule stays as the
++        // fallback for headers without fixSize (version < 3).
+         var maxSectionExtent = ComputeMaxSectionExtent(sections, bssSectionIndex);
+-        var bssOffset = AlignUp(maxSectionExtent, bssAlign);
++        var bssOffset = fixSize >= maxSectionExtent && fixSize != 0
++            ? AlignUp(fixSize, 0x20)
++            : AlignUp(maxSectionExtent, bssAlign);
+         var totalSize = checked(bssOffset + bssSize);
+         var adjustedSections = ApplyBssLayout(sections, bssSectionIndex, bssOffset, bssSize);
+         var imports = ParseImports(raw, importTableOffset, importTableSize);
+diff --git a/translator/src/Translator.Core/Lifting/PpcLifter.cs b/translator/src/Translator.Core/Lifting/PpcLifter.cs
+index c32cdc6..affebb4 100644
+--- a/translator/src/Translator.Core/Lifting/PpcLifter.cs
++++ b/translator/src/Translator.Core/Lifting/PpcLifter.cs
+@@ -1942,14 +1942,36 @@ public sealed partial class PpcLifter
+                     new IrCall(string.Empty, TargetLabel(ins, validAddresses, preferFallthrough: false), blArgs) 
+                 };
+ 
++            // Conditional branch-and-link reaches the lifter under its simplified mnemonics too
++            // (beql, blel, bdnzl, ...). The game never uses it; hand-written Kamek assembly does
++            // (NewerSMBW: `beql 0x81771E04` at 0x817722F0). The raw BO/BI decode below covers all.
+             case "bcl":
++            case "beql":
++            case "bnel":
++            case "bltl":
++            case "bgtl":
++            case "blel":
++            case "bgel":
++            case "bsol":
++            case "bnsl":
++            case "bdnzl":
++            case "bdzl":
++            case "bdnztl":
++            case "bdnzfl":
++            case "bdztl":
++            case "bdzfl":
+                 {
+                     var rawInstr = ReadRawInstruction(ins);
+                     var bo = (int)((rawInstr >> 21) & 0x1F);
+                     var bi = (int)((rawInstr >> 16) & 0x1F);
+                     var fallthrough = $"0x{ins.EndAddress:X8}";
+                     var targetAddr = ins.BranchTargets.FirstOrDefault();
+-                    var linkedTarget = $"link_branch_{ins.EndAddress:X8}_{targetAddr:X8}";
++                    // A target inside this function is the `bcl 20,31,$+4` get-PC idiom (or a local
++                    // subroutine): set LR and jump. Anything else is a conditional call to another
++                    // function, lowered as LR = return address, call, continue at the fallthrough.
++                    var linkedTarget = validAddresses.Contains(targetAddr)
++                        ? $"link_branch_{ins.EndAddress:X8}_{targetAddr:X8}"
++                        : $"link_call_{ins.EndAddress:X8}_{targetAddr:X8}";
+                     var instructions = new List<IrInstruction>();
+                     if ((bo & 0x04) == 0)
+                     {
+diff --git a/translator/src/Translator.Core/Translation/FunctionTranslator.cs b/translator/src/Translator.Core/Translation/FunctionTranslator.cs
+index 34bb2aa..27bdcdf 100644
+--- a/translator/src/Translator.Core/Translation/FunctionTranslator.cs
++++ b/translator/src/Translator.Core/Translation/FunctionTranslator.cs
+@@ -881,6 +881,17 @@ public sealed class FunctionTranslator
+             return true;
+         }
+ 
++        if (TryParseLinkBranchLabel(label, "link_call_", out fallthrough, out var callTarget))
++        {
++            block = new IrBasicBlock(label, new IrInstruction[]
++            {
++                new IrAssign("lr", IrValue.Imm((int)fallthrough)),
++                new IrCall(string.Empty, $"0x{callTarget:X8}", BuildAbiCallArgs()),
++                new IrJump($"0x{fallthrough:X8}")
++            });
++            return true;
++        }
++
+         if (TryParseLinkBranchLabel(label, LinkBranchPrefix, out fallthrough, out var target))
+         {
+             block = new IrBasicBlock(label, new IrInstruction[]
+diff --git a/translator/src/Translator.Cli/Program.cs b/translator/src/Translator.Cli/Program.cs
+index 8aaf19d..250f2de 100644
+--- a/translator/src/Translator.Cli/Program.cs
++++ b/translator/src/Translator.Cli/Program.cs
+@@ -1112,6 +1112,16 @@ int RunTranslateRecursive(string[] argsTail)
+                 {
+                     Console.WriteLine($"[translator]   skipped map entry 0x{address:X8}: {reason}");
+                 }
++                // TRANSLATOR_LOG_SKIPS_FROM=<hex address>: also list every skipped entry at or above it
++                // (e.g. a mod's code module, whose entries are otherwise hidden behind the REL ones).
++                if (Environment.GetEnvironmentVariable("TRANSLATOR_LOG_SKIPS_FROM") is { Length: > 0 } fromText &&
++                    uint.TryParse(fromText.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var from))
++                {
++                    foreach (var (address, reason) in speculativeSkips.Where(skip => skip.Address >= from).OrderBy(static skip => skip.Address))
++                    {
++                        Console.WriteLine($"[translator]   skipped map entry 0x{address:X8}: {reason}");
++                    }
++                }
+                 Console.WriteLine(
+                     $"[translator] Skipped {speculativeSkips.Count:N0} map entry/entries that did not translate; " +
+                     "these are seeded only by the map and are never reached by a call.");

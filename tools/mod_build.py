@@ -320,17 +320,22 @@ class GameImage:
         (out_code / "rels").mkdir(exist_ok=True)
         dol = self.files["main.dol"]
         if extra_text is not None:
-            dol = add_dol_text_section(dol, *extra_text)
+            # The module's code as a text section, its data (if any) as a data section.
+            address, code, text_size = extra_text
+            text_size = (text_size + 31) & ~31
+            dol = add_dol_section(dol, address, code[:text_size], True)
+            if len(code) > text_size:
+                dol = add_dol_section(dol, address + text_size, code[text_size:], False)
         (out_code / "main.dol").write_bytes(dol)
         for name in RELS:
             (out_code / "rels" / f"{name}.rel").write_bytes(self.files[name])
 
 
-def add_dol_text_section(dol, address, data):
-    """Copy of a DOL with one more text section (the linked Kamek code)."""
+def add_dol_section(dol, address, data, text):
+    """Copy of a DOL with one more text (slots 0-6) or data (7-17) section."""
     dol = bytearray(dol)
     sizes = struct.unpack(">18I", dol[144:216])
-    slot = next(i for i in range(7) if sizes[i] == 0)
+    slot = next(i for i in (range(7) if text else range(7, 18)) if sizes[i] == 0)
     offset = (len(dol) + 31) & ~31
     padded = bytes(data) + b"\0" * ((-len(data)) % 32)
     dol += b"\0" * (offset - len(dol)) + padded
@@ -352,8 +357,8 @@ MODULE_TOP = 0x817E0000
 
 
 class KamekModule:
-    def __init__(self, name, base, code, game_patches, seeds):
-        self.name, self.base, self.code = name, base, code
+    def __init__(self, name, base, code, text_size, game_patches, seeds):
+        self.name, self.base, self.code, self.text_size = name, base, code, text_size
         self.game_patches = game_patches  # [(address, bytes)] in the loader's order
         self.seeds = seeds                # function entry points inside the module
 
@@ -374,19 +379,6 @@ def parse_kamek_system(data):
             patches.append((address, data[i + 4:i + 4 + word * 4]))
             i += 4 + word * 4
     return patches
-
-
-def looks_like_function(code, offset):
-    if offset % 4 or offset + 4 > len(code):
-        return False
-    word = struct.unpack(">I", code[offset:offset + 4])[0]
-    if word >> 16 == 0x9421 or word == 0x7C0802A6:  # stwu r1,-n(r1) / mflr r0
-        return True
-    if offset >= 4:
-        prev = struct.unpack(">I", code[offset - 4:offset])[0]
-        if prev == 0x4E800020 or (prev >> 26 == 18 and not prev & 1):  # after blr / b
-            return word != 0
-    return offset == 0
 
 
 def link_newer(mod_dir, image, runtime_mem):
@@ -428,7 +420,7 @@ def link_newer(mod_dir, image, runtime_mem):
     if rel[:8] != b"NewerREL":
         raise SystemExit("  DLRelocs: missing NewerREL header")
     table = struct.unpack(">I", rel[8:12])[0]
-    seeds = {0}
+    targets, pointer_sites, code_sites = set(), [], []
     for i in range(12, table, 8):
         info, location = struct.unpack(">II", rel[i:i + 8])
         rtype, sym = info >> 24, info & 0xFFFFFF
@@ -436,8 +428,12 @@ def link_newer(mod_dir, image, runtime_mem):
         target = value if value & 0x80000000 else base + value
         in_module = not location & 0x80000000
         where = base + location if in_module else location
-        if not value & 0x80000000 and rtype in (1, 4, 10) and looks_like_function(code, value):
-            seeds.add(value)
+        if not value & 0x80000000:
+            targets.add(value)
+        if in_module and rtype == 1:
+            pointer_sites.append(location)
+        if in_module and rtype in (4, 5, 6, 10):
+            code_sites.append(location)
         if rtype == 1:
             new = struct.pack(">I", target)
         elif rtype == 4:
@@ -457,9 +453,23 @@ def link_newer(mod_dir, image, runtime_mem):
             patches.append((where, new))
             if len(new) == 4:
                 game[where] = bytearray(new)
-    print(f"  kamek: DLCode {len(files['DLCode'])} bytes linked at {base:08X}, "
+    # Old Kamek links one blob: .text first, then rodata/data. Instruction relocations
+    # (HA/LO/REL24) only occur in code and pointer relocations (ADDR32) only in data, so the code
+    # ends at the last blr before the first in-module ADDR32 site (NewerSMBW 1.30 US: 0x59484).
+    # Every relocation target inside the code part is a function entry (vtable slots, callbacks,
+    # hook targets); targets in the data part are data and must not be translated.
+    limit = min(pointer_sites) if pointer_sites else max(code_sites, default=len(code) - 4) + 4
+    limit = (min(limit, len(code)) + 3) & ~3
+
+    def ends_function(i):
+        word = struct.unpack(">I", code[i:i + 4])[0]
+        return word == 0x4E800020 or (word >> 26 == 18 and not word & 1)  # blr, or b without link
+
+    text_size = next((i + 4 for i in range(limit - 4, -1, -4) if ends_function(i)), limit)
+    seeds = sorted({0} | {t for t in targets if t < text_size and t % 4 == 0})
+    print(f"  kamek: DLCode {len(files['DLCode'])} bytes linked at {base:08X} (code 0x{text_size:X} bytes), "
           f"{len(patches)} game patch(es), {len(seeds)} entry point(s)")
-    return KamekModule("newer", base, bytes(code), patches, sorted(base + s for s in seeds))
+    return KamekModule("newer", base, bytes(code), text_size, patches, [base + t for t in seeds])
 
 
 # ---------------------------------------------------------------- patching
@@ -467,7 +477,7 @@ def link_newer(mod_dir, image, runtime_mem):
 def build_inputs(mod_dir, out_code):
     """Applies everything that can be static to copies of the game binaries.
 
-    Returns (stats, kamek module or None, runtime patches [(addr, bytes)])."""
+    Returns (stats, kamek module or None, loader-time patches [(addr, bytes)])."""
     image = GameImage()
     stats = {"baked": 0, "mismatch": 0, "runtime": 0, "unsupported": 0}
     runtime_patches, low_memory = [], {}
@@ -514,15 +524,22 @@ def build_inputs(mod_dir, out_code):
 
     kamek = link_newer(mod_dir, image, low_memory) if has_loader else None
     if kamek:
+        # The loader runs in the boot scene, after the RELs' static constructors have filled their
+        # data (profile tables and objects). Its code patches are baked (constructors never write
+        # code); its data patches are applied by the native loader at that same moment, otherwise
+        # the constructors would overwrite them with vanilla values.
+        loader_data = 0
         for address, value in kamek.game_patches:
-            if image.read(address, len(value)) is None:
+            section = image.section_for(address, len(value))
+            if section is None or not section.executable:
                 runtime_patches.append((address, value))
+                loader_data += 1
                 continue
-            section = image.write(address, value)
+            image.write(address, value)
             stats["baked"] += 1
-            kind = "code" if section.executable else "data"
-            print(f"  + kamek: {section.module} {kind} {address:08X} <- {value[:16].hex().upper()}")
-    image.write_files(out_code, (kamek.base, kamek.code) if kamek else None)
+        print(f"  kamek: {stats['baked']} code patch(es) baked in total, {loader_data} data patch(es) "
+              "applied by the native loader at run time")
+    image.write_files(out_code, (kamek.base, kamek.code, kamek.text_size) if kamek else None)
     return stats, kamek, runtime_patches
 
 
@@ -536,7 +553,7 @@ def write_function_map(out, kamek):
 
 
 def write_mod_source(gen, name, kamek, runtime_patches):
-    """C++ the mod build links in: the module image and the patches outside the game binaries."""
+    """C++ the mod build links in: the module image and the patches the native loader applies."""
     mod_dir = gen / "mod"
     mod_dir.mkdir(parents=True, exist_ok=True)
     for old in mod_dir.glob("*.cpp"):

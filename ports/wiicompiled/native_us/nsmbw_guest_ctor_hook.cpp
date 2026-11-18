@@ -43,7 +43,10 @@
 extern "C" void Nsmbw_RunGuestConstructorsOnce(CpuContext* ctx);
 
 // The relocated REL blobs InitializeDataSections() embeds; addresses and sizes match
-// generated_nsmbw/data_sections_init.cpp.
+// generated_nsmbw/data_sections_init.cpp as translated before 2026-11-17. Since then the translator
+// places each REL's .bss where the console's do_link does (module + ROUND_UP(fixSize, 0x20)), which
+// makes the blobs longer by the gap before .bss; the extra bytes are .bss, all zero, and OSInit has
+// already cleared this memory, so these sizes stay correct for both layouts.
 extern "C" const uint8_t kData_d_basesNP[];
 extern "C" const uint8_t kData_d_en_bossNP[];
 extern "C" const uint8_t kData_d_enemiesNP[];
