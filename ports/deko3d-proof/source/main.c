@@ -40,6 +40,9 @@ static DkCmdList g_cmdsRender;
 static DkQueue g_renderQueue;
 
 // Simple function for loading a shader from the filesystem
+#include <stdbool.h>
+bool compileShaderAtRuntime(DkShader* shader, int stage, DkMemBlock codeMem, uint32_t* offset);
+
 static void loadShader(DkShader* pShader, const char* path)
 {
     // Open the file, and retrieve its size
@@ -115,8 +118,12 @@ static void graphicsInitialize(void)
     g_codeMemOffset = 0;
 
     // Load our shaders (both vertex and fragment)
-    loadShader(&g_vertexShader, "romfs:/shaders/triangle_vsh.dksh");
-    loadShader(&g_fragmentShader, "romfs:/shaders/color_fsh.dksh");
+    // Compiled on the Switch at startup (runtime_shader.cpp); the build-time DKSH files are
+    // the fallback.
+    if (!compileShaderAtRuntime(&g_vertexShader, 0, g_codeMemBlock, &g_codeMemOffset))
+        loadShader(&g_vertexShader, "romfs:/shaders/triangle_vsh.dksh");
+    if (!compileShaderAtRuntime(&g_fragmentShader, 1, g_codeMemBlock, &g_codeMemOffset))
+        loadShader(&g_fragmentShader, "romfs:/shaders/color_fsh.dksh");
 
     // Create a memory block which will be used for recording command lists using a command buffer
     dkMemBlockMakerDefaults(&memBlockMaker, g_device, CMDMEMSIZE);
