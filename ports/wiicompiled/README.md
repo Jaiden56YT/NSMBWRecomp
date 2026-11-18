@@ -82,7 +82,8 @@ initial_texture_preload.txt, wii_bootstrap/, WiiCompiled/Config.toml (dvd_root =
 Riivolution packs go in `nsmbw_data/mods/<Mod>/` (Switch: `/switch/nsmbw2/nsmbw_data/mods`; or
 `[paths] mods_root`). File replacements and data `<memory>` patches apply at run time; code patches
 need a mod build: `python3 -I tools/mod_build.py <mod dir> --build` re-translates with them baked in.
-Survey, design and status: `docs/mods.md`.
+Survey, design and status: `docs/mods.md`. In game, the file select's third button (Mods) lists the
+packs with On / Off switches (writes `mod.toml`; applies at the next launch).
 
 ## Next
 1. Mac build of upstream's runtime + aurora (Metal via Dawn): NEON versions of the x86

@@ -3355,10 +3355,18 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..d23031f 100644
+index 8c96414..ce9053e 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
-@@ -156,23 +156,23 @@ std::vector<Row> BuildRows(int tab) {
+@@ -10,6 +10,7 @@
+ #include "nsmbw_menu_draw.h"
+ #include "nsmbw_movie_skip.h"
+ 
++#include "hle/storage/riivolution.h"
+ #include "memory.h"
+ #include "runtime_config.h"
+ #include "settings_overlay.h"
+@@ -156,23 +157,23 @@ std::vector<Row> BuildRows(int tab) {
  }
  
  // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
@@ -3387,7 +3395,7 @@ index 8c96414..d23031f 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,14 +186,14 @@ bool g_soundPaused = false;
+@@ -186,14 +187,14 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3405,7 +3413,7 @@ index 8c96414..d23031f 100644
  constexpr uint32_t kProcStopBits = 0x2u | 0x4u | 0x8u;
  uint32_t g_procBitsAdded = 0; // only the bits this menu set, so the game's own are never cleared
  
-@@ -234,7 +234,7 @@ void SetGameStopped(bool stopped) {
+@@ -234,7 +235,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3414,6 +3422,227 @@ index 8c96414..d23031f 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
+@@ -254,7 +255,7 @@ void LogMenu(const char* what, const char* why) {
+ 
+ // ---- Screens and state --------------------------------------------------------------------------
+ 
+-enum class Screen { Options, Bindings };
++enum class Screen { Options, Bindings, Mods };
+ Screen g_screen = Screen::Options;
+ 
+ // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
+@@ -271,6 +272,17 @@ struct BindState {
+     bool capturing = false;
+ } g_bind;
+ 
++// The mods screen: every pack in the mods folder with an On / Off switch, opened by the file select's
++// Mods button (ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp). The list is read when the
++// screen opens and after each change (InstalledMods reads the folder; a change writes mod.toml).
++constexpr int kModRowsShown = 5;
++struct ModsState {
++    std::vector<RuntimeRiivolution::InstalledMod> mods;
++    int row = 0;
++    int scroll = 0;
++    bool fromFileSelect = false;
++} g_mods;
++
+ // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
+ // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
+ int BindSlots() { return 4; }
+@@ -278,6 +290,8 @@ int BindSlots() { return 4; }
+ // Set when a menu opened from the pause window has finished closing; the pause input handler
+ // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
+ std::atomic<bool> g_returnToPause{false};
++// The same for the file select: set when the mods screen it opened has finished closing.
++std::atomic<bool> g_modsClosed{false};
+ 
+ // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
+ void Close(const char* why) {
+@@ -299,6 +313,8 @@ void FinishClose() {
+     SetGameStopped(false);
+     if (g.fromPause) g_returnToPause = true;
+     g.fromPause = false;
++    if (g_mods.fromFileSelect) g_modsClosed = true;
++    g_mods.fromFileSelect = false;
+ }
+ 
+ void Open(const char* why, bool fromPause) {
+@@ -319,6 +335,14 @@ void ShowScreen(Screen screen) {
+     g.openedAt = draw::Now();
+ }
+ 
++void OpenMods() {
++    g_mods.mods = RuntimeRiivolution::InstalledMods();
++    g_mods.row = g_mods.scroll = 0;
++    g_mods.fromFileSelect = true;
++    Open("file select", false);
++    g_screen = Screen::Mods;
++}
++
+ void OpenBindings(uint32_t player) {
+     g_bind = BindState{};
+     g_bind.player = player;
+@@ -467,10 +491,46 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+     return false;
+ }
+ 
++bool ModsCommand(Cmd cmd, const char* why) {
++    const int n = int(g_mods.mods.size());
++    switch (cmd) {
++    case Cmd::Up: case Cmd::Down:
++        if (n == 0) break;
++        g_mods.row = ((g_mods.row + (cmd == Cmd::Down ? 1 : -1)) % n + n) % n;
++        if (g_mods.row < g_mods.scroll) g_mods.scroll = g_mods.row;
++        if (g_mods.row >= g_mods.scroll + kModRowsShown) g_mods.scroll = g_mods.row - kModRowsShown + 1;
++        if (n > 1) Play(kSndCursor);
++        break;
++    case Cmd::Left: case Cmd::Right: case Cmd::Select: {
++        if (n == 0) {
++            if (cmd == Cmd::Select) Play(kSndInvalid);
++            break;
++        }
++        const auto& mod = g_mods.mods[size_t(g_mods.row)];
++        if (!RuntimeRiivolution::SetModEnabled(mod.folder, !mod.enabled)) {
++            Play(kSndInvalid);
++            break;
++        }
++        const std::string folder = mod.folder;
++        g_mods.mods = RuntimeRiivolution::InstalledMods();
++        for (int i = 0; i < int(g_mods.mods.size()); ++i) {
++            if (g_mods.mods[size_t(i)].folder == folder) g_mods.row = i;
++        }
++        Play(cmd == Cmd::Select ? kSndDecide : kSndCursor);
++        g.pressPending = cmd == Cmd::Select;
++        break;
++    }
++    case Cmd::Back: case Cmd::Exit: Close(why); Play(kSndBack); return true;
++    default: break;
++    }
++    return false;
++}
++
+ bool Dispatch(Cmd cmd, const char* why) {
+     static constexpr const char* kNames[] = {"up", "down", "left", "right", "select", "back",
+                                              "tab-", "tab+", "clear", "reset", "exit"};
+     LogMenu(kNames[int(cmd)], why);
++    if (g_screen == Screen::Mods) return ModsCommand(cmd, why);
+     return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
+ }
+ 
+@@ -588,7 +648,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+             SetOpen(!g.open);
+             continue;
+         }
+-        if ((action == "tab_prev" || action == "tab_next") && g.open && !g.closing && !g.afterPress) {
++        if ((action == "tab_prev" || action == "tab_next") && g.open && !g.closing && !g.afterPress &&
++            g_screen != Screen::Mods) {
+             Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
+             continue;
+         }
+@@ -807,6 +868,61 @@ void DrawBindings(const draw::Canvas& c) {
+     }
+ }
+ 
++// A mod's name shortened to fit the row beside its switch (Label draws in the game's menu font).
++std::string FitTitle(const std::string& title) {
++    constexpr size_t kMax = 26;
++    if (title.size() <= kMax) return title;
++    return title.substr(0, kMax - 3) + "...";
++}
++
++void DrawMods(const draw::Canvas& c) {
++    const int n = int(g_mods.mods.size());
++    g_mods.row = n == 0 ? 0 : std::clamp(g_mods.row, 0, n - 1);
++    g_mods.scroll = std::clamp(g_mods.scroll, 0, std::max(0, n - kModRowsShown));
++
++    c.Mario("Mods", 0, 132, 40);
++    const draw::TextStyle header{.white = Rgb(200, 215, 230), .outline = true};
++    c.Text(n == 0 ? std::string("No mods installed") : std::to_string(n) + (n == 1 ? " mod installed" : " mods installed"),
++           0, 94, 17, header);
++    c.Rect(0, 70, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
++
++    if (n == 0) {
++        c.Label("Put mod folders in:", 0, 30, 20, Align::Center, false);
++        std::string path = RuntimeConfigFile::PathToUtf8(RuntimeRiivolution::ModsRoot());
++        if (path.size() > 48) path = "..." + path.substr(path.size() - 45);
++        c.Text(path, 0, 0, 15, {.white = Rgb(255, 255, 160), .outline = true});
++    } else {
++        if (n > kModRowsShown) {
++            draw::TextStyle count = header;
++            count.align = Align::Right;
++            c.Text(std::to_string(g_mods.scroll + 1) + "-" + std::to_string(std::min(n, g_mods.scroll + kModRowsShown)) +
++                       " of " + std::to_string(n),
++                   262, 94, 15, count);
++        }
++        for (int k = 0; k < kModRowsShown && g_mods.scroll + k < n; ++k) {
++            const int i = g_mods.scroll + k;
++            const auto& mod = g_mods.mods[size_t(i)];
++            Row r{FitTitle(mod.title), Kind::Toggle, {}, mod.enabled ? 1 : 0, [](int) {}};
++            DrawRow(c, r, kRowY[size_t(k)], i == g_mods.row);
++        }
++    }
++
++    c.Rect(0, -98, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
++    if (n > 0) {
++        const auto& mod = g_mods.mods[size_t(g_mods.row)];
++        std::string note;
++        if (mod.enabled != mod.loaded) note = "Applies after a restart";
++        else if (mod.enabled && mod.hasCode && !mod.codeBuiltIn) note = "Its code needs a mod build (tools/mod_build.py)";
++        if (!note.empty()) {
++            c.Text(note, -262, kPromptY, 16, {.white = Rgb(255, 255, 80), .align = Align::Left, .outline = true});
++        }
++    }
++    DrawPrompts(c, kPromptY, {MenuPrompt("Select", "confirm"), MenuPrompt("Back", "back")});
++}
++
++// Set on the game thread by the file select's Mods button once its press animation has played.
++std::atomic<bool> g_openMods{false};
++
+ // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
+ // window has played its press and out animations; opened here on the next frame. The game already
+ // played its own decide sound.
+@@ -872,9 +988,22 @@ void RunScriptedOpenClose() {
+     }
+ }
+ 
++// NSMBW_MODS_MENU_TEST=<commands>: test runs drive the mods screen without keyboard focus, one
++// command every 40 frames (menu time) once it has opened: d down, u up, s select, b back.
++void RunScriptedModsCommands() {
++    static const char* spec = std::getenv("NSMBW_MODS_MENU_TEST");
++    static size_t next = 0;
++    if (spec == nullptr || spec[next] == '\0' || !g.open || g.closing || g_screen != Screen::Mods) return;
++    if (draw::Now() - g.openedAt < 40.0f * float(next + 1)) return;
++    const char c = spec[next++];
++    Dispatch(c == 'd' ? Cmd::Down : c == 'u' ? Cmd::Up : c == 's' ? Cmd::Select : Cmd::Back, "test");
++}
++
+ void Draw() noexcept {
+     RunScriptedOpenClose();
++    RunScriptedModsCommands();
+     if (!g.open && g_openFromPause.exchange(false)) Open("pause menu", true);
++    if (!g.open && !g.closing && g_openMods.exchange(false)) OpenMods();
+     if (!g.open) OpenOnFirstLaunch();
+     if (!g.open) {
+         ClearHeldIfReleased();
+@@ -906,10 +1035,11 @@ void Draw() noexcept {
+     }
+     const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
+     const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
+-    if (g_screen == Screen::Options || g.closing) c.FillDisplay(Rgb(0, 0, 0, uint8_t(128 * std::clamp(fade, 0.0f, 1.0f))));
++    if (g_screen != Screen::Bindings || g.closing) c.FillDisplay(Rgb(0, 0, 0, uint8_t(128 * std::clamp(fade, 0.0f, 1.0f))));
+     else c.FillDisplay(Rgb(0, 0, 0, 128));
+     c.PauseWindow(0, -2, 588, 334);
+     if (g_screen == Screen::Bindings) DrawBindings(c);
++    else if (g_screen == Screen::Mods) DrawMods(c);
+     else DrawOptions(c);
+     g.pressPending = false;
+ }
+@@ -934,3 +1064,5 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+ extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
+ extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
+ extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
++extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
++extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
 index a63636b..e61b1c4 100644
 --- a/runtime/src/product/nsmbw_product.cpp
@@ -5475,10 +5704,10 @@ index 9cb9576..10d7d75 100644
      if (!file.is_open()) {
          failure = HostReadFailure::MissingFile;
 diff --git a/runtime/src/product/nsmbw_layout_patch.cpp b/runtime/src/product/nsmbw_layout_patch.cpp
-index 6c7e32b..e6c2b0c 100644
+index 6c7e32b..5e2ea79 100644
 --- a/runtime/src/product/nsmbw_layout_patch.cpp
 +++ b/runtime/src/product/nsmbw_layout_patch.cpp
-@@ -23,6 +23,7 @@
+@@ -23,11 +23,13 @@
  //   BRLAN: same header, then pat1 (group list: count at +10, groups offset at +16, 20 bytes per
  //     group) and pai1 (entry count at +14, entry offset table at the offset in +16; each entry is
  //     self-contained - name (20 bytes), then tags at offsets relative to the entry).
@@ -5486,18 +5715,256 @@ index 6c7e32b..e6c2b0c 100644
  #include "nsmbw_layout_patch.h"
  
  #include "dvd_generated_files.h"
-@@ -463,6 +464,7 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
+ #include "runtime_config.h"
+ 
++#include <algorithm>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
+@@ -462,7 +464,201 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
+     return WriteArchive(arc);
  }
  
++// ---- The file select's Mods button ---------------------------------------------------------------
++//
++// dFileSelect_c (layout fileSelectBase_18) has two buttons under the save files: Free Mode
++// (N_Multi_00 > N_multiButton_00, green) and Coin Battle (N_MultiCoin_00 > N_multiCoin_00,
++// yellow), each a null pane with the button's pictures and texts under it, a group (F00_multi /
++// F01_coinBattle) and tracks in the six *Multi animations. Mods is a third button after them: a
++// copy of Coin Battle's subtree under new names, in group F02_mods, with renamed copies of its
++// tracks. The game code that drives it is ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp.
++//
++// Two things differ from a plain clone:
++//  - Colour. The button colours are pane vertex colours (the base gradient), material colour
++//    registers (the checker pattern and its highlight) and the animations' colour tracks, which
++//    move between an idle and a highlighted colour. Swapping red and blue everywhere in the copy
++//    - panes, its own copies of the materials, and the copied tracks (by target, so the animation
++//    keeps its timing) - turns the yellow-orange button into a cyan-blue one that highlights the
++//    same way. The checker uses Free Mode's "?" mask (immsk_check_01) instead of coins.
++//  - Materials. Colour tracks address a material by name, and a cloned pane still points at its
++//    original's material, so without copies Mods would light up whenever Coin Battle did. Each
++//    picture and text pane of the copy gets its own material, named after the pane.
++// Layout: the animations key only the inner panes' scale, so the three buttons are placed and
++// sized through the outer null panes. The row is 2 * kFileSelectStep wide; at full size and 16:9
++// it would reach past 4:3's 304-unit half width, so 4:3 uses a smaller row.
++
++// Material table (mat1): count at +8, entry offsets (from the section start) from +12. An entry is
++// its name (20 bytes), colour registers c0..c2 (GXColorS10, 8 bytes each) from +20, konst colours
++// from +44, flags at +60 (texture map count in the low nibble), texture maps (index, wrap s, wrap t)
++// from +64. Picture panes keep their material index at +0x5C, text panes at +0x50.
++size_t FindSection(Sectioned& l, const char* magic) {
++    for (size_t i = 0; i < l.sections.size(); ++i) {
++        if (Magic(l.sections[i]) == magic) return i;
++    }
++    throw Failure{std::string("missing section ") + magic};
++}
++
++std::vector<Bytes> MaterialEntries(const Bytes& mat) {
++    const uint16_t count = Get16(mat, 8);
++    std::vector<Bytes> entries;
++    for (uint16_t i = 0; i < count; ++i) {
++        const uint32_t start = Get32(mat, 12 + 4 * i);
++        const uint32_t end = i + 1 < count ? Get32(mat, 12 + 4 * (i + 1)) : uint32_t(mat.size());
++        Require(start < end && end <= mat.size(), "bad mat1");
++        entries.emplace_back(mat.begin() + start, mat.begin() + end);
++    }
++    return entries;
++}
++
++Bytes WriteMaterials(const Bytes& oldHeader, const std::vector<Bytes>& entries) {
++    Bytes out(oldHeader.begin(), oldHeader.begin() + 12);
++    out.resize(12 + 4 * entries.size(), 0);
++    for (size_t i = 0; i < entries.size(); ++i) {
++        Put32(out, 12 + 4 * i, uint32_t(out.size()));
++        out.insert(out.end(), entries[i].begin(), entries[i].end());
++    }
++    Put16(out, 8, uint16_t(entries.size()));
++    Put32(out, 4, uint32_t(out.size()));
++    return out;
++}
++
++uint16_t TextureIndex(Sectioned& l, const std::string& name) {
++    const Bytes& txl = l.sections[FindSection(l, "txl1")];
++    for (uint16_t i = 0, n = Get16(txl, 8); i < n; ++i) {
++        const uint32_t at = 12 + Get32(txl, 12 + 8 * i);
++        if (Name(txl, at, 64) == name) return i;
++    }
++    throw Failure{"missing texture " + name};
++}
++
++void SwapRedBlue(Bytes& b, size_t r, size_t bl) { std::swap(b[r], b[bl]); }
++
++// Gives each picture / text pane in `panes` a copy of its material, named after the pane, with red
++// and blue swapped in its colour registers.
++void CloneMaterialsSwapped(Sectioned& l, const std::vector<std::string>& panes) {
++    const size_t matIndex = FindSection(l, "mat1");
++    std::vector<Bytes> entries = MaterialEntries(l.sections[matIndex]);
++    for (const std::string& name : panes) {
++        Bytes& pane = Pane(l, name);
++        const std::string m = Magic(pane);
++        const size_t field = m == "pic1" ? 0x5C : m == "txt1" ? 0x50 : 0;
++        Require(field != 0, "material clone of a pane without one");
++        const uint16_t index = Get16(pane, field);
++        Require(index < entries.size(), "material index out of range");
++        Bytes copy = entries[index];
++        PutName(copy, 0, 20, name);
++        for (size_t reg = 0; reg < 3; ++reg) { // s16 r, g, b, a per register
++            const size_t at = 20 + 8 * reg;
++            std::swap(copy[at], copy[at + 4]);
++            std::swap(copy[at + 1], copy[at + 5]);
++        }
++        Put16(pane, field, uint16_t(entries.size()));
++        entries.push_back(std::move(copy));
++    }
++    l.sections[matIndex] = WriteMaterials(l.sections[matIndex], entries);
++}
++
++void SetMaterialTexture(Sectioned& l, const std::string& material, uint16_t texture) {
++    Bytes& mat = l.sections[FindSection(l, "mat1")];
++    for (uint16_t i = 0, n = Get16(mat, 8); i < n; ++i) {
++        const uint32_t at = Get32(mat, 12 + 4 * i);
++        if (Name(mat, at, 20) != material) continue;
++        Require((Get32(mat, at + 60) & 0xF) >= 1, "material without a texture");
++        Put16(mat, at + 64, texture);
++        return;
++    }
++    throw Failure{"missing material " + material};
++}
++
++// The four corner colours of a picture pane (+0x4C, RGBA each).
++void SwapPaneVertexColours(Sectioned& l, const std::string& pane) {
++    Bytes& sec = Pane(l, pane);
++    Require(Magic(sec) == "pic1", "vertex colours of a non-picture pane");
++    for (size_t corner = 0; corner < 4; ++corner) SwapRedBlue(sec, 0x4C + 4 * corner, 0x4E + 4 * corner);
++}
++
++void ScalePane(Sectioned& l, const std::string& pane, float scale) {
++    Bytes& sec = Pane(l, pane);
++    PutF(sec, 60, scale);
++    PutF(sec, 64, scale);
++}
++void MovePaneX(Sectioned& l, const std::string& pane, float x) { PutF(Pane(l, pane), 36, x); }
++
++// In the colour tracks of the entries named in `names`, red and blue trade places: RLVC targets
++// 0..15 are the corners' r, g, b, a (16 is the pane's alpha), RLMC targets come in fours (material
++// colour, c0..c2, konst). Swapping the target bytes keeps every key.
++void SwapTrackRedBlue(Sectioned& a, const std::vector<std::string>& names) {
++    for (Bytes& sec : a.sections) {
++        if (Magic(sec) != "pai1") continue;
++        const size_t table = Get32(sec, 16);
++        for (uint16_t e = 0, n = Get16(sec, 14); e < n; ++e) {
++            const size_t entry = Get32(sec, table + e * 4u);
++            if (std::find(names.begin(), names.end(), Name(sec, entry, 20)) == names.end()) continue;
++            for (uint8_t t = 0, tags = sec[entry + 20]; t < tags; ++t) {
++                const size_t tag = entry + Get32(sec, entry + 24 + t * 4u);
++                const std::string kind(sec.begin() + tag, sec.begin() + tag + 4);
++                if (kind != "RLVC" && kind != "RLMC") continue;
++                for (uint8_t g = 0, groups = sec[tag + 4]; g < groups; ++g) {
++                    uint8_t& target = sec[tag + Get32(sec, tag + 8 + g * 4u) + 1];
++                    if (kind == "RLVC" && target >= 16) continue;
++                    if (target % 4 == 0) target += 2;
++                    else if (target % 4 == 2) target -= 2;
++                }
++            }
++        }
++    }
++}
++
++const std::map<std::string, std::string> kModsPaneNames = {
++    {"N_MultiCoin_00", "N_MultiMods_00"}, {"N_multiCoin_00", "N_multiMods_00"},
++    {"P_battleBase_00", "P_modsBase_00"}, {"P_battleLight", "P_modsLight_00"},
++    {"P_battleUPs", "P_modsUPs_00"},      {"T_multiS_01", "T_multiS_02"},
++    {"T_multi_01", "T_multi_02"},         {"W_multiCoin_00", "W_multiMods_00"},
++    {"P_shadow_03", "P_shadow_04"},
++};
++
++Bytes PatchFileSelect(const Bytes& original) {
++    Archive arc = ReadArchive(original);
++    Bytes& lytFile = File(arc, "arc/blyt/fileSelectBase_18.brlyt");
++    Sectioned lyt = ReadSectioned(lytFile);
++
++    CloneSubtree(lyt, "N_MultiCoin_00", kModsPaneNames);
++    CloneMaterialsSwapped(lyt, {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00", "T_multiS_02", "T_multi_02", "P_shadow_04"});
++    SetMaterialTexture(lyt, "P_modsUPs_00", TextureIndex(lyt, "immsk_check_01.tpl"));
++    for (const char* pane : {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"}) SwapPaneVertexColours(lyt, pane);
++    SetText(lyt, "T_multiS_02", "Mods");
++    SetText(lyt, "T_multi_02", "Mods");
++
++    const bool wide = RuntimeConfigFile::WidescreenEnabled(true);
++    const float scale = wide ? 0.9f : 0.78f, step = wide ? 240.0f : 198.0f;
++    for (const char* outer : {"N_Multi_00", "N_MultiCoin_00", "N_MultiMods_00"}) ScalePane(lyt, outer, scale);
++    MovePaneX(lyt, "N_multiButton_00", -step / scale);
++    MovePaneX(lyt, "N_multiCoin_00", 0.0f);
++    MovePaneX(lyt, "N_multiMods_00", step / scale);
++
++    AddGroup(lyt, "F02_mods", {"N_MultiMods_00", "N_multiMods_00", "T_multiS_02", "T_multi_02", "P_shadow_04",
++                               "P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"});
++    lytFile = WriteSectioned(lyt);
++
++    const std::map<std::string, std::string> tracks = {
++        {"N_multiCoin_00", "N_multiMods_00"}, {"P_shadow_03", "P_shadow_04"}, {"P_battleBase_00", "P_modsBase_00"},
++        {"T_multiS_01", "T_multiS_02"},       {"T_multi_01", "T_multi_02"},   {"P_battleUPs", "P_modsUPs_00"},
++        {"P_battleLight", "P_modsLight_00"},
++    };
++    std::vector<std::string> renamed;
++    for (const auto& [from, to] : tracks) renamed.push_back(to);
++    for (const char* anim : {"inMulti", "onMulti", "idleMulti", "hitMulti", "offMulti", "outMulti"}) {
++        Bytes& file = File(arc, std::string("arc/anim/fileSelectBase_18_") + anim + ".brlan");
++        Sectioned a = ReadSectioned(file);
++        ExtendAnimation(a, "F02_mods", tracks);
++        SwapTrackRedBlue(a, renamed);
++        file = WriteSectioned(a);
++    }
++    return WriteArchive(arc);
++}
++
  std::optional<Bytes> ReadFile(const fs::path& path) {
 +    DvdReadContract::CloseCachedDiscFiles();
      std::ifstream f(path, std::ios::binary);
      if (!f) return std::nullopt;
      return Bytes(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+@@ -472,7 +668,7 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
+     const fs::path source = RuntimeDvd::HostPathFor(dvdPath);
+     const auto original = source.empty() ? std::nullopt : ReadFile(source);
+     if (!original) {
+-        std::fprintf(stderr, "[nsmbw][layout] %s not found; the Options button will be missing\n", dvdPath);
++        std::fprintf(stderr, "[nsmbw][layout] %s not found; the button it adds will be missing\n", dvdPath);
+         return false;
+     }
+     try {
+@@ -501,11 +697,14 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
+ 
+ bool g_pauseMenuPatched = false;
+ bool g_mapMenuPatched = false;
++bool g_fileSelectPatched = false;
+ 
+ void GenerateFiles() {
+     g_pauseMenuPatched = Generate("/Layout/pauseMenu/pauseMenu.arc", "pauseMenu.arc", &PatchPauseMenu);
+     g_mapMenuPatched =
+         Generate("/Layout/corseSelectMenu/corseSelectMenu.arc", "corseSelectMenu.arc", &PatchCourseSelectMenu);
++    g_fileSelectPatched =
++        Generate("/Layout/fileSelectBase/fileSelectBase.arc", "fileSelectBase.arc", &PatchFileSelect);
+     // The Wii Remote icon set keeps the game's own bubble: its hop belongs to the remote art.
+     if (RuntimeConfigFile::ButtonIcons("auto") != "wii") {
+         Generate("/Layout/fukidashiInfo/fukidashiInfo.arc", "fukidashiInfo.arc", &PatchFukidashi);
+@@ -520,3 +719,4 @@ void Register() noexcept { RuntimeDvd::SetGeneratedFilesHook(&GenerateFiles); }
+ 
+ extern "C" bool NsmbwPauseMenuHasOptions() { return nsmbw_layout_patch::g_pauseMenuPatched; }
+ extern "C" bool NsmbwMapMenuHasOptions() { return nsmbw_layout_patch::g_mapMenuPatched; }
++extern "C" bool NsmbwFileSelectHasMods() { return nsmbw_layout_patch::g_fileSelectPatched; }
 diff --git a/runtime/src/product/nsmbw_menu_art.cpp b/runtime/src/product/nsmbw_menu_art.cpp
-index 3f78c82..862a7df 100644
+index 3f78c82..59b98a4 100644
 --- a/runtime/src/product/nsmbw_menu_art.cpp
 +++ b/runtime/src/product/nsmbw_menu_art.cpp
+@@ -1,7 +1,7 @@
+ // Reads the options menu's art straight from the extracted disc ([paths] dvd_root/files):
+ //   Layout/pauseMenu/pauseMenu.arc        window frame and button frame textures
+ //   Layout/select_cursor/select_cursor.arc the yellow corner cursor
+-//   EU/<lang>/Font/*.brfnt                the message font and the Mario font
++//   EU|US/<lang>/Font/*.brfnt             the message font and the Mario font
+ // The formats, all big-endian:
+ //   .arc   U8 archive: a node table (directories and files) plus a string table. Some discs wrap
+ //          archives in Yaz0 compression; NSMBW's layout archives are plain U8, but both are handled.
 @@ -13,6 +13,7 @@
  // Layout offsets match the Python tools used to make the mockups (scratchpad arc_extract.py /
  // render_kit.py), which were checked by rendering the stock pause menu and comparing it with a
@@ -5514,6 +5981,34 @@ index 3f78c82..862a7df 100644
      std::ifstream in(path, std::ios::binary);
      if (!in) return false;
      out.assign(std::istreambuf_iterator<char>(in), {});
+@@ -295,15 +297,21 @@ bool LoadArchiveImage(const fs::path& arc, const char* name, Art art) {
+     return false;
+ }
+ 
+-// The fonts are byte-identical in every EU language folder; English first, else any.
++// The fonts are byte-identical in every language folder of a region; English first, else any. The
++// region folder is the disc's: EU/<lang> on PAL, US/<lang> on NTSC-U (the US port looked only in
++// EU/EngEU, so the menu found no font and closed itself as soon as it opened).
+ fs::path FindFontDir(const fs::path& files) {
+-    const fs::path english = files / "EU" / "EngEU" / "Font";
+-    if (fs::exists(english)) return english;
++    for (const char* english : {"US/EngUS", "EU/EngEU"}) {
++        const fs::path dir = files / english / "Font";
++        if (fs::exists(dir)) return dir;
++    }
+     std::error_code ec;
+-    for (const auto& entry : fs::directory_iterator(files / "EU", ec)) {
+-        if (fs::exists(entry.path() / "Font")) return entry.path() / "Font";
++    for (const char* region : {"US", "EU"}) {
++        for (const auto& entry : fs::directory_iterator(files / region, ec)) {
++            if (fs::exists(entry.path() / "Font")) return entry.path() / "Font";
++        }
+     }
+-    return english;
++    return files / "EU" / "EngEU" / "Font";
+ }
+ 
+ bool LoadFont(const fs::path& path, Font& font) {
 diff --git a/runtime/include/isa/ppc_isa_float.h b/runtime/include/isa/ppc_isa_float.h
 index fcd5795..882ba72 100644
 --- a/runtime/include/isa/ppc_isa_float.h
@@ -6190,7 +6685,7 @@ index f12c21f..69b11c0 100644
  // aurora_initialize; until then (and if guest RAM cannot be resolved) aurora
  // digests its source bytes on every validation, which is the old behaviour.
 diff --git a/runtime/src/hle/storage/riivolution.cpp b/runtime/src/hle/storage/riivolution.cpp
-index 7fddf83..c3f5c0a 100644
+index 7fddf83..92074a0 100644
 --- a/runtime/src/hle/storage/riivolution.cpp
 +++ b/runtime/src/hle/storage/riivolution.cpp
 @@ -22,14 +22,28 @@
@@ -6273,8 +6768,9 @@ index 7fddf83..c3f5c0a 100644
 +                  << " (using defaults)" << std::endl;
 +    }
 +    return settings;
-+}
-+
+ }
+ 
+-std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
 +// mods/<name>/ packs: each folder is a virtual SD card root (riivolution/*.xml
 +// plus the folders its XML points at), or, without XML, a disc-shaped overlay.
 +// Higher mod.toml priority wins, then folder name order.
@@ -6325,9 +6821,8 @@ index 7fddf83..c3f5c0a 100644
 +            state.modSettings[candidate.name] = std::move(candidate.settings);
 +        }
 +    }
- }
- 
--std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
++}
++
 +std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots(RiivoState& state) {
      std::vector<RuntimeRiivolution::Overlay> overlays;
  
@@ -6522,7 +7017,7 @@ index 7fddf83..c3f5c0a 100644
      }
  }
  
-@@ -354,6 +601,21 @@ void RiivoInitialize() {
+@@ -354,6 +601,127 @@ void RiivoInitialize() {
  
  namespace RuntimeRiivolution {
  
@@ -6541,11 +7036,117 @@ index 7fddf83..c3f5c0a 100644
 +    return fs::current_path() / "nsmbw_data" / "mods";
 +}
 +
++namespace {
++// Kamek code in a pack: a Kamek 2 binary (Code/*.bin starting "Kamek\0\0", the standard loader's
++// layout) or NewerSMBW's DLCode*.bin. Bounded walk: packs hold thousands of level files.
++bool RiivoPackHasCode(const fs::path& root) {
++    std::error_code ec;
++    uint32_t visited = 0;
++    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
++         it != end && !ec && visited < 20000; it.increment(ec), ++visited) {
++        if (!it->is_regular_file(ec)) continue;
++        const std::string name = PathToUtf8(it->path().filename());
++        if (name.size() < 4 || name.substr(name.size() - 4) != ".bin") continue;
++        if (name.rfind("DLCode", 0) == 0) return true;
++        std::ifstream f(it->path(), std::ios::binary);
++        char magic[7] = {};
++        if (f.read(magic, 7) && std::string(magic, 7) == std::string("Kamek\0\0", 7)) return true;
++    }
++    return false;
++}
++
++std::string RiivoModTitle(const fs::path& modRoot, const std::string& folder) {
++    const fs::path tomlPath = modRoot / "mod.toml";
++    std::error_code ec;
++    if (!fs::is_regular_file(tomlPath, ec)) return folder;
++    try {
++        std::ifstream stream(tomlPath, std::ios::binary);
++        const toml::value document = toml::parse(stream, PathToUtf8(tomlPath));
++        if (document.contains("name") && document.at("name").is_string()) {
++            const std::string name = document.at("name").as_string();
++            if (!name.empty()) return name;
++        }
++    } catch (const std::exception&) {
++    }
++    return folder;
++}
++} // namespace
++
++std::vector<InstalledMod> InstalledMods() {
++    std::vector<InstalledMod> mods;
++    const fs::path modsRoot = ModsRoot();
++    std::error_code ec;
++    if (!fs::is_directory(modsRoot, ec)) return mods;
++    const auto& overlays = Overlays();
++    for (const auto& entry : fs::directory_iterator(modsRoot, ec)) {
++        std::error_code entryEc;
++        if (!entry.is_directory(entryEc)) continue;
++        InstalledMod mod;
++        mod.folder = PathToUtf8(entry.path().filename());
++        if (mod.folder.empty() || mod.folder[0] == '.') continue;
++        mod.title = RiivoModTitle(entry.path(), mod.folder);
++        mod.enabled = RiivoReadModSettings(entry.path()).enabled;
++        mod.loaded = std::any_of(overlays.begin(), overlays.end(),
++                                 [&](const Overlay& o) { return o.modName == mod.folder; });
++        mod.hasCode = RiivoPackHasCode(entry.path());
++        const std::string prefix = mod.folder + " (";
++        for (const auto& image : ModImages()) {
++            if (image.name.rfind(prefix, 0) == 0) mod.codeBuiltIn = true;
++        }
++        mods.push_back(std::move(mod));
++    }
++    std::sort(mods.begin(), mods.end(), [](const InstalledMod& a, const InstalledMod& b) { return a.title < b.title; });
++    return mods;
++}
++
++bool SetModEnabled(const std::string& folder, bool enabled) {
++    const fs::path dir = ModsRoot() / PathFromUtf8(folder);
++    std::error_code ec;
++    if (folder.empty() || folder.find('/') != std::string::npos || !fs::is_directory(dir, ec)) return false;
++    const fs::path tomlPath = dir / "mod.toml";
++    std::vector<std::string> lines;
++    {
++        std::ifstream in(tomlPath, std::ios::binary);
++        for (std::string line; std::getline(in, line);) lines.push_back(line);
++    }
++    // Replace a top-level `enabled = ...` (before the first [table]); otherwise add one at the top.
++    const std::string value = std::string("enabled = ") + (enabled ? "true" : "false");
++    bool replaced = false;
++    for (std::string& line : lines) {
++        const size_t start = line.find_first_not_of(" \t");
++        if (start == std::string::npos) continue;
++        if (line[start] == '[') break;
++        if (line.compare(start, 7, "enabled") == 0) {
++            const size_t eq = line.find_first_not_of(" \t", start + 7);
++            if (eq != std::string::npos && line[eq] == '=') {
++                line = value;
++                replaced = true;
++                break;
++            }
++        }
++    }
++    if (!replaced) lines.insert(lines.begin(), value);
++    const fs::path temp = dir / "mod.toml.tmp";
++    {
++        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
++        for (const std::string& line : lines) out << line << "\n";
++        if (!out) return false;
++    }
++    fs::rename(temp, tomlPath, ec);
++    if (ec) {
++        fs::remove(temp, ec);
++        return false;
++    }
++    RT_LOG(RT_TAG_RIIVOLUTION) << "mod '" << folder << "' " << (enabled ? "enabled" : "disabled")
++                               << " in mod.toml (applies at the next launch)" << std::endl;
++    return true;
++}
++
  const std::vector<Overlay>& Overlays() {
      std::call_once(g_riivoOnce, RiivoInitialize);
      return g_riivoState.overlays;
 diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
-index ff7c71c..4ece636 100644
+index ff7c71c..bb43707 100644
 --- a/runtime/src/hle/storage/riivolution.h
 +++ b/runtime/src/hle/storage/riivolution.h
 @@ -6,6 +6,7 @@
@@ -6588,13 +7189,29 @@ index ff7c71c..4ece636 100644
      // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
      // overlay directory.
      std::optional<PatchSet> patches;
-@@ -57,4 +74,53 @@ const std::vector<Overlay>& Overlays();
+@@ -57,4 +74,69 @@ const std::vector<Overlay>& Overlays();
  // /title/<id>/data directory is redirected there).
  const std::optional<SaveRedirect>& GetSaveRedirect();
  
 +// The folder mods/<name>/ packs are discovered in: [paths] mods_root, else
 +// NSMBW_MODS_DIR, else nsmbw_data/mods next to the executable (or the working directory).
 +std::filesystem::path ModsRoot();
++
++// A mods/<folder>/ pack as the in-game mods menu shows it (nsmbw_options_menu.cpp). Read from the
++// mods folder on every call, so a change made with SetModEnabled shows straight away; what the
++// running game uses was fixed at startup (`loaded`).
++struct InstalledMod {
++    std::string folder;       // its folder under ModsRoot()
++    std::string title;        // mod.toml `name`, else the folder name
++    bool enabled = true;      // mod.toml `enabled`: what the next launch uses
++    bool loaded = false;      // its files and patches are in use in this session
++    bool hasCode = false;     // carries Kamek code (Code/*.bin with the Kamek header, NewerRes/DLCode*.bin)
++    bool codeBuiltIn = false; // this build has that code linked in (tools/mod_build.py)
++};
++std::vector<InstalledMod> InstalledMods();
++// Writes `enabled = true/false` into mods/<folder>/mod.toml (created if missing; other keys and
++// comments are kept). Takes effect at the next launch. Returns false when it cannot write.
++bool SetModEnabled(const std::string& folder, bool enabled);
 +
 +// Guest code ranges ([start, end)) whose bytes were translated ahead of time.
 +// A <memory> patch inside one cannot take effect at runtime; the product
@@ -7104,3 +7721,35 @@ index 8aaf19d..250f2de 100644
                  Console.WriteLine(
                      $"[translator] Skipped {speculativeSkips.Count:N0} map entry/entries that did not translate; " +
                      "these are seeded only by the map and are never reached by a call.");
+diff --git a/runtime/src/product/nsmbw_layout_patch.h b/runtime/src/product/nsmbw_layout_patch.h
+index c296d35..28f0dfc 100644
+--- a/runtime/src/product/nsmbw_layout_patch.h
++++ b/runtime/src/product/nsmbw_layout_patch.h
+@@ -15,3 +15,5 @@ void Register() noexcept;
+ extern "C" bool NsmbwPauseMenuHasOptions();
+ // The same for the world-map menu (corseSelectMenu.arc, nsmbw_map_options.cpp).
+ extern "C" bool NsmbwMapMenuHasOptions();
++// The file select's Mods button (fileSelectBase.arc; ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp).
++extern "C" bool NsmbwFileSelectHasMods();
+diff --git a/runtime/src/product/nsmbw_options_menu.h b/runtime/src/product/nsmbw_options_menu.h
+index 17930ea..f61afca 100644
+--- a/runtime/src/product/nsmbw_options_menu.h
++++ b/runtime/src/product/nsmbw_options_menu.h
+@@ -7,6 +7,8 @@
+ // settings (settings_overlay::settings); Controls shows which controller drives each player.
+ // Keyboard: arrows move and change, Enter / Z select, Esc / Backspace go back, Q / E switch tabs.
+ // Controller: d-pad or left stick, A select, B back, LB / RB tabs, Start closes.
++// It also has the Mods screen (the packs in the mods folder, each with an On / Off switch), opened
++// by the file select's Mods button through NsmbwModsMenuRequestOpen.
+ namespace nsmbw_options_menu {
+ // Hands the menu to settings_overlay (F10 opens it; Shift+F10 the old F10 bar). Once at startup.
+ void Register() noexcept;
+@@ -17,3 +19,8 @@ int32_t TakeSound() noexcept;
+ // The same for the KPAD override (projects/nsmbw/native), which plays it with the game's
+ // SndAudioMgr::startSystemSe.
+ extern "C" int32_t NsmbwOptionsMenuTakeSound();
++
++// The file select's Mods button (ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp): opens the
++// mods screen on the next frame, and reports once that it has finished closing.
++extern "C" void NsmbwModsMenuRequestOpen();
++extern "C" bool NsmbwModsMenuTakeClosed();

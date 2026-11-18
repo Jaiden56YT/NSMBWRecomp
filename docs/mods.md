@@ -1,6 +1,6 @@
 # NSMBW mods on the recomp
 
-Status: 2026-11-17. Survey of how NSMBW mods are built and shipped, what the recomp does with
+Status: 2026-11-18. Survey of how NSMBW mods are built and shipped, what the recomp does with
 each kind, the design for code mods, and what is left.
 
 ## Summary
@@ -434,6 +434,53 @@ Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>
 (own Config.toml with `mods_root`, own NAND) and `NSMBW_AUTO_PRESS_SELFTEST=1`; screenshots with
 `tools/winid.swift` + `screencapture`.
 
+## 6b. The Mods button on the file select (2026-11-18, Mac)
+
+The file select's bottom row has a third button, **Mods**, after Free Mode and Coin Battle. It
+opens a screen drawn with the game's pause-menu art (the options menu's renderer) listing every
+pack in the mods folder with an On / Off switch; Select or left / right flips it and writes
+`enabled = true/false` into that pack's `mod.toml` (other keys and comments kept). The game loads
+its overlays once at startup, so the note line says "Applies after a restart" for a pack whose
+switch differs from what is loaded, and "Its code needs a mod build" for an enabled pack with Kamek
+code that this build does not have linked in. Back closes it and the file select comes back with
+Mods highlighted.
+
+How it is built:
+- Layout (`runtime/src/product/nsmbw_layout_patch.cpp`, `PatchFileSelect`): the disc's
+  `fileSelectBase.arc` is patched as it is served. Coin Battle's subtree is cloned under new names
+  (group `F02_mods`, renamed copies of its tracks in the six `*Multi` animations). Each picture and
+  text pane of the copy gets its own material (colour tracks address materials by name, so a shared
+  one would light Mods up with Coin Battle). Red and blue are swapped in the copy's vertex colours,
+  material colour registers and copied colour-track targets, so the yellow button becomes a blue
+  one with the same highlight animation; the checker uses Free Mode's "?" mask. The animations only
+  key the inner panes' scale, so the three buttons are spaced and scaled through their outer null
+  panes (0.9 / 240 units apart at 16:9, 0.78 / 198 at 4:3).
+- Game code (`ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp`): `dFileSelect_c` in
+  d_basesNP. Its states pick a bottom button's animations by comparing the cursor with 3 / 4, so
+  Mods is choice 5 and the ten functions that animate, move or confirm the bottom row are replaced
+  (eight written natively, two structural copies with `EDIT` lines). The three buttons sit under
+  the three files, so down / up go straight between file n and button 3 + n. Mods' confirm plays
+  the button's hit animation, then opens the mods screen instead of starting a game.
+  Addresses come from mkwcat/nsmbw-project's `d_FileSelect.h` (PAL; every one is +0x40 on US) and
+  the US REL's relocated code.
+- If the layout patch fails (a mod that replaces `fileSelectBase.arc` with a different layout), the
+  game code behaves exactly like the original two-button row.
+- Adding overrides means re-translating: `translate_all.sh`, then the build.
+- Fixed on the way: the options menu's art loader looked for the fonts only under `EU/EngEU`
+  (PAL). The US disc has them under `US/EngUS`, so on the US build the menu found no font and
+  closed itself as soon as it opened (F10 included). `nsmbw_menu_art.cpp` now tries `US/EngUS`
+  first.
+
+Verified on the Mac (scripted, no keyboard focus): the row draws as Free-for-All / Coin Battle /
+Mods with Mods blue; down from file 1 then right twice reaches Mods; confirming it opens the mods
+screen listing the five test packs; toggling NewerSMBW on and PipeRandomizer off wrote their
+`mod.toml` (PipeRandomizer had none and got one) and showed "Applies after a restart"; Back closed
+it, and the file select then moved left to Coin Battle and up to file 2. A self-test run still goes
+file select -> world map -> 1-1. Not tried: a real keyboard or controller in the screen (scripted
+commands go through the same `Dispatch`), more than five packs (scrolling), 4:3 output.
+Test switch: `NSMBW_MODS_MENU_TEST=<d|u|s|b...>` sends down / up / select / back to the mods
+screen, one every 40 frames after it opens.
+
 ## 7. Next steps
 
 1. NewerSMBW: play further worlds (bosses, Koopatlas features, the credits) to find what else
@@ -443,6 +490,6 @@ Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>
    checkout and rebuild.
 3. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the
    patched functions are re-translated.
-4. In-game mod menu: list `mods/`, toggle `enabled` and options (writes `mod.toml`); code mods
-   would show "needs a mod build".
+4. Mods menu: per-mod Riivolution options (choices) on their own screen; hot reload of file-only
+   packs without a restart.
 5. Partial `<file offset length>` patches; `<savegame>` test.
