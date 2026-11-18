@@ -779,7 +779,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..67dba6e 100644
+index ec62546..f0e1621 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,11 +8,14 @@
@@ -799,7 +799,19 @@ index ec62546..67dba6e 100644
          CACHE FILEPATH "Translator-owned NSMBW combined shard manifest")
      if(NOT EXISTS "${NSMBW_SHARD_MANIFEST}")
          message(FATAL_ERROR
-@@ -47,9 +50,9 @@ if(MKW_BUILD_NSMBW)
+@@ -35,7 +38,10 @@ if(MKW_BUILD_NSMBW)
+     # 0x00000060 unknown-boot-call stub). Ordinary C++, not translated PPC, so it gets the
+     # normal object-target settings instead of the translated-code compile options.
+     file(GLOB NSMBW_NATIVE_SOURCES CONFIGURE_DEPENDS
+-        "${MKW_RUNTIME_SOURCE_DIR}/../projects/nsmbw/native/*.cpp")
++        "${MKW_RUNTIME_SOURCE_DIR}/../projects/nsmbw/native/*.cpp"
++        # A mod build's generated sources (tools/mod_build.py): its Kamek module image and the
++        # patches outside main.dol/RELs. Empty for the vanilla translation.
++        "${NSMBW_GENERATED_DIR}/mod/*.cpp")
+     if(NSMBW_NATIVE_SOURCES)
+         add_library(nsmbw_native OBJECT ${NSMBW_NATIVE_SOURCES})
+         mkw_configure_object_target(nsmbw_native)
+@@ -47,9 +53,9 @@ if(MKW_BUILD_NSMBW)
      # about a single dol+rel pair, and every one of those separately-generated files defines the
      # same extern "C" InitializeDataSections()/IsDataSectionsInitialized() symbols, which would
      # collide at link time the moment more than one was included.
@@ -812,7 +824,7 @@ index ec62546..67dba6e 100644
      if(NOT EXISTS "${NSMBW_DATA_INIT_FILE}")
          message(FATAL_ERROR
              "Missing combined NSMBW data initializer: ${NSMBW_DATA_INIT_FILE}. Run "
-@@ -126,7 +129,7 @@ if(MKW_BUILD_NSMBW)
+@@ -126,7 +132,7 @@ if(MKW_BUILD_NSMBW)
      add_library(nsmbw_runtime_common OBJECT ${NSMBW_RUNTIME_COMMON_SOURCES})
      mkw_configure_object_target(nsmbw_runtime_common)
      target_include_directories(nsmbw_runtime_common BEFORE PRIVATE
@@ -821,7 +833,7 @@ index ec62546..67dba6e 100644
      target_compile_features(nsmbw_runtime_common PRIVATE cxx_std_20)
      # MKW_RUNTIME_PRODUCT_NSMBW: distinguishes this compile of the shared runtime/src tree from
      # mkw_runtime_common's. Needed where a guest-code-address native override in a shared file is
-@@ -146,7 +149,7 @@ if(MKW_BUILD_NSMBW)
+@@ -146,7 +152,7 @@ if(MKW_BUILD_NSMBW)
          target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
      endif()
  
@@ -830,7 +842,7 @@ index ec62546..67dba6e 100644
      # foreach right at the end of that file - which has already run by the time this file is
      # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
      # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
-@@ -154,7 +157,7 @@ if(MKW_BUILD_NSMBW)
+@@ -154,7 +160,7 @@ if(MKW_BUILD_NSMBW)
      # was compiled without those target features enabled.
      foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
          if(TARGET ${nsmbw_target})
@@ -839,7 +851,7 @@ index ec62546..67dba6e 100644
          endif()
      endforeach()
  
-@@ -199,7 +202,7 @@ if(MKW_BUILD_NSMBW)
+@@ -199,7 +205,7 @@ if(MKW_BUILD_NSMBW)
          target_link_options(NSMBWCompiled PRIVATE -mwindows)
      endif()
      target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
@@ -848,7 +860,7 @@ index ec62546..67dba6e 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +210,16 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +213,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -866,7 +878,7 @@ index ec62546..67dba6e 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +235,24 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +238,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -6513,7 +6525,7 @@ index 7fddf83..c3f5c0a 100644
      std::call_once(g_riivoOnce, RiivoInitialize);
      return g_riivoState.overlays;
 diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
-index ff7c71c..80ae656 100644
+index ff7c71c..40880cd 100644
 --- a/runtime/src/hle/storage/riivolution.h
 +++ b/runtime/src/hle/storage/riivolution.h
 @@ -6,6 +6,7 @@
@@ -6556,7 +6568,7 @@ index ff7c71c..80ae656 100644
      // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
      // overlay directory.
      std::optional<PatchSet> patches;
-@@ -57,4 +74,27 @@ const std::vector<Overlay>& Overlays();
+@@ -57,4 +74,45 @@ const std::vector<Overlay>& Overlays();
  // /title/<id>/data directory is redirected there).
  const std::optional<SaveRedirect>& GetSaveRedirect();
  
@@ -6583,13 +6595,31 @@ index ff7c71c..80ae656 100644
 +// the first call does anything.
 +const MemoryPatchReport& ApplyMemoryPatches();
 +
++// Code mods built by tools/mod_build.py: a Kamek module linked ahead of time at a fixed guest
++// address (translated with the game), and patches the build could not bake into main.dol/RELs
++// (low memory, .bss). The generated mod source registers both from a static constructor.
++struct ModImage {
++    uint32_t base = 0;
++    const uint8_t* data = nullptr;
++    uint32_t size = 0;
++    std::string name;
++};
++void RegisterModImage(uint32_t base, const uint8_t* data, uint32_t size, const char* name);
++void RegisterModPatch(uint32_t address, const uint8_t* data, uint32_t size);
++const std::vector<ModImage>& ModImages();
++// Lowest base of any registered image (0 if none): the product keeps the MEM1 arena below it.
++uint32_t ModImagesLowestBase();
++// Copies the images and the registered patches into guest RAM. Call once the OS has finished
++// clearing the arena (the images sit at its top) and before the game creates its heaps.
++void InstallModImages();
++
  } // namespace RuntimeRiivolution
 diff --git a/runtime/src/hle/storage/riivolution_memory.cpp b/runtime/src/hle/storage/riivolution_memory.cpp
 new file mode 100644
-index 0000000..a609a02
+index 0000000..f8eba37
 --- /dev/null
 +++ b/runtime/src/hle/storage/riivolution_memory.cpp
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,309 @@
 +// Riivolution <memory> patches for a statically translated game.
 +//
 +// Riivolution writes its memory patches into RAM after the main executable is
@@ -6821,7 +6851,71 @@ index 0000000..a609a02
 +
 +} // namespace
 +
++namespace {
++
++struct ModPatch {
++    uint32_t address;
++    const uint8_t* data;
++    uint32_t size;
++};
++
++std::vector<RuntimeRiivolution::ModImage>& ModImageList() {
++    static std::vector<RuntimeRiivolution::ModImage> images;
++    return images;
++}
++
++std::vector<ModPatch>& ModPatchList() {
++    static std::vector<ModPatch> patches;
++    return patches;
++}
++
++} // namespace
++
 +namespace RuntimeRiivolution {
++
++void RegisterModImage(uint32_t base, const uint8_t* data, uint32_t size, const char* name) {
++    ModImageList().push_back({base, data, size, name ? name : "mod"});
++    RegisterCodeRange(base, base + size, name);
++}
++
++void RegisterModPatch(uint32_t address, const uint8_t* data, uint32_t size) {
++    ModPatchList().push_back({address, data, size});
++}
++
++const std::vector<ModImage>& ModImages() { return ModImageList(); }
++
++uint32_t ModImagesLowestBase() {
++    uint32_t lowest = 0;
++    for (const ModImage& image : ModImageList()) {
++        if (lowest == 0 || image.base < lowest) {
++            lowest = image.base;
++        }
++    }
++    return lowest;
++}
++
++void InstallModImages() {
++    for (const ModImage& image : ModImageList()) {
++        void* pointer = Memory::Contains(image.base, image.size) ? Memory::GetPointer(image.base, image.size) : nullptr;
++        if (!pointer) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << "ERROR: mod image " << image.name << " at " << Hex(image.base)
++                      << " is outside guest memory" << std::endl;
++            continue;
++        }
++        std::memcpy(pointer, image.data, image.size);
++        RT_LOG(RT_TAG_RIIVOLUTION) << "mod code " << image.name << ": " << image.size << " bytes at "
++                  << Hex(image.base) << " (translated ahead of time)" << std::endl;
++    }
++    for (const ModPatch& patch : ModPatchList()) {
++        if (void* pointer = Memory::Contains(patch.address, patch.size) ? Memory::GetPointer(patch.address, patch.size) : nullptr) {
++            std::memcpy(pointer, patch.data, patch.size);
++        }
++    }
++    if (!ModPatchList().empty()) {
++        RT_LOG(RT_TAG_RIIVOLUTION) << "mod build: " << ModPatchList().size()
++                  << " patch(es) outside main.dol/RELs written" << std::endl;
++    }
++}
 +
 +void RegisterCodeRange(uint32_t start, uint32_t end, const char* name) {
 +    if (end > start) {

@@ -11,8 +11,9 @@ each kind, the design for code mods, and what is left.
 | Riivolution options and choices | `<options>` + `riivolution/config/SMNE.xml` | **Works**: `mod.toml [options]`, Dolphin's config XML, or "first choice of every option" |
 | Data memory patches (strings, tables, constants) | `<memory offset value original>` | **Works** (tested: the save-name patch moves the save to `NASDemo.sav`) |
 | Multi-region XMLs | the same patch listed per region with `original=` | **Works**: only the patch whose `original` matches US Rev 2 is applied |
-| Code memory patches (instructions in main.dol/RELs) | `<memory>` into `.text` | **Prototype**: `tools/mod_build.py` bakes them in and re-translates (~2 min + build) |
-| New code (Kamek / Newer loader) | `valuefile` blob + loader, or `.kmk`/`Code.bin` | **Not yet**: needs the extra code translated as a module (design below) |
+| Code memory patches (instructions in main.dol/RELs) | `<memory>` into `.text` | **Works in a mod build**: `tools/mod_build.py` bakes them in and re-translates (~2 min + build) |
+| New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build** with a hand-made test mod (section 5); not yet tried with NewerSMBW itself |
+| New code, Kamek 2 binaries (`.kmk` + kamekLoader) | Kamek 2 loader + binary | **Not yet** (same pipeline, different file format) |
 | Dolphin texture packs | `Load/Textures/SMN/` | Already supported (`nsmbw_data/texture_replacements/SMN`) |
 | Ocarina/Gecko codes (`ocarina="true"`) | `<memory ocarina>` | Not supported (logged and skipped) |
 
@@ -167,48 +168,90 @@ hashes, a patch only rebuilds the shards whose functions changed when the build 
 4. with `--build`, configures `third_party/NSMBWiicompiled/build_mac_mod_<name>` with the new
    CMake cache variable `NSMBW_GENERATED_DIR` (and `NSMBW_SHARD_MANIFEST`) and builds it.
 
-Because the data initializer embeds the patched `.text`, guest RAM holds the patched bytes too,
-and the runtime reports those patches as "already in place". Data patches and file replacements
-still come from the mods folder at run time, so the same mod folder is used with the mod build.
+Data patches that land in main.dol/RELs are baked in as well, so a mod build has nothing left
+for the runtime there; because the data initializer embeds the patched sections, guest RAM holds
+the patched bytes and the runtime reports those patches as "already in place". File replacements
+and patches outside the binaries still come from the mods folder at run time, so the same mod
+folder is used with the mod build.
 
-Limits of the prototype:
+Notes:
 
-- REL `.text` patches are written to the REL *file* before relocation. A patch on a word that has
-  a relocation would be overwritten by the relocation; not detected yet.
-- New code (a `valuefile` outside every section, Kamek output) is reported, not translated.
+- REL patches are written to the REL *file*, before relocation. Where the patched word has a REL
+  relocation, the relocation is turned into `R_RVL_NOP` so linking keeps the patch.
+- Patches baked into data sections run before guest constructors; on a console they are applied
+  after them. A constructor that rewrites a patched word would undo the patch (not seen yet).
 - On the Switch a code mod means its own `.nro` (no dynamic loading there); configure the Switch
   build with the same `-DNSMBW_GENERATED_DIR=...`.
 
-## 5. What Kamek and Newer need
+## 5. Kamek / Newer code mods
 
-New code has to be translated ahead of time like the game, which needs (a) a fixed load address,
-(b) its entry points, and (c) the game-side hooks as patches. Plan:
+Kamek code is new PowerPC code that the game never contained, loaded at runtime. The recomp can
+only run code it translated ahead of time, so `tools/mod_build.py` does the loader's work at
+build time and translates the result with the game.
 
-1. **Offline linker** (`tools/kamek_link.py`, to write): read `System.bin`, `DLCode.bin` and
-   `DLRelocs.bin` for US v2 (`SystemUS_2.bin` etc.), choose a fixed base for DLCode in memory the
-   game never allocates (as `nsmbw_dylink_heap_reserve.cpp` does for the RELs), and apply the
-   relocations. Relocations whose *target location* is inside DLCode relocate it; those inside
-   game code/data (REL24 branches = hooks, ADDR32 = vtable/pointer hooks) become Riivolution-style
-   `<memory>` patches. `System.bin` entries become patches too. For Kamek 2 `.kmk` files the
-   upstream `KamekChunk` parser already decodes the command list.
-2. **Extra module**: wrap the linked DLCode as a one-section DOL at its fixed base and translate it
-   with `translate-recursive`, seeded with every symbol the game is patched to call (hook targets
-   and pointers); add it to `modules.txt` as a sixth module; embed its image in the data
-   initializer.
-3. **Bake** the game-side patches with `mod_build.py` (code) and the runtime (data).
-4. **Loader HLE**: a native override at the loader entry (`0x80001800` for Newer) that does the
-   loader's bookkeeping (it calls `OSReport`, opens the files, allocates heap) without loading
-   anything, since the code is already in place. Alternatively drop the XML's loader patches in
-   the mod build and copy the image at boot.
-5. **Check** Newer's own heap expansions (it patches `ArchiveHeap`/2D heap sizes in code) and
-   region detection (it reads a code word at `0x80768D50`; the preseeded RELs make that word
-   valid).
+### What NewerSMBW's loader does (on a console)
 
-For Kamek 2 mods the same steps apply with the `.kmk` command list in place of DLRelocs; upstream's
-`translate-mod` (`translator/src/Translator.Core/Mods/`) already implements the MKW variant
-(Pulsar: classify each Kamek write as module command / base code patch / base data patch,
-re-translate patched base functions as overlays, translate the mod's code at a fixed guest base)
-and is the code to reuse.
+Riivolution writes `Loader.bin` to `0x80001800` and rewrites the boot scene's state table
+(`0x803280E0` on US) so the REL link phases run first and then the loader. The loader detects the
+region and version from a code word in d_profileNP, then for US Rev 2:
+
+1. reads `/NewerRes/SystemUS_2.bin` and applies it: a list of `addr, word` (address has bit 31
+   set) or `count, addr, count words`, ending in `FFFFFFFF`;
+2. reads `/NewerRes/DLCodeUS_2.bin` into a block from the game heap (`GameHeapArray[0]`);
+3. reads `/NewerRes/DLRelocsUS_2.bin` (`"NewerREL"`, offset of the symbol table, then
+   `(type << 24 | symbol index, location)` pairs and the symbol table; values with bit 31 set are
+   game addresses, others are offsets into DLCode) and applies ADDR32, ADDR16_LO/HI/HA and REL24
+   (`*loc |= (S - P) & 0x03FFFFFF`, on a word System.bin already set to `b`/`bl` with LI = 0).
+   Relocations at game addresses are the hooks: branches from game code into DLCode and pointers
+   in game data (vtables, profile tables);
+4. returns 1 so the boot scene moves on.
+
+Format and behaviour were read from the NSMASR loader (`third_party/NSMASR-Code/Kamek/Loader/
+NSMASRLoader.S`, a NewerSMBW fork) and its Kamek build script (`tools/kamek.py`).
+
+### What the recomp does instead
+
+`tools/mod_build.py <mod>` (when the mod's XML has a `valuefile` patch at `0x80001800`):
+
+1. finds the three files through the mod's own `<file>`/`<folder>` mappings (as the DVD layer
+   would serve `/NewerRes/...`);
+2. links DLCode at a fixed address: the top of the module is `0x817E0000` and the base is that
+   minus the code size. The 64 KiB below `0x817F0040` (MEM1 arena top) are skipped, because the
+   runtime runs `__start`'s first instructions and every guest constructor with
+   `r1 = 0x817F0040`; their stack frames overwrote the module's data in the first test;
+3. applies System.bin and the game-side relocations to copies of main.dol and the RELs, after the
+   XML's own patches (loader order). A patched REL word that has its own REL relocation gets that
+   relocation turned into `R_RVL_NOP`, otherwise linking would overwrite the patch. Patches
+   outside main.dol/RELs (low memory, `.bss`) go into a generated table the runtime writes at boot;
+4. adds the linked code to main.dol as an extra text section, so the normal DOL translation
+   reaches it through the hooks, and seeds every relocation target that looks like a function
+   start (vtable entries, callbacks) into the build's function map;
+5. writes `generated_nsmbw/mod/mod_<name>.cpp` (the module image and the leftover patches,
+   registered from a static constructor) and builds `build_mac_mod_<name>` with
+   `NSMBW_GENERATED_DIR` pointing at the mod's translation (`NsmbwProduct.cmake` compiles
+   `mod/*.cpp` from there).
+
+At run time (`nsmbw_guest_ctor_hook.cpp`, before guest constructors): the MEM1 arena top is
+lowered to the module's base with `OSSetMEM1ArenaHi` (main's `dSystem::fixArena` reads it later
+to build the heaps), and the image and leftover patches are copied in. When the boot scene calls
+`0x80001800`, `nsmbw_kamek_loader.cpp` (a native override) reports the module and returns 1.
+
+In a normal build the same mod still loads its files, and the runtime refuses the boot-table patch
+because it points into the `Loader.bin` blob, so the game runs unmodded instead of stopping on
+untranslated code.
+
+### Open points for NewerSMBW itself
+
+- DLCode mixes code and data. Function entry points are taken from relocation targets that look
+  like functions (prologue, or right after `blr`/`b`), plus everything reachable from the hooks.
+  A callback only reached through a pointer computed some other way would be missed
+  (`missing_target` at run time); add its address to the build's function map.
+- Data patches that guest constructors later rewrite: on a console the loader runs after
+  constructors, here the patches are baked in before them. Not seen yet.
+- The code's size: Newer's DLCode is far bigger than the test module. The arena loses that much
+  memory, as it does on a console, where the code sits in the game heap.
+- Kamek 2 binaries (`.kmk`, used by newer projects) need a parser for their command list
+  (upstream's `KamekChunk` handles the Pulsar variant); the rest of the pipeline is the same.
 
 ## 6. Testing (Mac)
 
@@ -235,16 +278,32 @@ and the ArchiveHeap code patch (`0x800E4994`, `3C600120` → `3C600140`) for two
   before calls in `func_801A08F0`. The base translation looks older than some native overrides;
   re-running `translate_all.sh` is worth doing independently of mods.
 
+Kamek test mod (`python3 -I tools/tests/make_kamek_testmod.py <mods>/KamekTest`, hand-assembled,
+no compiler needed): a Newer-format pack whose code hooks `fBase_c::createRoot` (`0x80162B20`)
+with a branch into DLCode, increments a counter in DLCode's data and writes 40 + counter to
+player 1's lives (`daPyMng_c::mRest`, US `0x80354E90`); it uses Newer's US boot-table patch.
+
+- `mod_build.py --build`: DLCode linked at `0x817DFFA0`; `func_80162B20` now calls
+  `0x817DFFA0`, and `func_817DFFA0` is the hook (counter at `0x817DFFE0`, store to
+  `0x80354E90`, `mr r0,r4`, jump to `0x80162B24`, which the translator also emitted).
+- Run: `MEM1 arena hi 0x817F0040 -> 0x817DFFA0`, `Kamek loader (native): ... already linked`
+  (so the reordered boot table ran), boot through the title, map and 1-1 with no errors.
+  `NSMBW_WATCH_WRITE=817DFFE0` shows the counter going 1, 2, 3... once per scene;
+  `NSMBW_WATCH_WRITE=80354E90` shows lives 5 -> 42 -> 44 -> 45 -> 47 (40 + counter) at each scene
+  creation; the world map shows Mario x53 instead of x05.
+- Normal build with the same mod: files load, the boot-table patch is refused with a message, the
+  game runs unmodded.
+
 Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>/ud`
 (own Config.toml with `mods_root`, own NAND) and `NSMBW_AUTO_PRESS_SELFTEST=1`; screenshots with
 `tools/winid.swift` + `screencapture`.
 
 ## 7. Next steps
 
-1. Kamek/Newer: offline linker + extra translated module + loader HLE (section 5).
+1. Try NewerSMBW itself (needs its files: the user's call to download) and fix what it finds.
+   Kamek 2 `.kmk` support.
 2. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the
    patched functions are re-translated.
-3. Detect REL patches on relocated words in `mod_build.py`.
-4. In-game mod menu: list `mods/`, toggle `enabled` and options (writes `mod.toml`); code mods
+3. In-game mod menu: list `mods/`, toggle `enabled` and options (writes `mod.toml`); code mods
    would show "needs a mod build".
-5. Partial `<file offset length>` patches; `<savegame>` test.
+4. Partial `<file offset length>` patches; `<savegame>` test.

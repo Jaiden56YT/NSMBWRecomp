@@ -210,23 +210,271 @@ def memory_patches(mod_dir):
             yield entry
 
 
+def file_mappings(mod_dir):
+    """(disc path or None, host path, is_folder) for every active <file>/<folder>, in order."""
+    out = []
+    for xml, patch, params, root_attr in active_patches(mod_dir):
+        patch_root = xml.parent
+        if root_attr:
+            patch_root = resolve_external(mod_dir, xml.parent, substitute(root_attr, params)) or xml.parent
+        for node in patch:
+            if node.tag not in ("file", "folder"):
+                continue
+            host = resolve_external(mod_dir, patch_root, substitute(node.get("external", ""), params))
+            if host is not None:
+                out.append((substitute(node.get("disc", ""), params) or None, host, node.tag == "folder"))
+    return out
+
+
+def resolve_disc_file(mappings, disc_path):
+    """Host file the runtime would serve for a disc path (last mapping wins, as in dvd.cpp)."""
+    found = None
+    lower = disc_path.lower()
+    for disc, host, folder in mappings:
+        if not folder and disc and disc.lower() == lower and host.is_file():
+            found = host
+        elif folder and disc:
+            prefix = disc.rstrip("/").lower() + "/"
+            if lower.startswith(prefix):
+                candidate = host / disc_path[len(prefix):]
+                if candidate.is_file():
+                    found = candidate
+        elif folder and not disc:
+            candidate = next(host.rglob(Path(disc_path).name), None)
+            if candidate is not None and candidate.is_file():
+                found = candidate
+    if found is None:
+        plain = REPO / "extracted" / "files" / disc_path.lstrip("/")
+        if plain.is_file():
+            found = plain
+    return found
+
+
+# ---------------------------------------------------------------- game image
+
+class GameImage:
+    """Copies of main.dol and the four RELs, addressed by guest address."""
+
+    def __init__(self):
+        self.files = {"main.dol": bytearray((REPO / "code" / "main.dol").read_bytes())}
+        self.sections = dol_sections(REPO / "code" / "main.dol")
+        for name, (base, _) in RELS.items():
+            self.files[name] = bytearray((REPO / "code" / "rels" / f"{name}.rel").read_bytes())
+            self.sections += rel_sections(REPO / "code" / "rels" / f"{name}.rel", name, base)
+        self.rel_relocs = {name: self._rel_reloc_sites(name) for name in RELS}
+
+    def section_for(self, address, length):
+        return next((s for s in self.sections if s.contains(address, length)), None)
+
+    def read(self, address, length):
+        section = self.section_for(address, length)
+        if section is None:
+            return None
+        start = section.file_offset + address - section.address
+        return bytes(self.files[section.module][start:start + length])
+
+    def write(self, address, value):
+        section = self.section_for(address, len(value))
+        start = section.file_offset + address - section.address
+        self.files[section.module][start:start + len(value)] = value
+        if section.module in RELS:
+            self._drop_rel_relocs(section.module, address, len(value))
+        return section
+
+    # A REL's own relocations are applied when the translator (and the console) link it, after
+    # the file bytes. A patch on a relocated word would be overwritten, so such relocations are
+    # turned into R_RVL_NOP (201), which keeps the offset chain intact.
+    def _rel_reloc_sites(self, name):
+        d = self.files[name]
+        base = RELS[name][0]
+        count, table = struct.unpack(">II", d[0x0C:0x14])
+        section_offsets = [struct.unpack(">I", d[table + i * 8:table + i * 8 + 4])[0] & ~3 for i in range(count)]
+        imp_offset, imp_size = struct.unpack(">II", d[0x28:0x30])
+        sites = []  # (guest address, length, file offset of the reloc entry)
+        for i in range(imp_size // 8):
+            _, rel_offset = struct.unpack(">II", d[imp_offset + i * 8:imp_offset + i * 8 + 8])
+            pos, section_base, cursor = 0, 0, rel_offset
+            while True:
+                offset, rtype, section = struct.unpack(">HBB", d[cursor:cursor + 4])
+                if rtype == 203:  # R_RVL_STOP
+                    break
+                if rtype == 202:  # R_RVL_SECT
+                    section_base, pos = section_offsets[section], 0
+                else:
+                    pos += offset
+                    if rtype not in (0, 201):
+                        length = 2 if rtype in (4, 5, 6) else 4
+                        sites.append((base + section_base + pos, length, cursor))
+                cursor += 8
+        return sites
+
+    def _drop_rel_relocs(self, name, address, length):
+        d = self.files[name]
+        for site, size, entry in self.rel_relocs[name]:
+            if site < address + length and address < site + size and d[entry + 2] != 201:
+                d[entry + 2] = 201
+                print(f"    {name}: relocation at {site:08X} dropped (patched)")
+
+    def write_files(self, out_code, extra_text=None):
+        out_code.mkdir(parents=True, exist_ok=True)
+        (out_code / "rels").mkdir(exist_ok=True)
+        dol = self.files["main.dol"]
+        if extra_text is not None:
+            dol = add_dol_text_section(dol, *extra_text)
+        (out_code / "main.dol").write_bytes(dol)
+        for name in RELS:
+            (out_code / "rels" / f"{name}.rel").write_bytes(self.files[name])
+
+
+def add_dol_text_section(dol, address, data):
+    """Copy of a DOL with one more text section (the linked Kamek code)."""
+    dol = bytearray(dol)
+    sizes = struct.unpack(">18I", dol[144:216])
+    slot = next(i for i in range(7) if sizes[i] == 0)
+    offset = (len(dol) + 31) & ~31
+    padded = bytes(data) + b"\0" * ((-len(data)) % 32)
+    dol += b"\0" * (offset - len(dol)) + padded
+    struct.pack_into(">I", dol, slot * 4, offset)
+    struct.pack_into(">I", dol, 72 + slot * 4, address)
+    struct.pack_into(">I", dol, 144 + slot * 4, len(padded))
+    return dol
+
+
+# ---------------------------------------------------------------- Kamek (Newer loader format)
+
+NEWER_LOADER = 0x80001800
+# Top of the linked Kamek code. The MEM1 arena ends at 0x817F0040 (nsmbw_product.cpp), and the
+# runtime lowers the arena top to the module's base at boot. The 64 KiB just below 0x817F0040 stay
+# out of the module: the runtime runs __start's first instructions and every guest constructor
+# with r1 = 0x817F0040, so their stack frames land there after the module is copied in (seen as
+# the module's data being overwritten with a stack frame: back chain 0x817F0030, LR 0x80160A40).
+MODULE_TOP = 0x817E0000
+
+
+class KamekModule:
+    def __init__(self, name, base, code, game_patches, seeds):
+        self.name, self.base, self.code = name, base, code
+        self.game_patches = game_patches  # [(address, bytes)] in the loader's order
+        self.seeds = seeds                # function entry points inside the module
+
+
+def parse_kamek_system(data):
+    """Kamek System.bin: addr|0x80000000 + word, or count + addr + count words; FFFFFFFF ends."""
+    patches, i = [], 0
+    while i + 4 <= len(data):
+        word = struct.unpack(">I", data[i:i + 4])[0]
+        i += 4
+        if word == 0xFFFFFFFF:
+            break
+        if word & 0x80000000:
+            patches.append((word, data[i:i + 4]))
+            i += 4
+        else:
+            address = struct.unpack(">I", data[i:i + 4])[0]
+            patches.append((address, data[i + 4:i + 4 + word * 4]))
+            i += 4 + word * 4
+    return patches
+
+
+def looks_like_function(code, offset):
+    if offset % 4 or offset + 4 > len(code):
+        return False
+    word = struct.unpack(">I", code[offset:offset + 4])[0]
+    if word >> 16 == 0x9421 or word == 0x7C0802A6:  # stwu r1,-n(r1) / mflr r0
+        return True
+    if offset >= 4:
+        prev = struct.unpack(">I", code[offset - 4:offset])[0]
+        if prev == 0x4E800020 or (prev >> 26 == 18 and not prev & 1):  # after blr / b
+            return word != 0
+    return offset == 0
+
+
+def link_newer(mod_dir, image, runtime_mem):
+    """Links Newer's DLCode at a fixed MEM1 address, the way NewerSMBW's loader does at runtime.
+
+    Returns None when the mod has no Newer loader. runtime_mem maps addresses outside the
+    DOL/REL sections to bytes already patched (low memory), for REL24 read-modify-write."""
+    mappings = file_mappings(mod_dir)
+    region, version = "US", "2"  # SMNE01 Rev 2, what the loader detects on this disc
+    files = {}
+    for kind in ("System", "DLCode", "DLRelocs"):
+        disc = f"/NewerRes/{kind}{region}_{version}.bin"
+        host = resolve_disc_file(mappings, disc)
+        if host is None:
+            raise SystemExit(f"  Newer loader patch found but {disc} is not in the mod")
+        files[kind] = host.read_bytes()
+        print(f"  kamek: {disc} <- {host} ({len(files[kind])} bytes)")
+
+    code = bytearray(files["DLCode"])
+    code += b"\0" * ((-len(code)) % 32)
+    base = (MODULE_TOP - len(code)) & ~0x1F
+    game = {}  # address -> bytearray(4) words/halfwords written by System.bin + relocations
+    patches = []
+
+    def game_read(address, length):
+        if address in game and len(game[address]) == length:
+            return bytes(game[address])
+        data = image.read(address, length)
+        if data is None:
+            data = runtime_mem.get(address, b"\0" * length)[:length]
+        return data
+
+    for address, data in parse_kamek_system(files["System"]):
+        patches.append((address, bytes(data)))
+        for k in range(0, len(data), 4):
+            game[address + k] = bytearray(data[k:k + 4])
+
+    rel = files["DLRelocs"]
+    if rel[:8] != b"NewerREL":
+        raise SystemExit("  DLRelocs: missing NewerREL header")
+    table = struct.unpack(">I", rel[8:12])[0]
+    seeds = {0}
+    for i in range(12, table, 8):
+        info, location = struct.unpack(">II", rel[i:i + 8])
+        rtype, sym = info >> 24, info & 0xFFFFFF
+        value = struct.unpack(">I", rel[table + sym * 4:table + sym * 4 + 4])[0]
+        target = value if value & 0x80000000 else base + value
+        in_module = not location & 0x80000000
+        where = base + location if in_module else location
+        if not value & 0x80000000 and rtype in (1, 4, 10) and looks_like_function(code, value):
+            seeds.add(value)
+        if rtype == 1:
+            new = struct.pack(">I", target)
+        elif rtype == 4:
+            new = struct.pack(">H", target & 0xFFFF)
+        elif rtype == 5:
+            new = struct.pack(">H", target >> 16)
+        elif rtype == 6:
+            new = struct.pack(">H", ((target >> 16) + ((target >> 15) & 1)) & 0xFFFF)
+        elif rtype == 10:
+            old = struct.unpack(">I", bytes(code[location:location + 4]) if in_module else game_read(where, 4))[0]
+            new = struct.pack(">I", old | ((target - where) & 0x03FFFFFF))
+        else:
+            continue  # the loader skips other types too
+        if in_module:
+            code[location:location + len(new)] = new
+        else:
+            patches.append((where, new))
+            if len(new) == 4:
+                game[where] = bytearray(new)
+    print(f"  kamek: DLCode {len(files['DLCode'])} bytes linked at {base:08X}, "
+          f"{len(patches)} game patch(es), {len(seeds)} entry point(s)")
+    return KamekModule("newer", base, bytes(code), patches, sorted(base + s for s in seeds))
+
+
 # ---------------------------------------------------------------- patching
 
-def apply_code_patches(mod_dir, out_code):
-    out_code.mkdir(parents=True, exist_ok=True)
-    (out_code / "rels").mkdir(exist_ok=True)
-    files = {"main.dol": bytearray((REPO / "code" / "main.dol").read_bytes())}
-    sections = dol_sections(REPO / "code" / "main.dol")
-    for name, (base, _) in RELS.items():
-        files[name] = bytearray((REPO / "code" / "rels" / f"{name}.rel").read_bytes())
-        sections += rel_sections(REPO / "code" / "rels" / f"{name}.rel", name, base)
+def build_inputs(mod_dir, out_code):
+    """Applies everything that can be static to copies of the game binaries.
 
-    def read(section, address, length):
-        start = section.file_offset + address - section.address
-        return bytes(files[section.module][start:start + length])
+    Returns (stats, kamek module or None, runtime patches [(addr, bytes)])."""
+    image = GameImage()
+    stats = {"baked": 0, "mismatch": 0, "runtime": 0, "unsupported": 0}
+    runtime_patches, low_memory = [], {}
+    xml_patches = list(memory_patches(mod_dir))
+    has_loader = any(p["valuefile"] and p["offset"] == NEWER_LOADER for p in xml_patches)
 
-    stats = {"code": 0, "data": 0, "mismatch": 0, "outside": 0, "unsupported": 0}
-    for patch in memory_patches(mod_dir):
+    for patch in xml_patches:
         value, address = patch["value"], patch["offset"]
         if patch["ocarina"]:
             stats["unsupported"] += 1
@@ -234,8 +482,8 @@ def apply_code_patches(mod_dir, out_code):
             continue
         if patch["search"]:
             found = None
-            for section in (s for s in sections if s.executable):
-                blob = read(section, section.address, section.size)
+            for section in (s for s in image.sections if s.executable):
+                blob = image.read(section.address, section.size)
                 i = blob.find(patch["original"])
                 while i >= 0 and (section.address + i) % patch["align"]:
                     i = blob.find(patch["original"], i + 1)
@@ -246,29 +494,75 @@ def apply_code_patches(mod_dir, out_code):
                 stats["mismatch"] += 1
                 continue
             address = found
-        section = next((s for s in sections if s.contains(address, len(value))), None)
-        if section is None:
-            stats["outside"] += 1
-            what = f"valuefile {Path(patch['valuefile']).name}" if patch["valuefile"] else f"{len(value)} bytes"
-            print(f"  ! {patch['source']}: {address:08X} ({what}) is outside main.dol/RELs: "
-                  "new code there needs an extra translated module (not done yet)")
+        current = image.read(address, len(value))
+        if current is None:
+            # Low memory, .bss, MEM2: the runtime writes these at boot (riivolution_memory.cpp).
+            if patch["valuefile"] and address == NEWER_LOADER and has_loader:
+                print(f"  = {patch['source']}: Newer loader at {address:08X} is replaced by the native loader")
+            else:
+                stats["runtime"] += 1
+                low_memory[address] = value
             continue
-        if not section.executable:
-            stats["data"] += 1  # the runtime applies data patches at boot
-            continue
-        current = read(section, address, len(value))
-        if patch["original"] and current != patch["original"][:len(current)] and current != value:
+        if patch["original"] and current[:len(patch["original"])] != patch["original"] and current != value:
             stats["mismatch"] += 1
             continue
-        start = section.file_offset + address - section.address
-        files[section.module][start:start + len(value)] = value
-        stats["code"] += 1
-        print(f"  + {patch['source']}: {section.module} {address:08X} <- {value.hex().upper()}")
+        section = image.write(address, value)
+        stats["baked"] += 1
+        kind = "code" if section.executable else "data"
+        print(f"  + {patch['source']}: {section.module} {kind} {address:08X} <- {value[:16].hex().upper()}"
+              + ("..." if len(value) > 16 else ""))
 
-    (out_code / "main.dol").write_bytes(files["main.dol"])
-    for name in RELS:
-        (out_code / "rels" / f"{name}.rel").write_bytes(files[name])
-    return stats
+    kamek = link_newer(mod_dir, image, low_memory) if has_loader else None
+    if kamek:
+        for address, value in kamek.game_patches:
+            if image.read(address, len(value)) is None:
+                runtime_patches.append((address, value))
+                continue
+            section = image.write(address, value)
+            stats["baked"] += 1
+            kind = "code" if section.executable else "data"
+            print(f"  + kamek: {section.module} {kind} {address:08X} <- {value[:16].hex().upper()}")
+    image.write_files(out_code, (kamek.base, kamek.code) if kamek else None)
+    return stats, kamek, runtime_patches
+
+
+def write_function_map(out, kamek):
+    path = out / "function_map.txt"
+    text = (PORT / "function_map_us.txt").read_text()
+    if kamek:
+        text += "".join(f"{a:08X} kamek_{kamek.name}_{a:08X}\n" for a in kamek.seeds)
+    path.write_text(text)
+    return path
+
+
+def write_mod_source(gen, name, kamek, runtime_patches):
+    """C++ the mod build links in: the module image and the patches outside the game binaries."""
+    mod_dir = gen / "mod"
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    for old in mod_dir.glob("*.cpp"):
+        old.unlink()
+    if not kamek and not runtime_patches:
+        return
+    ident = re.sub(r"\W", "_", name)
+
+    def array(label, data):
+        rows = [", ".join(f"0x{b:02X}" for b in data[i:i + 16]) for i in range(0, len(data), 16)]
+        return f"alignas(32) const uint8_t {label}[] = {{\n    " + ",\n    ".join(rows) + "\n};\n"
+
+    lines = ["// Generated by tools/mod_build.py - do not edit. Contains the mod's code: do not share.",
+             '#include "hle/storage/riivolution.h"', "#include <cstdint>", "", "namespace {"]
+    if kamek:
+        lines.append(array("kModuleImage", kamek.code))
+    for i, (_, value) in enumerate(runtime_patches):
+        lines.append(array(f"kPatch{i}", value))
+    lines += ["struct Register {", "    Register() {"]
+    if kamek:
+        lines.append(f'        RuntimeRiivolution::RegisterModImage(0x{kamek.base:08X}u, kModuleImage, '
+                     f'sizeof(kModuleImage), "{name} ({kamek.name})");')
+    for i, (address, _) in enumerate(runtime_patches):
+        lines.append(f"        RuntimeRiivolution::RegisterModPatch(0x{address:08X}u, kPatch{i}, sizeof(kPatch{i}));")
+    lines += ["    }", "} g_register;", "} // namespace", ""]
+    (mod_dir / f"mod_{ident}.cpp").write_text("\n".join(lines))
 
 
 # ---------------------------------------------------------------- translation
@@ -280,14 +574,14 @@ def write_project(src, dst, replacements):
     dst.write_text(text)
 
 
-def translate(out, code_dir, threads):
+def translate(out, code_dir, threads, function_map):
     env = dict(os.environ, DOTNET_ROLL_FORWARD="Major")
     common = {
         "workspace_root: .": f"workspace_root: {PORT}",
         '"../../code/main.dol"': f'"{code_dir / "main.dol"}"',
         "native_registration_root: native_us": f"native_registration_root: {PORT / 'native_us'}",
         "native_abi_directories: [native_us]": f"native_abi_directories: [{PORT / 'native_us'}]",
-        "path: function_map_us.txt": f"path: {PORT / 'function_map_us.txt'}",
+        "path: function_map_us.txt": f"path: {function_map}",
     }
     projects = out / "projects"
     projects.mkdir(parents=True, exist_ok=True)
@@ -351,16 +645,18 @@ def main():
     name = args.name or mod_dir.name
     out = PORT / "mod_builds" / name
     print(f"mod '{name}': {mod_dir}")
-    stats = apply_code_patches(mod_dir, out / "code")
-    print(f"  code patches baked in: {stats['code']}, data patches (left to the runtime): {stats['data']}, "
-          f"other region/version: {stats['mismatch']}, outside known sections: {stats['outside']}, "
-          f"unsupported: {stats['unsupported']}")
+    stats, kamek, runtime_patches = build_inputs(mod_dir, out / "code")
+    print(f"  baked into main.dol/RELs: {stats['baked']}, other region/version: {stats['mismatch']}, "
+          f"left to the runtime (outside the binaries): {stats['runtime']}, unsupported: {stats['unsupported']}"
+          + (f", kamek module at {kamek.base:08X} ({len(kamek.code)} bytes)" if kamek else ""))
     if args.dry_run:
         return
-    if stats["code"] == 0:
-        print("  no code patches: the normal build runs this mod as is")
+    if stats["baked"] == 0 and not kamek:
+        print("  nothing to bake: the normal build runs this mod as is")
         return
-    gen = translate(out, out / "code", args.threads)
+    function_map = write_function_map(out, kamek)
+    gen = translate(out, out / "code", args.threads, function_map)
+    write_mod_source(gen, name, kamek, runtime_patches)
     build_dir = UPSTREAM / f"build_mac_mod_{name}"
     configure = ["cmake", "-S", str(UPSTREAM / "runtime"), "-B", str(build_dir), "-G", "Ninja",
                  "-DCMAKE_BUILD_TYPE=Release", "-DMKW_BUILD_NSMBW=ON",
