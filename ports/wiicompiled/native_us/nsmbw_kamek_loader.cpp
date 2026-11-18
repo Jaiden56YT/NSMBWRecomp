@@ -24,24 +24,44 @@
 
 #include <cstdio>
 
-extern "C" void NsmbwKamekLoader_80001800(CpuContext* ctx)
+// Shared by every native Kamek loader: NewerSMBW's at 0x80001800 below, and the one a Kamek 2 mod
+// build generates at its own loader's address (generated_nsmbw/mod/mod_<name>.cpp). Writes the
+// loader's data patches, then runs the module's static constructors (Kamek 2 binaries carry them;
+// its loader calls them after linking). Runs once.
+extern "C" void NsmbwRunKamekLoader(CpuContext* ctx, uint32_t entry)
 {
-    static bool reported = false;
-    if (!reported) {
-        reported = true;
-        const auto& images = RuntimeRiivolution::ModImages();
-        if (images.empty()) {
-            std::printf("[riivolution] WARNING: the game called a Kamek loader at 0x80001800 but this build "
-                        "has no mod code; build the mod with tools/mod_build.py\n");
+    static bool done = false;
+    if (done) {
+        ctx->gpr[3] = 1;
+        return;
+    }
+    done = true;
+    const auto& images = RuntimeRiivolution::ModImages();
+    if (images.empty()) {
+        std::printf("[riivolution] WARNING: the game called a Kamek loader at 0x%08X but this build "
+                    "has no mod code; build the mod with tools/mod_build.py\n", entry);
+    }
+    const uint32_t patched = RuntimeRiivolution::ApplyModLoaderPatches();
+    for (const auto& image : images) {
+        std::printf("[riivolution] Kamek loader (native, 0x%08X): %s linked at 0x%08X (%u bytes), "
+                    "%u data patch(es) applied\n",
+                    entry, image.name.c_str(), image.base, image.size, patched);
+    }
+    const auto& ctors = RuntimeRiivolution::ModCtors();
+    if (!ctors.empty()) {
+        const uint32_t savedLr = ctx->lr;
+        for (const uint32_t ctor : ctors) {
+            InvokeIndirectCpu(ctor, ctx);
         }
-        const uint32_t patched = RuntimeRiivolution::ApplyModLoaderPatches();
-        for (const auto& image : images) {
-            std::printf("[riivolution] Kamek loader (native): %s linked at 0x%08X (%u bytes), "
-                        "%u data patch(es) applied\n",
-                        image.name.c_str(), image.base, image.size, patched);
-        }
+        ctx->lr = savedLr;
+        std::printf("[riivolution] Kamek loader: ran %zu static constructor(s)\n", ctors.size());
     }
     ctx->gpr[3] = 1;
+}
+
+extern "C" void NsmbwKamekLoader_80001800(CpuContext* ctx)
+{
+    NsmbwRunKamekLoader(ctx, 0x80001800u);
 }
 
 PPC_NATIVE_OVERRIDE_VOID(80001800, NsmbwKamekLoader_80001800, (CpuContext* ctx), (ctx));

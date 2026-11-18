@@ -109,6 +109,11 @@ def resolve_external(sd_root, patch_root, external):
     return base / external.lstrip("/")
 
 
+def load_mod_toml(mod_dir):
+    path = mod_dir / "mod.toml"
+    return tomllib.loads(path.read_text()) if path.is_file() else {}
+
+
 def load_mod_settings(mod_dir):
     path = mod_dir / "mod.toml"
     if not path.is_file():
@@ -355,10 +360,30 @@ MODULE_TOP = 0x817F0040
 
 
 class KamekModule:
-    def __init__(self, name, base, code, text_size, game_patches, seeds):
+    def __init__(self, name, base, code, text_size, game_patches, seeds, ctors=(), loader=NEWER_LOADER):
         self.name, self.base, self.code, self.text_size = name, base, code, text_size
         self.game_patches = game_patches  # [(address, bytes)] in the loader's order
         self.seeds = seeds                # function entry points inside the module
+        self.ctors = list(ctors)          # static constructors the loader calls after linking
+        self.loader = loader              # guest address the game calls to run the loader
+
+
+def split_code_data(code, pointer_sites, code_sites):
+    """End of the code part of a Kamek blob (code first, then rodata/data/bss).
+
+    Instruction relocations (HA/LO/REL24/branches) only occur in code and pointer relocations
+    (ADDR32) only in data, so the code ends at the last blr/b before the first in-module pointer
+    site, or after the last instruction site when there is no data (NewerSMBW 1.30 US: 0x59484).
+    Relocation targets inside the code part are function entries (vtable slots, callbacks, hook
+    targets); targets in the data part are data and must not be translated."""
+    limit = min(pointer_sites) if pointer_sites else max(code_sites, default=len(code) - 4) + 4
+    limit = (min(limit, len(code)) + 3) & ~3
+
+    def ends_function(i):
+        word = struct.unpack(">I", code[i:i + 4])[0]
+        return word == 0x4E800020 or (word >> 26 == 18 and not word & 1)  # blr, or b without link
+
+    return next((i + 4 for i in range(limit - 4, -1, -4) if ends_function(i)), limit)
 
 
 def parse_kamek_system(data):
@@ -451,23 +476,171 @@ def link_newer(mod_dir, image, runtime_mem):
             patches.append((where, new))
             if len(new) == 4:
                 game[where] = bytearray(new)
-    # Old Kamek links one blob: .text first, then rodata/data. Instruction relocations
-    # (HA/LO/REL24) only occur in code and pointer relocations (ADDR32) only in data, so the code
-    # ends at the last blr before the first in-module ADDR32 site (NewerSMBW 1.30 US: 0x59484).
-    # Every relocation target inside the code part is a function entry (vtable slots, callbacks,
-    # hook targets); targets in the data part are data and must not be translated.
-    limit = min(pointer_sites) if pointer_sites else max(code_sites, default=len(code) - 4) + 4
-    limit = (min(limit, len(code)) + 3) & ~3
-
-    def ends_function(i):
-        word = struct.unpack(">I", code[i:i + 4])[0]
-        return word == 0x4E800020 or (word >> 26 == 18 and not word & 1)  # blr, or b without link
-
-    text_size = next((i + 4 for i in range(limit - 4, -1, -4) if ends_function(i)), limit)
+    text_size = split_code_data(code, pointer_sites, code_sites)
     seeds = sorted({0} | {t for t in targets if t < text_size and t % 4 == 0})
     print(f"  kamek: DLCode {len(files['DLCode'])} bytes linked at {base:08X} (code 0x{text_size:X} bytes), "
           f"{len(patches)} game patch(es), {len(seeds)} entry point(s)")
     return KamekModule("newer", base, bytes(code), text_size, patches, [base + t for t in seeds])
+
+
+# ---------------------------------------------------------------- Kamek 2 binaries
+
+KAMEK_MAGIC = b"Kamek\0\0"
+KAMEK_ARGS = {1: 1, 4: 1, 5: 1, 6: 1, 10: 1, 32: 1, 33: 1, 34: 1, 35: 2, 36: 2, 37: 2, 38: 2, 64: 1, 65: 1}
+
+
+def parse_kamek2(data):
+    """Kamek 2 binary (Treeki/Kamek KamekFile): 'Kamek\0\0' + version (1-3), bss size, code size,
+    then from version 2 the constructor range [ctorStart, ctorEnd) (version 3: chunk size), code,
+    and a command stream. Each command is (id << 24 | address24); address24 0xFFFFFE means an
+    absolute address follows, anything else is an offset into the module."""
+    if data[:7] != KAMEK_MAGIC or data[7] not in (1, 2, 3):
+        raise ValueError("not a Kamek binary")
+    version = data[7]
+    bss, code_size = struct.unpack(">II", data[8:16])
+    ctor_start = ctor_end = 0
+    end = len(data)
+    header = 0x10
+    if version >= 2:
+        ctor_start, ctor_end = struct.unpack(">II", data[16:24])
+        header = 0x20
+        if version == 3:
+            end = struct.unpack(">I", data[24:28])[0]
+    code = data[header:header + code_size]
+    commands, i = [], header + code_size
+    while i < end:
+        word = struct.unpack(">I", data[i:i + 4])[0]
+        i += 4
+        cid, addr = word >> 24, word & 0xFFFFFF
+        absolute = addr == 0xFFFFFE
+        if absolute:
+            addr = struct.unpack(">I", data[i:i + 4])[0]
+            i += 4
+        if cid not in KAMEK_ARGS:
+            raise ValueError(f"unknown Kamek command {cid} at 0x{i - 4:X}")
+        args = struct.unpack(f">{KAMEK_ARGS[cid]}I", data[i:i + 4 * KAMEK_ARGS[cid]])
+        i += 4 * KAMEK_ARGS[cid]
+        commands.append((cid, absolute, addr, args))
+    return version, bss, code, ctor_start, ctor_end, commands
+
+
+def link_kamek2(path, image, runtime_mem, loader):
+    """Links a Kamek 2 binary at a fixed MEM1 address, as kamekLoader does after allocating it."""
+    version, bss, blob, ctor_start, ctor_end, commands = parse_kamek2(path.read_bytes())
+    code = bytearray(blob) + bytearray(bss)
+    code += b"\0" * ((-len(code)) % 32)
+    base = (MODULE_TOP - len(code)) & ~0x1F
+    game, patches = {}, []
+    targets, pointer_sites, code_sites = set(), [], []
+
+    def resolve(value):
+        if value & 0x80000000:
+            return value
+        targets.add(value)
+        return base + value
+
+    def read(where, length):
+        if base <= where < base + len(code):
+            return bytes(code[where - base:where - base + length])
+        if where in game and len(game[where]) == length:
+            return bytes(game[where])
+        data = image.read(where, length)
+        return data if data is not None else runtime_mem.get(where, b"\0" * length)[:length]
+
+    def write(where, value):
+        if base <= where < base + len(code):
+            code[where - base:where - base + len(value)] = value
+        else:
+            patches.append((where, value))
+            game[where] = bytearray(value)
+
+    for cid, absolute, addr, args in commands:
+        where = addr if absolute else base + addr
+        in_module = base <= where < base + len(code)
+        if in_module:
+            (pointer_sites if cid in (1, 35) else code_sites if cid in (4, 5, 6, 10, 64, 65) else []).append(where - base)
+        if cid == 1:                       # Addr32 / WritePointer
+            write(where, struct.pack(">I", resolve(args[0])))
+        elif cid in (4, 5, 6):             # Addr16 Lo / Hi / Ha
+            t = resolve(args[0])
+            half = t & 0xFFFF if cid == 4 else t >> 16 if cid == 5 else ((t >> 16) + ((t >> 15) & 1)) & 0xFFFF
+            write(where, struct.pack(">H", half))
+        elif cid == 10:                    # Rel24
+            old = struct.unpack(">I", read(where, 4))[0]
+            write(where, struct.pack(">I", (old & 0xFC000003) | ((resolve(args[0]) - where) & 0x03FFFFFC)))
+        elif cid in (32, 33, 34):          # Write32 / 16 / 8 (raw values)
+            size = {32: 4, 33: 2, 34: 1}[cid]
+            write(where, args[0].to_bytes(4, "big")[4 - size:])
+        elif cid in (35, 36, 37, 38):      # CondWritePointer / CondWrite32 / 16 / 8
+            size = {35: 4, 36: 4, 37: 2, 38: 1}[cid]
+            value, original = args
+            if read(where, size) == original.to_bytes(4, "big")[4 - size:]:
+                value = resolve(value) if cid == 35 else value
+                write(where, value.to_bytes(4, "big")[4 - size:])
+        elif cid in (64, 65):              # Branch / BranchLink
+            write(where, struct.pack(">I", 0x48000000 | ((resolve(args[0]) - where) & 0x03FFFFFC) | (cid - 64)))
+
+    text_size = split_code_data(code, pointer_sites, code_sites)
+    ctors = [struct.unpack(">I", code[o:o + 4])[0] for o in range(ctor_start, ctor_end, 4)]
+    seeds = sorted({0} | {t for t in targets if t < text_size and t % 4 == 0} |
+                   {c - base for c in ctors if base <= c < base + text_size})
+    print(f"  kamek: {path.name} (Kamek binary v{version}) {len(blob)} bytes + 0x{bss:X} bss linked at "
+          f"{base:08X} (code 0x{text_size:X} bytes), {len(commands)} command(s), {len(patches)} game patch(es), "
+          f"{len(ctors)} constructor(s), {len(seeds)} entry point(s), loader at {loader:08X}")
+    return KamekModule(path.stem, base, bytes(code), text_size, patches, [base + t for t in seeds], ctors, loader)
+
+
+def find_kamek2(mod_dir, settings):
+    """The Kamek binary for SMNE01 Rev 2: mod.toml [kamek] binary = "<path in the mod folder>", or
+    the only file in the mod whose name marks US v2 (Kamek's version names: E2, else E/US/NTSC)."""
+    configured = settings.get("binary")
+    if configured:
+        path = (mod_dir / configured).resolve()
+        if not path.is_file():
+            raise SystemExit(f"  mod.toml kamek.binary {configured} not found")
+        return path
+    found = []
+    for path in mod_dir.rglob("*"):
+        if path.is_file() and path.stat().st_size > 16:
+            with open(path, "rb") as f:
+                if f.read(7) == KAMEK_MAGIC:
+                    found.append(path)
+    if len(found) <= 1:
+        return found[0] if found else None
+    for pattern in (r"(^|[^A-Za-z])E_?2([^0-9]|$)", r"(^|[^A-Za-z])(E|US|NTSC|ntsc|us)([^A-Za-z]|$)"):
+        matches = [p for p in found if re.search(pattern, p.stem)]
+        if len(matches) == 1:
+            return matches[0]
+    raise SystemExit("  several Kamek binaries in the mod; set [kamek] binary in mod.toml: " +
+                     ", ".join(str(p.relative_to(mod_dir)) for p in found))
+
+
+def find_kamek2_loader(xml_patches, image, settings):
+    """Where the game enters the mod's Kamek loader: mod.toml [kamek] loader = 0x..., else the
+    target of a hook (b/bl, or a pointer in data) that the XML installs into a code blob it writes
+    outside main.dol/RELs (the loader that Kamek's -output-riiv / -static builds put in low memory)."""
+    if "loader" in settings:
+        value = settings["loader"]
+        return int(value, 0) if isinstance(value, str) else int(value)
+    blobs = [(p["offset"], p["offset"] + len(p["value"])) for p in xml_patches
+             if not p["search"] and image.read(p["offset"], len(p["value"])) is None and len(p["value"]) >= 16]
+    entries = []
+    for p in xml_patches:
+        if image.read(p["offset"], len(p["value"])) is None or p["offset"] % 4:
+            continue
+        for k in range(0, len(p["value"]) - 3, 4):
+            word = struct.unpack(">I", p["value"][k:k + 4])[0]
+            where = p["offset"] + k
+            target = word
+            if word >> 26 == 18:  # b / bl
+                li = word & 0x03FFFFFC
+                target = where + (li - 0x04000000 if li & 0x02000000 else li)
+            if any(a <= target < b for a, b in blobs) and target not in entries:
+                entries.append(target)
+    if len(entries) > 1:
+        raise SystemExit("  several possible Kamek loader entries " + ", ".join(f"{e:08X}" for e in entries) +
+                         "; set [kamek] loader in mod.toml")
+    return entries[0] if entries else None
 
 
 # ---------------------------------------------------------------- compatibility patches
@@ -527,6 +700,9 @@ def build_inputs(mod_dir, out_code):
             # Low memory, .bss, MEM2: the runtime writes these at boot (riivolution_memory.cpp).
             if patch["valuefile"] and address == NEWER_LOADER and has_loader:
                 print(f"  = {patch['source']}: Newer loader at {address:08X} is replaced by the native loader")
+            elif address < 0x80003000 and len(value) >= 16:
+                print(f"  = {patch['source']}: {len(value)} bytes at {address:08X} (a loader in low memory; "
+                      "the runtime writes it, the native loader runs instead)")
             else:
                 stats["runtime"] += 1
                 low_memory[address] = value
@@ -541,12 +717,21 @@ def build_inputs(mod_dir, out_code):
               + ("..." if len(value) > 16 else ""))
 
     kamek = link_newer(mod_dir, image, low_memory) if has_loader else None
+    if kamek is None:
+        settings = load_mod_toml(mod_dir).get("kamek", {})
+        binary = find_kamek2(mod_dir, settings)
+        if binary is not None:
+            loader = find_kamek2_loader(xml_patches, image, settings)
+            if loader is None:
+                raise SystemExit(f"  {binary.name} is a Kamek binary but no loader entry was found; "
+                                 "set [kamek] loader = 0x... in mod.toml")
+            kamek = link_kamek2(binary, image, low_memory, loader)
     if kamek:
         # The loader runs in the boot scene, after the RELs' static constructors have filled their
         # data (profile tables and objects). Its code patches are baked (constructors never write
         # code); its data patches are applied by the native loader at that same moment, otherwise
         # the constructors would overwrite them with vanilla values.
-        loader_data = 0
+        loader_data = kamek_code = 0
         for address, value in kamek.game_patches:
             section = image.section_for(address, len(value))
             if section is None or not section.executable:
@@ -555,7 +740,8 @@ def build_inputs(mod_dir, out_code):
                 continue
             image.write(address, value)
             stats["baked"] += 1
-        print(f"  kamek: {stats['baked']} code patch(es) baked in total, {loader_data} data patch(es) "
+            kamek_code += 1
+        print(f"  kamek: {kamek_code} code patch(es) baked, {loader_data} data patch(es) "
               "applied by the native loader at run time")
     if kamek:
         for address, original, value, why in KAMEK_COMPAT_PATCHES:
@@ -601,7 +787,16 @@ def write_mod_source(gen, name, kamek, runtime_patches):
                      f'sizeof(kModuleImage), "{name} ({kamek.name})");')
     for i, (address, _) in enumerate(runtime_patches):
         lines.append(f"        RuntimeRiivolution::RegisterModPatch(0x{address:08X}u, kPatch{i}, sizeof(kPatch{i}));")
+    for ctor in (kamek.ctors if kamek else []):
+        lines.append(f"        RuntimeRiivolution::RegisterModCtor(0x{ctor:08X}u);")
     lines += ["    }", "} g_register;", "} // namespace", ""]
+    if kamek and kamek.loader != NEWER_LOADER:
+        # The loader the game calls, replaced natively (Newer's 0x80001800 is in native_us).
+        a = f"{kamek.loader:08X}"
+        lines += ['#include "hle_stubs.h"', '#include "ppc_runtime.h"', '#include "abi_bridge.h"',
+                  'extern "C" void NsmbwRunKamekLoader(CpuContext* ctx, uint32_t entry);',
+                  f'extern "C" void ModKamekLoader_{a}(CpuContext* ctx) {{ NsmbwRunKamekLoader(ctx, 0x{a}u); }}',
+                  f"PPC_NATIVE_OVERRIDE_VOID({a}, ModKamekLoader_{a}, (CpuContext* ctx), (ctx));", ""]
     (mod_dir / f"mod_{ident}.cpp").write_text("\n".join(lines))
 
 

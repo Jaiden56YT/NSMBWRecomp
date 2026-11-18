@@ -13,7 +13,7 @@ each kind, the design for code mods, and what is left.
 | Multi-region XMLs | the same patch listed per region with `original=` | **Works**: only the patch whose `original` matches US Rev 2 is applied |
 | Code memory patches (instructions in main.dol/RELs) | `<memory>` into `.text` | **Works in a mod build**: `tools/mod_build.py` bakes them in and re-translates (~2 min + build) |
 | New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build**: NewerSMBW 1.30 boots to its title (including its attract-mode replays), its own world map (Koopatlas) and plays 1-1 at 60 fps on the Mac |
-| New code, Kamek 2 binaries (`.kmk` + kamekLoader) | Kamek 2 loader + binary | **Not yet** (same pipeline, different file format) |
+| New code, Kamek 2 binaries (`Kamek\0\0` v1-v3, kamekLoader) | loader in low memory + binary on disc | **Works in a mod build** with a hand-made test mod (section 5b); not yet tried with a released Kamek 2 mod |
 | Dolphin texture packs | `Load/Textures/SMN/` | Already supported (`nsmbw_data/texture_replacements/SMN`) |
 | Ocarina/Gecko codes (`ocarina="true"`) | `<memory ocarina>` | Not supported (logged and skipped) |
 
@@ -322,8 +322,46 @@ Other notes:
   other way would show as `missing_target` into `0x8176EE60`..`0x817C82E4`; add it to the map.
 - `TRANSLATOR_LOG_SKIPS_FROM=<hex>` makes the translator list every map entry it could not
   translate at or above that address (the default log shows only the first 20, all REL entries).
-- Kamek 2 binaries (`.kmk`, used by newer projects) need a parser for their command list
-  (upstream's `KamekChunk` handles the Pulsar variant); the rest of the pipeline is the same.
+
+## 5b. Kamek 2 binaries
+
+Mods built with Treeki's Kamek (the C# linker, 2015 on) ship one binary per game version
+(`Kamek\0\0` + format version 1-3; file names follow Kamek's version names, `E2` for US Rev 2)
+and a small loader that Kamek's `-output-riiv` / `-static` builds write to low memory through
+Riivolution `<memory>` patches, plus a hook that makes the game call it. The loader allocates
+code + `.bss`, applies the command list and calls the static constructors in
+`[ctorStart, ctorEnd)`. Commands (`id << 24 | address24`; `0xFFFFFE` = an absolute address
+follows, otherwise an offset into the module): Addr32/WritePointer (1), Addr16 Lo/Hi/Ha (4/5/6),
+Rel24 (10), Write32/16/8 (32-34, raw values), CondWritePointer/CondWrite32/16/8 (35-38: value,
+original; written only where memory holds the original), Branch/BranchLink (64/65).
+
+`mod_build.py` (when there is no Newer loader):
+
+- **binary**: `[kamek] binary = "<path in the mod folder>"` in `mod.toml`, else the only file in
+  the mod that starts with `Kamek\0\0`, else the one whose name marks US Rev 2 (`E2`, then
+  `E`/`US`/`NTSC`);
+- **loader entry**: `[kamek] loader = 0x...`, else the target of a hook the XML installs (a
+  `b`/`bl` or a pointer in data) into a code blob it writes outside main.dol/RELs;
+- links code + zeroed `.bss` ending at the arena top, applies the commands (module-relative ones
+  to the image; game-side code patches baked, game data patches written by the native loader),
+  splits code from data as for Newer, seeds relocation targets in the code and the constructors;
+- generates the native loader at the loader's address (`PPC_NATIVE_OVERRIDE_VOID` in
+  `generated_nsmbw/mod/mod_<name>.cpp`), which calls `NsmbwRunKamekLoader`
+  (`nsmbw_kamek_loader.cpp`, shared with Newer's 0x80001800): data patches, then the module's
+  constructors (`RuntimeRiivolution::RegisterModCtor`), then returns 1.
+
+Difference from a console: hooks into game code are baked into the translation, so they are live
+from boot, while a console's loader installs them when it runs. A hook that fires before the
+loader runs sees the module's data before its constructors have run (the test mod shows it: the
+counter hook ran twice before the constructor set it to 100).
+
+Test (`python3 -I tools/tests/make_kamek2_testmod.py <mods>/KamekTest2`, format version 2): the
+binary (`Code/E2.bin`) and the loader entry (0x80001900, from the boot-table pointer) were found
+automatically; 11 commands, 1 constructor, `.bss` counter. Run: `Kamek loader (native,
+0x80001900): ... 1 data patch(es) applied`, `ran 1 static constructor(s)`, the CondWrite32 renamed
+the save to `KMK2j2d.sav`, and player 1's lives went 42, 43, 45, 46 (constructor's 100 + scene
+count - 60); the map shows Mario x46. The parser was also checked against a version 3 copy of the
+binary (same result, stops at the chunk size).
 
 ## 6. Testing (Mac)
 
@@ -373,7 +411,8 @@ Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>
 ## 7. Next steps
 
 1. NewerSMBW: play further worlds (bosses, Koopatlas features, the credits) to find what else
-   breaks. Kamek 2 `.kmk` support.
+   breaks. Try a released Kamek 2 mod (its loader may be reached by a direct `bl` from game code,
+   which the test mod does not cover).
 2. Re-run the vanilla translation with the fixed translator (REL `.bss` layout) in the main
    checkout and rebuild.
 3. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the

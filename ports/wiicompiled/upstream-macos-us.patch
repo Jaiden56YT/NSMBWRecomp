@@ -6545,7 +6545,7 @@ index 7fddf83..c3f5c0a 100644
      std::call_once(g_riivoOnce, RiivoInitialize);
      return g_riivoState.overlays;
 diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
-index ff7c71c..7e8196f 100644
+index ff7c71c..4ece636 100644
 --- a/runtime/src/hle/storage/riivolution.h
 +++ b/runtime/src/hle/storage/riivolution.h
 @@ -6,6 +6,7 @@
@@ -6588,7 +6588,7 @@ index ff7c71c..7e8196f 100644
      // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
      // overlay directory.
      std::optional<PatchSet> patches;
-@@ -57,4 +74,49 @@ const std::vector<Overlay>& Overlays();
+@@ -57,4 +74,53 @@ const std::vector<Overlay>& Overlays();
  // /title/<id>/data directory is redirected there).
  const std::optional<SaveRedirect>& GetSaveRedirect();
  
@@ -6627,6 +6627,10 @@ index ff7c71c..7e8196f 100644
 +};
 +void RegisterModImage(uint32_t base, const uint8_t* data, uint32_t size, const char* name);
 +void RegisterModPatch(uint32_t address, const uint8_t* data, uint32_t size);
++// A Kamek module's static constructor (Kamek 2 binaries list them; the loader calls them after
++// linking). The product's native loader calls them, in registration order.
++void RegisterModCtor(uint32_t address);
++const std::vector<uint32_t>& ModCtors();
 +const std::vector<ModImage>& ModImages();
 +// Lowest base of any registered image (0 if none): the product keeps the MEM1 arena below it.
 +uint32_t ModImagesLowestBase();
@@ -6640,10 +6644,10 @@ index ff7c71c..7e8196f 100644
  } // namespace RuntimeRiivolution
 diff --git a/runtime/src/hle/storage/riivolution_memory.cpp b/runtime/src/hle/storage/riivolution_memory.cpp
 new file mode 100644
-index 0000000..d054fe7
+index 0000000..9450796
 --- /dev/null
 +++ b/runtime/src/hle/storage/riivolution_memory.cpp
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,323 @@
 +// Riivolution <memory> patches for a statically translated game.
 +//
 +// Riivolution writes its memory patches into RAM after the main executable is
@@ -6893,6 +6897,11 @@ index 0000000..d054fe7
 +    return patches;
 +}
 +
++std::vector<uint32_t>& ModCtorList() {
++    static std::vector<uint32_t> ctors;
++    return ctors;
++}
++
 +} // namespace
 +
 +namespace RuntimeRiivolution {
@@ -6907,6 +6916,10 @@ index 0000000..d054fe7
 +}
 +
 +const std::vector<ModImage>& ModImages() { return ModImageList(); }
++
++void RegisterModCtor(uint32_t address) { ModCtorList().push_back(address); }
++
++const std::vector<uint32_t>& ModCtors() { return ModCtorList(); }
 +
 +uint32_t ModImagesLowestBase() {
 +    uint32_t lowest = 0;
