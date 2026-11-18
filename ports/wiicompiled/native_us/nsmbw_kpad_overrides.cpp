@@ -88,6 +88,12 @@ extern "C" uint32_t NsmbwMovieSkipFilterInput(uint32_t chan, uint32_t hold); // 
 extern "C" int32_t NsmbwMovieSkipTake();                   // same file; 0 none, 1 opening, 2 hint movie
 extern "C" void NsmbwWpadSetConnectedCount(uint32_t count); // nsmbw_wpad_overrides.cpp
 extern "C" const bool* SDL_GetKeyboardState(int* numkeys);
+// Step 0 of online play: input record / replay and per-frame memory hashes (nsmbw_netplay_replay.cpp).
+extern "C" bool NsmbwReplayFrameMode();
+extern "C" void NsmbwReplayBeginFrame();
+extern "C" bool NsmbwReplayTakeInput(uint32_t* channels, uint32_t* hold, float* tilt, int32_t* skip);
+extern "C" void NsmbwReplayRecordInput(uint32_t channels, const uint32_t* hold, const float* tilt, int32_t skip);
+extern "C" void NsmbwReplayEndFrame();
 // Set by nsmbw_tick_read_pump.cpp's self-test (NSMBW_AUTO_PRESS_SELFTEST): a synthetic A press
 // is delivered as one frame of "held" through the same path as a real key.
 extern "C" uint32_t g_nsmbwSelfTestPressBits;
@@ -215,16 +221,45 @@ uint32_t TranslatePadToWpad(const PADStatus& status) {
     return w;
 }
 
-// One keyboard snapshot per VI frame: several KPADRead calls in the same frame must see the
-// same hold/trig/release, or a press edge would be consumed by whichever caller read first.
-void SampleKeyboardForFrame() {
-    uint32_t tick = 0;
-    Memory::TryRead32(kViRetraceCountAddr, tick);
-    if (tick == g_lastSampledTick) return;
-    g_lastSampledTick = tick;
+// Turns one sample's hold word (with the host-only shake bit) and tilt target into the channel's
+// hold / trig / release, shake burst and eased tilt. Shared by the per-VI-tick and per-frame paths.
+void UpdateChannel(uint32_t chan, uint32_t hold, float tiltTarget, uint32_t tick) {
+    RemoteState& r = g_remotes[chan];
+    // A shake press edge (not hold) starts one burst, so a tap is one spin like one flick of
+    // the remote; the game's cooldowns decide how soon the next one can fire.
+    if ((hold & kHostShake) && !(r.prevHold & kHostShake)) r.shakeBurstTicks = kShakeBurstTicks;
+    if (r.shakeBurstTicks != 0) {
+        r.accY = kShakeBurstPattern[(kShakeBurstTicks - r.shakeBurstTicks) & 3u];
+        --r.shakeBurstTicks;
+    } else {
+        r.accY = 0.0f;
+    }
+    if (r.accZ < tiltTarget) {
+        r.accZ = r.accZ + kTiltStepPerTick > tiltTarget ? tiltTarget : r.accZ + kTiltStepPerTick;
+    } else if (r.accZ > tiltTarget) {
+        r.accZ = r.accZ - kTiltStepPerTick < tiltTarget ? tiltTarget : r.accZ - kTiltStepPerTick;
+    }
+    if (chan == 0) LogTilt(tick, -tiltTarget); // log the input (+ = right), not the acc.z target
 
+    r.hold = hold & ~kHostShake;
+    r.trig = (hold & ~r.prevHold) & ~kHostShake;
+    r.release = (r.prevHold & ~hold) & ~kHostShake;
+    r.prevHold = hold;
+
+    if (r.trig != 0 || r.release != 0) {
+        static const bool log = AURORA_ENV("NSMBW_LOG_INPUT") != nullptr;
+        if (log) {
+            std::fprintf(stderr, "[nsmbw][kpad] tick=%u chan=%u hold=0x%04X trig=0x%04X release=0x%04X\n",
+                         tick, chan, r.hold, r.trig, r.release);
+        }
+    }
+}
+
+// The local devices' hold words (with the shake bit) and tilt targets for every channel, and the
+// connected count. Reads SDL, so call it once per sample.
+uint32_t ReadLocalInput(uint32_t (&hold)[kMaxRemotes], float (&tilt)[kMaxRemotes]) {
     InitKeyboardOnce();
-    NsmbwSkipBootScreensApply(); // once per frame; see nsmbw_skip_boot_screens.cpp
+    NsmbwSkipBootScreensApply(); // once per sample; see nsmbw_skip_boot_screens.cpp
     SDL_PumpEvents();
     PADStatus statuses[PAD_CHANMAX]{};
     PADRead(statuses);
@@ -233,59 +268,67 @@ void SampleKeyboardForFrame() {
     // above still runs for the PAD layer's own bookkeeping; TranslatePadToWpad is kept only as
     // documentation of the old fixed mapping and for NSMBW_LEGACY_PAD_MAPPING=1 (player 0 only).
     static const bool legacy = AURORA_ENV("NSMBW_LEGACY_PAD_MAPPING") != nullptr;
-    g_connectedRemotes = legacy ? 1u : NsmbwControlsPlayerCount();
-    NsmbwWpadSetConnectedCount(g_connectedRemotes);
+    const uint32_t connected = legacy ? 1u : NsmbwControlsPlayerCount();
     for (uint32_t chan = 0; chan < kMaxRemotes; ++chan) {
-        RemoteState& r = g_remotes[chan];
-        uint32_t hold = 0;
-        float tiltTarget = 0.0f;
-        if (chan < g_connectedRemotes) {
-            hold = legacy ? TranslatePadToWpad(statuses[0]) : NsmbwControlsReadWpad(chan);
+        hold[chan] = 0;
+        tilt[chan] = 0.0f;
+        if (chan < connected) {
+            hold[chan] = legacy ? TranslatePadToWpad(statuses[0]) : NsmbwControlsReadWpad(chan);
             // acc.z target: tilt right (+input) is -acc.z - see "Sign" in the header comment.
-            tiltTarget = legacy ? 0.0f : -NsmbwControlsReadTilt(chan);
+            tilt[chan] = legacy ? 0.0f : -NsmbwControlsReadTilt(chan);
         }
         if (chan == 0) {
-            hold |= g_nsmbwSelfTestPressBits;
+            hold[chan] |= g_nsmbwSelfTestPressBits;
             g_nsmbwSelfTestPressBits = 0;
         }
-        hold = NsmbwMovieSkipFilterInput(chan, hold); // - skips the opening / a hint movie
-
-        // A shake press edge (not hold) starts one burst, so a tap is one spin like one flick of
-        // the remote; the game's cooldowns decide how soon the next one can fire.
-        if ((hold & kHostShake) && !(r.prevHold & kHostShake)) r.shakeBurstTicks = kShakeBurstTicks;
-        if (r.shakeBurstTicks != 0) {
-            r.accY = kShakeBurstPattern[(kShakeBurstTicks - r.shakeBurstTicks) & 3u];
-            --r.shakeBurstTicks;
-        } else {
-            r.accY = 0.0f;
-        }
-        if (r.accZ < tiltTarget) {
-            r.accZ = r.accZ + kTiltStepPerTick > tiltTarget ? tiltTarget : r.accZ + kTiltStepPerTick;
-        } else if (r.accZ > tiltTarget) {
-            r.accZ = r.accZ - kTiltStepPerTick < tiltTarget ? tiltTarget : r.accZ - kTiltStepPerTick;
-        }
-        if (chan == 0) LogTilt(tick, -tiltTarget); // log the input (+ = right), not the acc.z target
-
-        r.hold = hold & ~kHostShake;
-        r.trig = (hold & ~r.prevHold) & ~kHostShake;
-        r.release = (r.prevHold & ~hold) & ~kHostShake;
-        r.prevHold = hold;
-
-        if (r.trig != 0 || r.release != 0) {
-            static const bool log = AURORA_ENV("NSMBW_LOG_INPUT") != nullptr;
-            if (log) {
-                std::fprintf(stderr, "[nsmbw][kpad] tick=%u chan=%u hold=0x%04X trig=0x%04X release=0x%04X\n",
-                             tick, chan, r.hold, r.trig, r.release);
-                if (chan == 0) {
-                    int numKeys = 0;
-                    const bool* kb = SDL_GetKeyboardState(&numKeys);
-                    std::fprintf(stderr, "[nsmbw][kpad]   pad=0x%04X scancodes down:", statuses[0].button);
-                    for (int i = 0; kb && i < numKeys; ++i) if (kb[i]) std::fprintf(stderr, " %d", i);
-                    std::fprintf(stderr, "\n");
-                }
-            }
-        }
+        hold[chan] = NsmbwMovieSkipFilterInput(chan, hold[chan]); // - skips the opening / a hint movie
     }
+    return connected;
+}
+
+// One keyboard snapshot per VI frame: several KPADRead calls in the same frame must see the
+// same hold/trig/release, or a press edge would be consumed by whichever caller read first.
+void SampleKeyboardForFrame() {
+    uint32_t tick = 0;
+    Memory::TryRead32(kViRetraceCountAddr, tick);
+    if (tick == g_lastSampledTick) return;
+    g_lastSampledTick = tick;
+
+    uint32_t hold[kMaxRemotes];
+    float tilt[kMaxRemotes];
+    g_connectedRemotes = ReadLocalInput(hold, tilt);
+    NsmbwWpadSetConnectedCount(g_connectedRemotes);
+    for (uint32_t chan = 0; chan < kMaxRemotes; ++chan) UpdateChannel(chan, hold[chan], tilt[chan], tick);
+}
+
+// Frame mode (nsmbw_netplay_replay.cpp): one sample per game frame, recorded or replayed.
+// Returns the frame's movie-skip request.
+int32_t SampleForGameFrame() {
+    uint32_t tick = 0;
+    Memory::TryRead32(kViRetraceCountAddr, tick);
+    NsmbwReplayBeginFrame();
+    uint32_t hold[kMaxRemotes];
+    float tilt[kMaxRemotes];
+    uint32_t connected = ReadLocalInput(hold, tilt); // also keeps SDL / the boot-screen skip running
+    int32_t skip = NsmbwMovieSkipTake();
+    if (!NsmbwReplayTakeInput(&connected, hold, tilt, &skip)) NsmbwReplayRecordInput(connected, hold, tilt, skip);
+    g_connectedRemotes = connected;
+    NsmbwWpadSetConnectedCount(g_connectedRemotes);
+    for (uint32_t chan = 0; chan < kMaxRemotes; ++chan) UpdateChannel(chan, hold[chan], tilt[chan], tick);
+    NsmbwReplayEndFrame();
+    return skip;
+}
+
+// NSMBW_LOG_KPAD_CALLERS=1: the first 400 KPAD reads with their VI tick and guest LR, to see
+// how many channel-0 reads a game frame makes and from where.
+void LogCaller(uint32_t chan) {
+    static const bool log = AURORA_ENV("NSMBW_LOG_KPAD_CALLERS") != nullptr;
+    static int n = 0;
+    if (!log || n >= 400) return;
+    ++n;
+    uint32_t tick = 0;
+    Memory::TryRead32(kViRetraceCountAddr, tick);
+    std::fprintf(stderr, "[nsmbw][kpad-caller] tick=%u chan=%u lr=0x%08X\n", tick, chan, CurrentCpuContext()->lr);
 }
 
 void WriteZeroedStatus(uint32_t addr, int8_t wpadErr) {
@@ -345,8 +388,7 @@ void SyncOptionsMenuSoundPause() {
 //   Hint movie - the pause window's exit (0x800D1100) calls dScStage_c's scene exit
 //     0x80102260(3 WORLD_MAP, 0, 2, fader 5); in GAME_MODE_HINT_MOVIE it goes to 0x801018C0,
 //     back to the hint movie list. Called here the same way, once per movie.
-void RunMovieSkip() {
-    const int32_t request = NsmbwMovieSkipTake();
+void RunMovieSkip(int32_t request) {
     if (request == 1) {
         uint32_t movie = 0, state = 0;
         if (!Memory::TryRead32(0x8042A1B8u, movie) || movie == 0) return;
@@ -370,11 +412,22 @@ extern "C" int32_t NsmbwKpadRead_801ED500(uint32_t chan, uint32_t samples, uint3
 {
     (void)isEx;
     try {
-        SampleKeyboardForFrame();
-        if (chan == 0) {
-            SyncOptionsMenuSoundPause(); // before the menu's own sounds: those must not be paused
-            PlayOptionsMenuSounds();
-            RunMovieSkip();
+        static const bool frameMode = NsmbwReplayFrameMode();
+        LogCaller(chan);
+        if (frameMode) {
+            if (chan == 0) {
+                const int32_t skip = SampleForGameFrame();
+                SyncOptionsMenuSoundPause();
+                PlayOptionsMenuSounds();
+                RunMovieSkip(skip);
+            }
+        } else {
+            SampleKeyboardForFrame();
+            if (chan == 0) {
+                SyncOptionsMenuSoundPause(); // before the menu's own sounds: those must not be paused
+                PlayOptionsMenuSounds();
+                RunMovieSkip(NsmbwMovieSkipTake());
+            }
         }
         // Channels below the player count are connected remotes (nsmbw_wpad_overrides.cpp
         // marks the same channels connected for WPADProbe).

@@ -5,9 +5,10 @@ friend's), the room fills up, and everyone goes back to the menu and plays NSMBW
 co-op (up to four players), with the remote players' inputs arriving over the network. Free Mode
 and Coin Battle come along for free, because the design synchronises input, not game modes.
 
-Status: design only. Nothing below is built. Section 8 is the proposed build order; step 0 is a
-cheap experiment that should happen before anything else, because it decides whether the rest
-works as written.
+Status: design, plus step 0 (the determinism check, section 8a) built and run on the Mac.
+Section 8 is the build order. Step 0's answer: input + seed + frame counting reproduce the game
+state, but the audio engine's timing reaches scene transitions, so lockstep needs audio driven by
+game frames before it can hold (section 8a).
 
 ## 1. Summary of the decisions
 
@@ -238,6 +239,83 @@ three buttons. Less code in the layout, but Online is one more press away.
 
 Each step ends with a Mac test and a note in this file. Step 0 is about a day of work and gives a
 clear answer on whether lockstep holds as designed.
+
+## 8a. Step 0 results (2026-11-18, Mac)
+
+What was built (all opt-in through environment variables, nothing changes in normal play):
+- `ports/wiicompiled/native_us/nsmbw_netplay_replay.cpp`: records the input every game frame
+  receives (`NSMBW_REPLAY_RECORD`), plays a recording back instead of the keyboard / pads
+  (`NSMBW_REPLAY_PLAY`), hashes guest memory every game frame in 256 KiB pages
+  (`NSMBW_REPLAY_HASHES`), dumps MEM1 / MEM2 at chosen frames (`NSMBW_REPLAY_DUMP_FRAMES`), exits
+  at a frame (`NSMBW_REPLAY_EXIT_AT`), and fixes the random seed (`NSMBW_REPLAY_SEED`).
+- `nsmbw_kpad_overrides.cpp`: split into "read the local devices" and "turn a hold word into
+  hold / trig / release, shake and tilt", so the same code runs per VI tick (normal play) or once
+  per game frame from a recording (frame mode). This is also the shape the netplay input path needs.
+- `tools/tests/replay_run.sh` (one muted run from a fresh user folder) and
+  `tools/tests/replay_compare.py` (first differing frame and page between two hash files).
+- No new guest-address override, so no `translate_all.sh`.
+
+Test: record a run with the self-test presses (boot, title, new save, opening movie skipped with
+two `-` presses, world map, 1-1 holding right + jump, back to the map, into a course again; 4000
+game frames), then play the recording back twice, each from an empty save. Machine heavily loaded
+by other builds (load average 90-130), so wall-clock timing varied a lot between runs (the same
+game frame landed up to 30 % apart in VI ticks).
+
+Findings:
+1. **The frame counter is right.** The only caller of the KPAD read is EGG's per-frame controller
+   read (guest LR 0x802BD938), once per channel per frame. Counting channel-0 reads gives game
+   frames; a slow frame no longer shifts input.
+2. **The random seed has to be fixed, and that works.** `dGameCom::initRandomSeed` seeds both
+   generators from the calendar clock. With different seeds the replay diverged at frame 337 (the
+   title scene's creation fills per-tile random tables); with a recording replayed under a
+   different seed the boot itself went elsewhere. Fixed by overwriting both seed words (US
+   0x80429F44 / 0x8042A390; r13 is 0x8042F680 on US, not the PAL 0x8042F6A0) at the first frame
+   boundary after the game seeds them, and re-shuffling the title-demo table from the new seed. A
+   native override of 0x800B2E70 was tried first: it used the PAL addresses, wrote into two other
+   globals and stalled the boot on every run, which cost a re-translation and a long detour.
+3. **The first-launch options menu stops one machine.** On an empty user folder the F10 menu opens
+   by itself at boot and holds the game until closed (only self-test runs skip it), so a replay
+   without the self-test sat in the boot scene. Confirms risk 5: in a session, menus that hold the
+   game must be off or synchronised. The test marks the menu as already shown.
+4. **With 1-3 fixed, game state replays.** Recording vs first replay: identical scene sequence on
+   identical frames for all 4000 frames (boot 3, strap 230, title 337, game setup 570, movie 927,
+   map 1144, course 2285/2395, map 2888, course 3169/3270). Byte diffs of the game heap at frames
+   1500 (map), 2600 (inside 1-1) and 3999: identical except one word (0x80D1C318, 0 vs 1, from
+   frame 11-42 on) and, inside the level, an object's count of sound handles (pointers into the
+   audio heap at 0x924Axxxx) for a few hundred frames.
+5. **Audio timing still leaks into scene timing.** The second replay entered the movie scene 5
+   frames late (932 vs 927, from the game-setup scene), and the runs after it shifted with it. The
+   game-setup scene waits for something before it changes scene; the leading candidate is the
+   music fading out, which the audio engine runs on the host clock. Everything else that differs
+   between runs is audio-engine state (0x8037xxxx-0x8041xxxx: voice lists, volumes, pitches), OS
+   thread queues and timestamps, and the audio heap in MEM2 (0x923C0000-0x924BFFFF) - all expected
+   to differ, as long as gameplay never waits on them. Scene changes evidently can.
+6. Load-timing: in these runs no scene transition was shifted by disc reads (the runtime serves
+   files from the host quickly), but the sample is small and the loads were all short.
+
+What this means for the design: lockstep is viable (input + seed + game-frame counting reproduce
+the game across thousands of frames and two scenes of gameplay), but **risk 1 is real**. Before
+step 1, the audio engine has to advance per game frame in a session (a fixed number of AX frames
+per game frame, with the output stretched / resampled to absorb the difference), or at least the
+places where the game waits on audio (BGM fade-out before a scene change, sound handles) have to
+be made frame-based. Next actions, in order:
+- find exactly what game-setup waits on (a write watch on the scene's state word around frame
+  927; lldb could not attach on this Mac, so a polling watch or a temporary log is needed);
+- drive AX from game frames in frame mode and re-run this test; target: three replays with
+  identical scene timing and an identical game heap;
+- identify 0x80D1C318 (set in the boot scene, 0 or 1 depending on timing).
+
+How to re-run (from the repo root, with the Mac build in `third_party/NSMBWiicompiled/build_mac`):
+
+    tools/tests/replay_run.sh record /tmp/rp/A 4000 NSMBW_AUTO_PRESS_TICKS=100000 \
+        NSMBW_AUTO_PRESS_STOP_IN_LEVEL=1 NSMBW_TEST_INPUT="8.1@120+10=1000,8.1@180+10=1000,5.2@120+2500=104/40:20"
+    tools/tests/replay_run.sh play /tmp/rp/B 4000 /tmp/rp/A/input.rec
+    python3 tools/tests/replay_compare.py /tmp/rp/A/hashes /tmp/rp/B/hashes \
+        --ignore 80340000-80440000,80740000-80780000
+
+(The ignored ranges are OS / audio-engine statics and REL-area words holding timestamps and VI-tick copies; leave
+them in to see everything.) Hashing every frame slows the game to about half speed; that does not
+affect the result, since the comparison is per game frame.
 
 ## 9. Open questions for the user
 
