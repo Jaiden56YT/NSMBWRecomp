@@ -1719,10 +1719,60 @@ index c56e2bb..3d00082 100644
          }
          value &= ~kExiCrTstart;
 diff --git a/runtime/src/hle/gx/gx_dl.cpp b/runtime/src/hle/gx/gx_dl.cpp
-index cb8e87e..f760a41 100644
+index cb8e87e..77c7486 100644
 --- a/runtime/src/hle/gx/gx_dl.cpp
 +++ b/runtime/src/hle/gx/gx_dl.cpp
-@@ -1107,7 +1107,7 @@ static void ApplyAuroraArrayIfChanged(GXAttr attr, const void* data, uint32_t si
+@@ -3,6 +3,7 @@
+ #include "gx_cp_decode.h"
+ #include "isa/big_endian.h"
+ 
++#include <cstdio>
+ #include <cstdlib>
+ #include <unordered_map>
+ 
+@@ -537,8 +538,17 @@ struct DlScanCacheProbe {
+     uint64_t contentDigest = 0;
+     bool digestValid = false;
+     uint64_t writeGeneration = kDlWriteGenerationUntracked;
++    bool hadEntry = false;
++    bool fastHit = false;
+ };
+ 
++// Scan cache hit/miss counts, printed every 30000 display-list calls (NSMBW_LOG_INTERP).
++struct DlScanCacheStats {
++    uint64_t calls = 0, tooBig = 0, fastHits = 0, digestHits = 0, missNew = 0, missChanged = 0,
++             nested = 0, clears = 0, storedNoDraw = 0, storedDraw = 0;
++};
++static DlScanCacheStats g_dlScanStats;
++
+ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr, uint32_t nbytes,
+                                          uint64_t layoutHash) {
+     DlScanCacheProbe probe{};
+@@ -548,6 +558,7 @@ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr,
+     const uint64_t key = DlScanCacheKey(listAddr, nbytes, layoutHash);
+     const auto it = s_cache.entries.find(key);
+     if (it != s_cache.entries.end()) {
++        probe.hadEntry = true;
+         auto& record = it->second;
+         const auto& entry = record.result;
+         const bool identityMatches = entry.listAddr == CanonicalizeGxMainRamAddress(listAddr) &&
+@@ -559,6 +570,7 @@ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr,
+             probe.record = &record;
+             probe.contentDigest = record.contentDigest;
+             probe.digestValid = true;
++            probe.fastHit = true;
+         } else {
+             probe.contentDigest = DlContentDigest(list, nbytes);
+             probe.digestValid = true;
+@@ -595,6 +607,7 @@ static void StoreDlScanCache(uint32_t listAddr, uint32_t nbytes, uint64_t layout
+         s_cache.storedCommandBytes - replacedBytes + incomingBytes > kDlScanCacheMaxStoredBytes) {
+         s_cache.entries.clear();
+         s_cache.storedCommandBytes = 0;
++        ++g_dlScanStats.clears;
+         replacing = false;
+         replacedBytes = 0;
+     }
+@@ -1107,7 +1120,7 @@ static void ApplyAuroraArrayIfChanged(GXAttr attr, const void* data, uint32_t si
      if (applied.valid && applied.data == data && applied.size == size && applied.stride == stride) {
          return;
      }
@@ -1731,6 +1781,66 @@ index cb8e87e..f760a41 100644
      applied.data = data;
      applied.size = size;
      applied.stride = stride;
+@@ -1365,12 +1378,43 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
+             allowScanCache ? ProbeDlScanCache(list, listAddr, nbytes, scanLayoutHash)
+                            : DlScanCacheProbe{};
+         const DlScanCacheRecord* cached = probe.record;
++        {
++            auto& st = g_dlScanStats;
++            ++st.calls;
++            if (!allowScanCache) ++st.tooBig;
++            else if (probe.fastHit) ++st.fastHits;
++            else if (cached != nullptr) ++st.digestHits;
++            else if (probe.hadEntry) ++st.missChanged;
++            else ++st.missNew;
++            static const bool s_log = std::getenv("NSMBW_LOG_INTERP") != nullptr;
++            if (s_log && st.calls % 30000 == 0) {
++                std::fprintf(stderr,
++                             "[dl-scan-cache] calls %llu: fast hits %llu, digest hits %llu, new %llu, "
++                             "changed %llu, too big %llu, nested (not stored) %llu, clears %llu, stored no-draw %llu, "
++                             "stored draw %llu\n",
++                             (unsigned long long)st.calls, (unsigned long long)st.fastHits,
++                             (unsigned long long)st.digestHits, (unsigned long long)st.missNew,
++                             (unsigned long long)st.missChanged, (unsigned long long)st.tooBig,
++                             (unsigned long long)st.nested, (unsigned long long)st.clears,
++                             (unsigned long long)st.storedNoDraw, (unsigned long long)st.storedDraw);
++            }
++        }
+ 
+         // The scan a cached record came from already walked the list for this,
+         // so only a miss pays for DisplayListMayContainDraw.
+         const bool mayContainDraw =
+             (cached != nullptr) ? cached->mayContainDraw : DisplayListMayContainDraw(list, nbytes);
+         if (!mayContainDraw) {
++            // Remember register-only lists too: without a record every call re-walked the list
++            // (run46: ~60% of display-list calls were misses with no entry).
++            if (cached == nullptr && allowScanCache) {
++                ++g_dlScanStats.storedNoDraw;
++                DlScanCacheEntry entry{};
++                const uint64_t contentDigest =
++                    probe.digestValid ? probe.contentDigest : DlContentDigest(list, nbytes);
++                StoreDlScanCache(listAddr, nbytes, scanLayoutHash, contentDigest, probe.writeGeneration,
++                                 false, entry, {}, nullptr, 0u);
++            }
+             EnsureAuroraFrameActive();
+             GXMarkFrameWork();
+             GXCallDisplayList(list, nbytes);
+@@ -1461,6 +1505,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
+             // Nested lists stay uncached: the digest only covers the outer list, so a
+             // rewritten callee would go undetected. Everything else is cacheable since the
+             // scan/flatten are pure functions of the list bytes and the layout-hash cache key.
++            if (dlHasNestedDl) ++g_dlScanStats.nested;
+             if (allowScanCache && scanOk && !dlHasNestedDl && (!needsFlatten || flattenOk)) {
+                 DlScanCacheEntry entry{};
+                 entry.listAddr = CanonicalizeGxMainRamAddress(listAddr);
+@@ -1484,6 +1529,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
+ 
+                 const uint64_t contentDigest =
+                     probe.digestValid ? probe.contentDigest : DlContentDigest(list, nbytes);
++                ++g_dlScanStats.storedDraw;
+                 StoreDlScanCache(listAddr, nbytes, scanLayoutHash, contentDigest,
+                                  probe.writeGeneration, mayContainDraw, entry, std::move(cpWrites),
+                                  storeFlattened ? flattened.data() : nullptr,
 diff --git a/runtime/src/hle/gx/gx_egg.cpp b/runtime/src/hle/gx/gx_egg.cpp
 index 8a9fd75..8bb0a3f 100644
 --- a/runtime/src/hle/gx/gx_egg.cpp
