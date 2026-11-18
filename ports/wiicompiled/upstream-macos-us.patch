@@ -2582,10 +2582,18 @@ index 62c4411..365fa9c 100644
      if (!Memory::Contains(kProductCodeAddress, sizeof(kProductCode))) {
          return 0;
 diff --git a/runtime/src/hle/storage/dvd.cpp b/runtime/src/hle/storage/dvd.cpp
-index 5ea4232..bca2923 100644
+index 5ea4232..8aed1c3 100644
 --- a/runtime/src/hle/storage/dvd.cpp
 +++ b/runtime/src/hle/storage/dvd.cpp
-@@ -25,6 +25,7 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+@@ -10,6 +10,7 @@
+ // layer's caches must be notified explicitly that these bytes changed.
+ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+ #include "hle/storage/riivolution.h"
++#include "abi_bridge.h"
+ #include "dvd_generated_files.h"
+ #include "ppc_runtime.h"
+ #include "recomp_mod_loader.h"
+@@ -25,6 +26,7 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
  #include <vector>
  #include <string>
  #include <map>
@@ -2593,7 +2601,7 @@ index 5ea4232..bca2923 100644
  #include <unordered_set>
  #include <filesystem>
  #include <iostream>
-@@ -73,6 +74,9 @@ struct DVDFileEntry {
+@@ -73,6 +75,9 @@ struct DVDFileEntry {
      uint32_t size;
      uint32_t discOffsetWords = 0;
      bool isDirectory = false;
@@ -2603,7 +2611,7 @@ index 5ea4232..bca2923 100644
  };
  
  struct FstFileEntry {
-@@ -94,6 +98,8 @@ struct PublishedExtent {
+@@ -94,6 +99,8 @@ struct PublishedExtent {
  };
  static std::vector<PublishedExtent> g_publishedExtents;
  static bool g_dvdInitialized = false;
@@ -2612,7 +2620,7 @@ index 5ea4232..bca2923 100644
  static std::vector<FstFileEntry> g_fstFiles;
  static bool g_fstLoaded = false;
  static std::unordered_set<std::string> g_loggedReadErrors;
-@@ -397,6 +403,14 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
+@@ -397,6 +404,26 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
          readLength = entry.size - fileOffset;
      }
  
@@ -2624,10 +2632,22 @@ index 5ea4232..bca2923 100644
 +                  << " <- " << HostPathText(entry.hostPath) << std::endl;
 +    }
 +
++    // NSMBW_LOG_DVD_READS=<substring>: log every read of a disc path containing it.
++    static const char* readFilter = std::getenv("NSMBW_LOG_DVD_READS");
++    if (readFilter && entry.dvdPath.find(readFilter) != std::string::npos) {
++        RT_LOG(RT_TAG_DVD) << "read " << entry.dvdPath << " offset=0x" << std::hex << fileOffset << " len=0x"
++                  << readLength << " (requested 0x" << length << ")" << std::dec << std::endl;
++        // NSMBW_TRACE_AFTER_READ=<substring>: print the next guest calls after a matching read.
++        static const char* traceAfter = std::getenv("NSMBW_TRACE_AFTER_READ");
++        if (traceAfter && entry.dvdPath.find(traceAfter) != std::string::npos) {
++            DiagRecentCalls::g_traceBudget.store(300, std::memory_order_relaxed);
++        }
++    }
++
      out.entry = &entry;
      out.fileOffset = fileOffset;
      out.readLength = readLength;
-@@ -415,6 +429,7 @@ static void RegisterFileEntry(std::string dvdPath, const fs::path& hostPath, uin
+@@ -415,6 +442,7 @@ static void RegisterFileEntry(std::string dvdPath, const fs::path& hostPath, uin
      fileEntry.hostPath = hostPath;
      fileEntry.dvdPath = dvdPath;
      fileEntry.size = size;
@@ -2635,7 +2655,7 @@ index 5ea4232..bca2923 100644
  
      const int32_t entryNum = static_cast<int32_t>(g_fileEntries.size());
      g_fileEntries.push_back(std::move(fileEntry));
-@@ -497,10 +512,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
+@@ -497,10 +525,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
              return;
          }
  
@@ -2670,7 +2690,7 @@ index 5ea4232..bca2923 100644
  
          std::string prefix = virtualPrefix.empty() ? "/" : virtualPrefix;
          if (prefix.back() != '/' && prefix.back() != '\\') {
-@@ -703,11 +741,20 @@ static void BuildAndPublishRuntimeFst() {
+@@ -703,11 +754,20 @@ static void BuildAndPublishRuntimeFst() {
          FailRuntimeFst(error.what());
      }
  
@@ -2691,7 +2711,7 @@ index 5ea4232..bca2923 100644
      }
      g_fileEntries = std::move(indexedEntries);
      g_pathToEntry = std::move(image.pathToEntry);
-@@ -788,7 +835,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
+@@ -788,7 +848,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
  
  static void InitDvdWaitingQueues()
  {
@@ -2700,7 +2720,7 @@ index 5ea4232..bca2923 100644
      for (uint32_t i = 0; i < 4; ++i) {
          const uint32_t queue = kQueueBase + (i * 8);
          Memory::Write32(queue + 0, queue);
-@@ -802,12 +849,12 @@ static void CompleteDvdCancelState()
+@@ -802,12 +862,12 @@ static void CompleteDvdCancelState()
  
      // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
      // The actual drive work is HLE'd, so complete pending cancel/reset waits.
@@ -2719,7 +2739,7 @@ index 5ea4232..bca2923 100644
  }
  
  // 0x8015EA1C -> DVDInit
-@@ -824,14 +871,14 @@ extern "C" void DVDInit_8015EA1C()
+@@ -824,14 +884,14 @@ extern "C" void DVDInit_8015EA1C()
  
      // 1. Initialize Global Flags (Emulate OS state)
      // These addresses are standard OS globals for DVD context
@@ -2739,7 +2759,7 @@ index 5ea4232..bca2923 100644
      constexpr uint32_t kMagicValue = 0xFEEBDAED;
      for (int i = 0; i < 4; i++) {
          uint32_t ctx = kContextBase + i * 0x20;
-@@ -867,9 +914,11 @@ extern "C" void DVDInit_8015EA1C()
+@@ -867,9 +927,11 @@ extern "C" void DVDInit_8015EA1C()
      // reverse discovery order: the explicitly configured root outranks the mod
      // manifest.
      const size_t vanillaEntryCount = g_fileEntries.size();
@@ -2751,7 +2771,7 @@ index 5ea4232..bca2923 100644
      RT_LOG(RT_TAG_DVD) << "disc index: " << vanillaEntryCount << " disc file(s), "
                << (g_fileEntries.size() - vanillaEntryCount) << " overlay registration(s) from "
                << overlays.size() << " root(s)" << std::endl;
-@@ -883,7 +932,7 @@ extern "C" void DVDInit_8015EA1C()
+@@ -883,7 +945,7 @@ extern "C" void DVDInit_8015EA1C()
      BuildAndPublishRuntimeFst();
  
      // Initialize the translated DVD filesystem so it can use the published FST.
@@ -2760,7 +2780,7 @@ index 5ea4232..bca2923 100644
      if (TranslatedFunctionRegistry::FindByAddressPtr(kDvdFsInitAddress)) {
          InvokeIndirectCpu(kDvdFsInitAddress, &GetPersistentCpuContext());
      }
-@@ -1196,7 +1245,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
+@@ -1196,7 +1258,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
      CopyToGuestAsDma(buffer, tempBuf.data(), tempBuf.size());
      return finish(true);
  }

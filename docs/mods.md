@@ -12,7 +12,7 @@ each kind, the design for code mods, and what is left.
 | Data memory patches (strings, tables, constants) | `<memory offset value original>` | **Works** (tested: the save-name patch moves the save to `NASDemo.sav`) |
 | Multi-region XMLs | the same patch listed per region with `original=` | **Works**: only the patch whose `original` matches US Rev 2 is applied |
 | Code memory patches (instructions in main.dol/RELs) | `<memory>` into `.text` | **Works in a mod build**: `tools/mod_build.py` bakes them in and re-translates (~2 min + build) |
-| New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build**: NewerSMBW 1.30 boots to its title, its own world map (Koopatlas) and plays 1-1 at 60 fps on the Mac. Known issue: the title's attract-mode replay crashes (section 5) |
+| New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build**: NewerSMBW 1.30 boots to its title (including its attract-mode replays), its own world map (Koopatlas) and plays 1-1 at 60 fps on the Mac |
 | New code, Kamek 2 binaries (`.kmk` + kamekLoader) | Kamek 2 loader + binary | **Not yet** (same pipeline, different file format) |
 | Dolphin texture packs | `Load/Textures/SMN/` | Already supported (`nsmbw_data/texture_replacements/SMN`) |
 | Ocarina/Gecko codes (`ocarina="true"`) | `<memory ocarina>` | Not supported (logged and skipped) |
@@ -217,10 +217,10 @@ NSMASRLoader.S`, a NewerSMBW fork) and its Kamek build script (`tools/kamek.py`)
 
 1. finds the three files through the mod's own `<file>`/`<folder>` mappings (as the DVD layer
    would serve `/NewerRes/...`);
-2. links DLCode at a fixed address: the top of the module is `0x817E0000` and the base is that
-   minus the code size. The 64 KiB below `0x817F0040` (MEM1 arena top) are skipped, because the
-   runtime runs `__start`'s first instructions and every guest constructor with
-   `r1 = 0x817F0040`; their stack frames overwrote the module's data in the first test;
+2. links DLCode at a fixed address ending at the MEM1 arena top (`0x817F0040`). The runtime runs
+   `__start`'s first instructions and every guest constructor with `r1 = 0x817F0040`, so the image
+   is copied in after the constructors (their stack frames overwrote the module's data in the first
+   test, when it was copied before them);
 3. applies System.bin and the game-side relocations to copies of main.dol and the RELs, after the
    XML's own patches (loader order). A patched REL word that has its own REL relocation gets that
    relocation turned into `R_RVL_NOP`, otherwise linking would overwrite the patch. Patches
@@ -233,9 +233,9 @@ NSMASRLoader.S`, a NewerSMBW fork) and its Kamek build script (`tools/kamek.py`)
    `NSMBW_GENERATED_DIR` pointing at the mod's translation (`NsmbwProduct.cmake` compiles
    `mod/*.cpp` from there).
 
-At run time (`nsmbw_guest_ctor_hook.cpp`, before guest constructors): the MEM1 arena top is
+At run time (`nsmbw_guest_ctor_hook.cpp`): before the guest constructors the MEM1 arena top is
 lowered to the module's base with `OSSetMEM1ArenaHi` (main's `dSystem::fixArena` reads it later
-to build the heaps), and the image and leftover patches are copied in. When the boot scene calls
+to build the heaps); after them the image is copied in. When the boot scene calls
 `0x80001800`, `nsmbw_kamek_loader.cpp` (a native override) reports the module and returns 1.
 
 In a normal build the same mod still loads its files, and the runtime refuses the boot-table patch
@@ -285,11 +285,32 @@ What it took, in order of discovery:
    The simplified mnemonics now reach that case, and a target outside the function is lowered as a
    real call (`link_call_` block: LR = return address, call, continue).
 
-Known issue: about 17 s on the title, Newer starts its attract-mode replay (the title scene
-restarts with a recorded play, `/Replay/title` from Newer's `TitleReplay`). It stops with
-`missing_target 0x0` from `0x800D4164`: `func_800D40F0` indexes an array with a signed byte at
-`this+1904` that reads -32 (r27 = 0xFFFFF000), so the object it calls through is not one. Pressing
-2 before then avoids it. Not investigated further yet.
+5. **Title replays (4-player).** About 17 s idle on the title, Newer plays a recorded replay. The
+   4-player ones crashed (`missing_target 0x0` from `0x800D4164`, the player-model code indexing
+   with powerup 0x40). Traced back: the replay data heap (`dScStage_c::createReplayDataHeap`,
+   called at `0x800E4AF4`) is a unit heap of 4 x 0x70800 bytes, one unit per player. Newer's
+   replays are LZ-compressed, and `EGG::DvdRipper::loadToMainRAMDecomp` takes a second unit for its
+   64 KiB read chunk (chunk size from `.sdata` `0x8042946C`), so the 4th player's load never fits:
+   the ripper reads the 32-byte LZ header, fails the chunk allocation and returns the unfilled
+   destination as if it had loaded (`NSMBW_LOG_DVD_READS=Replay` showed `_4` reading only its
+   header). That unit held the 3rd file's compressed chunk (its first word zeroed by the unit heap's
+   free-list link), so player 4 got character 0 and powerup `0x03200340`. This is the game's and
+   Newer's own logic; a console does the same failed load and presumably survives by luck of heap
+   layout. Fix: `mod_build.py` adds a compatibility patch to Kamek mod builds that gives the heap a
+   5th unit (`0x1C2000` -> `0x232800` bytes, 4 -> 5 units; 460 KB of MEM2, which the recomp has to
+   spare because IOS does not reserve the top of MEM2). Checked: forced 05-01 replays (all four
+   files now read in full) play; six natural runs with the empty save, six different replays, no
+   crash; gameplay unchanged.
+6. **Module placement.** The module now ends at the arena top (`0x817F0040`) and is copied in after
+   the guest constructors (whose stack frames start at `0x817F0040`), instead of ending 64 KiB lower.
+   That gap was MEM1 a console does not lose. Re-checked with the Kamek test mod, whose counter now
+   sits at `0x817F0020`, the word the constructor frames used to overwrite.
+
+Diagnostics added on the way (all env-gated or crash-only): the `missing_target` handler prints the
+registers, the first words at r3/r31, 256 bytes of stack and the last 96 guest calls;
+`NSMBW_CRASH_DUMP_R31=<hex off>` and `NSMBW_CRASH_DUMP_PTRS=<table>,<n>,<off>` dump objects at the
+crash; `NSMBW_LOG_DVD_READS=<substring>` logs each read (offset, length) of matching files;
+`NSMBW_TRACE_AFTER_READ=<substring>` prints the next 300 guest calls after a matching read.
 
 Other notes:
 
@@ -351,8 +372,8 @@ Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>
 
 ## 7. Next steps
 
-1. NewerSMBW: the title attract-mode replay crash; play further worlds (bosses, Koopatlas
-   features, the credits) to find what else breaks. Kamek 2 `.kmk` support.
+1. NewerSMBW: play further worlds (bosses, Koopatlas features, the credits) to find what else
+   breaks. Kamek 2 `.kmk` support.
 2. Re-run the vanilla translation with the fixed translator (REL `.bss` layout) in the main
    checkout and rebuild.
 3. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the

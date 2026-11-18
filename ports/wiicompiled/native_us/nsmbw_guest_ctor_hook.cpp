@@ -82,11 +82,19 @@ void RestoreRelImages()
 // top (0x817F0040) and translated with the game. On a console NewerSMBW's loader allocates it
 // from the game heap at boot; here its address has to be fixed, so the arena's top is lowered
 // below the code before main() builds the heaps from it (dSystem::fixArena, 0x800E51A0, reads
-// OSGetMEM1ArenaHi). OSInit has already cleared the arena by now, so the code is copied in after.
+// OSGetMEM1ArenaHi).
+//
+// The image itself is copied in after the guest constructors (InstallKamekImages below): the
+// runtime runs every constructor with r1 = 0x817F0040, so their stack frames land in the top of
+// that range. The first version copied it before them and left a 64 KiB gap below 0x817F0040
+// instead; that gap was memory a console does not lose, and NewerSMBW's 4-player title replays
+// then failed to load their 4th file (the decompressing loader's temporary buffer did not fit).
+// Translated code never reads instructions from guest RAM, only the module's data, and nothing
+// reaches the module before main().
 constexpr uint32_t kOSGetMEM1ArenaHi = 0x801ABE60u;
 constexpr uint32_t kOSSetMEM1ArenaHi = 0x801ABEC0u;
 
-void InstallKamekModules(CpuContext* ctx)
+void ReserveKamekModules(CpuContext* ctx)
 {
     const uint32_t lowest = RuntimeRiivolution::ModImagesLowestBase();
     if (lowest == 0) {
@@ -99,7 +107,6 @@ void InstallKamekModules(CpuContext* ctx)
         InvokeDirectCpu<kOSSetMEM1ArenaHi>(ctx);
         std::printf("[riivolution] MEM1 arena hi 0x%08X -> 0x%08X for mod code\n", arenaHi, lowest);
     }
-    RuntimeRiivolution::InstallModImages();
 }
 
 // Riivolution <memory> patches (mods/<name>/riivolution/*.xml). Riivolution writes them after
@@ -116,7 +123,7 @@ void ApplyRiivolutionMemoryPatches(CpuContext* ctx)
     RuntimeRiivolution::RegisterCodeRange(0x8076D7B0u, 0x80933784u, "d_basesNP .text");
     RuntimeRiivolution::RegisterCodeRange(0x809A2DD0u, 0x80ACD1F8u, "d_enemiesNP .text");
     RuntimeRiivolution::RegisterCodeRange(0x80B1CA50u, 0x80B73A7Cu, "d_en_bossNP .text");
-    InstallKamekModules(ctx);
+    ReserveKamekModules(ctx);
     RuntimeRiivolution::ApplyMemoryPatches();
 }
 
@@ -135,6 +142,11 @@ extern "C" void NsmbwGuestCtorHook_80004040(CpuContext* ctx)
         ApplyRiivolutionMemoryPatches(ctx);
     }
     Nsmbw_RunGuestConstructorsOnce(ctx);
+    static bool modImagesInstalled = false;
+    if (!modImagesInstalled) {
+        modImagesInstalled = true;
+        RuntimeRiivolution::InstallModImages();
+    }
 
     ctx->gpr[13] = savedSda;
     ctx->gpr[2] = savedSda2;

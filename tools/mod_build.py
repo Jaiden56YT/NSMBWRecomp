@@ -348,12 +348,10 @@ def add_dol_section(dol, address, data, text):
 # ---------------------------------------------------------------- Kamek (Newer loader format)
 
 NEWER_LOADER = 0x80001800
-# Top of the linked Kamek code. The MEM1 arena ends at 0x817F0040 (nsmbw_product.cpp), and the
-# runtime lowers the arena top to the module's base at boot. The 64 KiB just below 0x817F0040 stay
-# out of the module: the runtime runs __start's first instructions and every guest constructor
-# with r1 = 0x817F0040, so their stack frames land there after the module is copied in (seen as
-# the module's data being overwritten with a stack frame: back chain 0x817F0030, LR 0x80160A40).
-MODULE_TOP = 0x817E0000
+# Top of the linked Kamek code: the MEM1 arena's top (nsmbw_product.cpp). The runtime lowers the
+# arena top to the module's base at boot and copies the module in after the guest constructors
+# (nsmbw_guest_ctor_hook.cpp), so it costs the arena exactly its size, as on a console.
+MODULE_TOP = 0x817F0040
 
 
 class KamekModule:
@@ -472,6 +470,26 @@ def link_newer(mod_dir, image, runtime_mem):
     return KamekModule("newer", base, bytes(code), text_size, patches, [base + t for t in seeds])
 
 
+# ---------------------------------------------------------------- compatibility patches
+
+# Code patches the recomp adds to every Newer-format (Kamek loader) mod build, with the reason.
+# (address, original, value, why)
+KAMEK_COMPAT_PATCHES = [
+    # The title-screen replay heap (dScStage_c::createReplayDataHeap, called at 0x800E4AF4) is a
+    # unit heap of 4 x 0x70800 bytes, one unit per player. Newer ships its title replays
+    # LZ-compressed, and EGG::DvdRipper::loadToMainRAMDecomp takes a second unit from the same heap
+    # for its 64 KiB read chunk, so a 4-player replay's 4th file never fits: the ripper returns the
+    # unfilled buffer as if it had loaded (stale data from the 3rd file's chunk), the player gets
+    # garbage character/powerup values and the model code indexes out of its table (NewerSMBW:
+    # missing_target 0x0 from 0x800D4164 on 4-player replays such as 04-07 and 05-01). A console
+    # does the same failed load and survives by luck of its heap layout. Five units of the same
+    # size give the chunk its own unit (0x232800 bytes of MEM2, which the recomp has to spare).
+    (0x800E4AE4, "3C80001C", "3C800023", "replay heap size 0x1C2000 -> 0x232800 (lis)"),
+    (0x800E4AEC, "38842000", "38842800", "replay heap size 0x1C2000 -> 0x232800 (addi)"),
+    (0x800E4AF0, "38A00004", "38A00005", "replay heap units 4 -> 5"),
+]
+
+
 # ---------------------------------------------------------------- patching
 
 def build_inputs(mod_dir, out_code):
@@ -539,6 +557,11 @@ def build_inputs(mod_dir, out_code):
             stats["baked"] += 1
         print(f"  kamek: {stats['baked']} code patch(es) baked in total, {loader_data} data patch(es) "
               "applied by the native loader at run time")
+    if kamek:
+        for address, original, value, why in KAMEK_COMPAT_PATCHES:
+            if image.read(address, 4) == bytes.fromhex(original):
+                image.write(address, bytes.fromhex(value))
+                print(f"  + compat: {address:08X} <- {value} ({why})")
     image.write_files(out_code, (kamek.base, kamek.code, kamek.text_size) if kamek else None)
     return stats, kamek, runtime_patches
 
