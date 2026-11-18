@@ -3241,7 +3241,7 @@ index 8c96414..d23031f 100644
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..e61b1c4 100644
+index a63636b..38dc070 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -37,8 +37,10 @@
@@ -3430,7 +3430,7 @@ index a63636b..e61b1c4 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +802,249 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +802,265 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -3616,6 +3616,22 @@ index a63636b..e61b1c4 100644
 +    // card cost the game thread time); the terminate handler below flushes before aborting.
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
 +    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
++    // Atmosphere writes crash reports outside the folder the test station can read, so copy any new
++    // ones next to the logs (crash_reports/<name>) for the station to fetch.
++    {
++        std::error_code ec;
++        const std::filesystem::path dst = "/switch/nsmbw2/crash_reports";
++        for (const char* src : {"/atmosphere/crash_reports", "/atmosphere/fatal_reports"}) {
++            for (const auto& entry : std::filesystem::directory_iterator(src, ec)) {
++                if (!entry.is_regular_file(ec)) continue;
++                std::filesystem::create_directories(dst, ec);
++                const auto target = dst / entry.path().filename();
++                if (std::filesystem::exists(target, ec)) continue;
++                std::filesystem::copy_file(entry.path(), target, ec);
++                std::fprintf(stderr, "[switch] copied crash report %s\n", entry.path().filename().c_str());
++            }
++        }
++    }
 +    setenv("SDL_SWITCH_NO_EGL_SURFACE", "1", 1);
 +    setenv("NSMBW_LOG_INTERP", "1", 0);  // frame timing / idle / shader-compile stats every 2 s
 +    setenv("AURORA_LOG_WORKER_TIMING", "1", 0);  // frame worker phase timings every 120 frames
@@ -3680,7 +3696,7 @@ index a63636b..e61b1c4 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1124,7 @@ int main() {
+@@ -863,7 +1140,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -3689,7 +3705,7 @@ index a63636b..e61b1c4 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1234,21 @@ int main() {
+@@ -973,7 +1250,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -3711,7 +3727,7 @@ index a63636b..e61b1c4 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1343,11 @@ int main() {
+@@ -1068,11 +1359,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -3741,10 +3757,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..285e7fc
+index 0000000..2b05b6e
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,252 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -3854,12 +3870,14 @@ index 0000000..285e7fc
 +// go to /switch/nsmbw2/profile_<n>.txt (n = window index mod 40) and are cleared, so startup and
 +// gameplay land in different files. Addresses are absolute; "main=" gives the load base.
 +#include <array>
++#include <malloc.h>
 +#include <atomic>
 +#include <cstdio>
 +#include <map>
 +#include <string>
 +#include <algorithm>
 +extern "C" int main();
++void GxEfbCopyDestinationStats(size_t& count, uint32_t& largest);  // gx_copy.cpp
 +namespace {
 +std::atomic<Handle> g_profThreads[2];
 +bool ReadableWord(uint64_t addr) {
@@ -3927,6 +3945,21 @@ index 0000000..285e7fc
 +            put(std::snprintf(line, sizeof(line), "main=0x%llx\nwindow %u uptime %.0f s\n",
 +                              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&main)), window,
 +                              armTicksToNs(now - start) / 1e9));
++            {
++                // Memory watch (run 43 crashed after ~15 min at a level load): process memory in
++                // use vs the application limit, and the newlib heap's in-use / arena bytes.
++                u64 usedMem = 0, totalMem = 0;
++                svcGetInfo(&usedMem, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
++                svcGetInfo(&totalMem, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
++                const struct mallinfo mi = mallinfo();
++                size_t efbCopies = 0;
++                uint32_t efbLargest = 0;
++                GxEfbCopyDestinationStats(efbCopies, efbLargest);
++                std::fprintf(stderr, "[mem] uptime %.0f s: process %.1f / %.1f MiB, malloc in use %.1f MiB of arena %.1f MiB, "
++                             "efb copy destinations %zu (largest %u bytes)\n",
++                             armTicksToNs(now - start) / 1e9, usedMem / 1048576.0, totalMem / 1048576.0,
++                             mi.uordblks / 1048576.0, mi.arena / 1048576.0, efbCopies, efbLargest);
++            }
 +            for (int sl = 0; sl < 2; ++sl) {
 +                put(std::snprintf(line, sizeof(line), "slot %d total %llu\n", sl,
 +                                  static_cast<unsigned long long>(totals[sl])));
@@ -6015,3 +6048,61 @@ index f12c21f..69b11c0 100644
  // Installs the generation/notification hooks into aurora. Called once after
  // aurora_initialize; until then (and if guest RAM cannot be resolved) aurora
  // digests its source bytes on every validation, which is the old behaviour.
+diff --git a/runtime/src/hle/gx/gx_copy.cpp b/runtime/src/hle/gx/gx_copy.cpp
+index 156ba23..3ea5814 100644
+--- a/runtime/src/hle/gx/gx_copy.cpp
++++ b/runtime/src/hle/gx/gx_copy.cpp
+@@ -27,16 +27,47 @@ void RememberEfbCopyDestination(uint32_t addr, uint32_t size) {
+     if (size == 0) {
+         return;
+     }
+-    std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
+-    g_efbCopyDestinations[CanonicalizeGxMainRamAddress(addr)] = size;
+-    // A conservative monotonic maximum lets invalidation jump directly to
+-    // the only map interval that could overlap instead of walking every copy
+-    // destination on every DCStoreRange.
+-    g_largestEfbCopyDestination = std::max(g_largestEfbCopyDestination, size);
++    const uint32_t start = CanonicalizeGxMainRamAddress(addr);
++    const uint64_t end = static_cast<uint64_t>(start) + size;
++    std::vector<uint32_t> retired;
++    {
++        std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
++        // The new copy overwrites any older destination it overlaps, so those entries (and their
++        // GPU textures) are dead. Without this, destinations at addresses that are never flushed
++        // again piled up for the whole session: the walk in InvalidateEfbCopyDestinationsForRange
++        // runs on every DCStoreRange, and the game slowed down the longer it ran (run44, 58 -> 50
++        // fps on the title level over 30 minutes).
++        const uint64_t earliest = start > g_largestEfbCopyDestination ? start - g_largestEfbCopyDestination : 0;
++        for (auto it = g_efbCopyDestinations.lower_bound(static_cast<uint32_t>(earliest));
++             it != g_efbCopyDestinations.end() && static_cast<uint64_t>(it->first) < end;) {
++            const uint64_t otherEnd = static_cast<uint64_t>(it->first) + it->second;
++            if (it->first == start || otherEnd <= start) {
++                ++it;
++                continue;
++            }
++            retired.push_back(it->first);
++            it = g_efbCopyDestinations.erase(it);
++        }
++        g_efbCopyDestinations[start] = size;
++        // A conservative monotonic maximum lets invalidation jump directly to
++        // the only map interval that could overlap instead of walking every copy
++        // destination on every DCStoreRange.
++        g_largestEfbCopyDestination = std::max(g_largestEfbCopyDestination, size);
++    }
++    for (const uint32_t copyAddr : retired) {
++        GXDestroyCopyTex(GuestToHostPtr(copyAddr));
++    }
+ }
+ 
+ } // namespace
+ 
++// For the periodic [mem] line: how many EFB copy destinations are tracked, and the largest size.
++void GxEfbCopyDestinationStats(size_t& count, uint32_t& largest) {
++    std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
++    count = g_efbCopyDestinations.size();
++    largest = g_largestEfbCopyDestination;
++}
++
+ void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
+     if (size == 0) {
+         return;
