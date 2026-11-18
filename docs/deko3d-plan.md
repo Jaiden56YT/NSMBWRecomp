@@ -48,8 +48,16 @@ Pieces:
 - 11-18 step 1 done: deko3d triangle on hardware (ports/deko3d-proof, logs/hw/deko01).
 - 11-18 step 2 done: uam built for the Switch (ports/uam-switch/build.sh -> uam_switch.o, only
   `uam_compile_dksh` exported); the proof app compiles its GLSL on the device: vertex 4.4 ms,
-  fragment 2.5 ms, triangle correct (logs/hw/deko02). Next: Tint WGSL->GLSL for a real aurora
-  shader, then the dk-webgpu core.
+  fragment 2.5 ms, triangle correct (logs/hw/deko02).
+- 11-18 step 2b done: 12 real aurora shader pairs (dumped with NSMBW_DUMP_SHADERS on the Mac)
+  -> Tint (host build: third_party/dawn-switch/build_host_tint/tint, `-f glsl --glsl-desktop
+  true -ep vs_main|fs_main`) -> uam. All 24 compile on the Switch: median 88 ms, worst 313 ms,
+  total 2.6 s (logs/hw/deko03). Two fixes the real backend must make in Tint's GLSL:
+  combined samplers need explicit `layout(binding = N)` (bind_samplers.py does it in order), and
+  Tint's frag-depth clamp uses `tint_immediates` uniforms uam rejects (turn the clamp off; deko3d
+  clamps in hardware). Compiles are too slow for the frame: background thread + SD cache.
+  Tint also adds robustness clamps (min(i, length-1)) on every buffer read: turn those off too.
+  Next: the dk-webgpu core (step 3).
 
 ## Steps (each tested on hardware via the station)
 

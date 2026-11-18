@@ -41,6 +41,7 @@ static DkQueue g_renderQueue;
 
 // Simple function for loading a shader from the filesystem
 #include <stdbool.h>
+void compileAuroraShaders(void);
 bool compileShaderAtRuntime(DkShader* shader, int stage, DkMemBlock codeMem, uint32_t* offset);
 
 static void loadShader(DkShader* pShader, const char* path)
@@ -120,6 +121,7 @@ static void graphicsInitialize(void)
     // Load our shaders (both vertex and fragment)
     // Compiled on the Switch at startup (runtime_shader.cpp); the build-time DKSH files are
     // the fallback.
+    compileAuroraShaders();
     if (!compileShaderAtRuntime(&g_vertexShader, 0, g_codeMemBlock, &g_codeMemOffset))
         loadShader(&g_vertexShader, "romfs:/shaders/triangle_vsh.dksh");
     if (!compileShaderAtRuntime(&g_fragmentShader, 1, g_codeMemBlock, &g_codeMemOffset))

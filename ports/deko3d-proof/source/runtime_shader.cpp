@@ -66,3 +66,42 @@ extern "C" bool compileShaderAtRuntime(DkShader* shader, int stage, DkMemBlock c
     dkShaderInitialize(shader, &maker);
     return true;
 }
+
+// Step 3: compile every converted aurora shader in romfs:/aurora (Tint GLSL, sampler bindings
+// added) on the device and log each result and time.
+#include <dirent.h>
+#include <string>
+extern "C" void compileAuroraShaders(void) {
+    FILE* log = std::fopen("/switch/nsmbw2/nsmbw.log", "a");
+    DIR* d = opendir("romfs:/aurora");
+    double total = 0, worst = 0;
+    int ok = 0, failed = 0;
+    while (struct dirent* e = d ? readdir(d) : nullptr) {
+        const std::string name = e->d_name;
+        const bool vert = name.size() > 5 && name.compare(name.size() - 5, 5, ".vert") == 0;
+        const bool frag = name.size() > 5 && name.compare(name.size() - 5, 5, ".frag") == 0;
+        if (!vert && !frag) continue;
+        FILE* f = std::fopen(("romfs:/aurora/" + name).c_str(), "rb");
+        if (!f) continue;
+        std::string src;
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) src.append(buf, n);
+        std::fclose(f);
+        const uint64_t t0 = armGetSystemTick();
+        void* image = nullptr;
+        size_t size = 0;
+        const bool good = uam_compile_dksh(vert ? 0 : 1, src.c_str(), &image, &size) != 0;
+        const double ms = armTicksToNs(armGetSystemTick() - t0) / 1e6;
+        std::free(image);
+        good ? ++ok : ++failed;
+        total += ms;
+        if (ms > worst) worst = ms;
+        if (log) std::fprintf(log, "[deko3d-proof] aurora %s: %s, %zu bytes, %.2f ms\n", name.c_str(), good ? "ok" : "FAILED", size, ms);
+    }
+    if (d) closedir(d);
+    if (log) {
+        std::fprintf(log, "[deko3d-proof] aurora shaders: %d ok, %d failed, total %.1f ms, worst %.1f ms\n", ok, failed, total, worst);
+        std::fclose(log);
+    }
+}
