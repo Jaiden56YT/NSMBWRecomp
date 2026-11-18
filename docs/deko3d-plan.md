@@ -44,6 +44,13 @@ Pieces:
    mesa-switch build already compiles). DKSH results go into a disk cache keyed by WGSL hash,
    pre-seeded like the current pipeline cache.
 
+## Progress
+- 11-18 step 1 done: deko3d triangle on hardware (ports/deko3d-proof, logs/hw/deko01).
+- 11-18 step 2 done: uam built for the Switch (ports/uam-switch/build.sh -> uam_switch.o, only
+  `uam_compile_dksh` exported); the proof app compiles its GLSL on the device: vertex 4.4 ms,
+  fragment 2.5 ms, triangle correct (logs/hw/deko02). Next: Tint WGSL->GLSL for a real aurora
+  shader, then the dk-webgpu core.
+
 ## Steps (each tested on hardware via the station)
 
 1. **Proof of life**: a tiny deko3d NRO path inside the app (behind `NSMBW_DEKO3D=1`) that
