@@ -590,6 +590,44 @@ def link_kamek2(path, image, runtime_mem, loader):
     return KamekModule(path.stem, base, bytes(code), text_size, patches, [base + t for t in seeds], ctors, loader)
 
 
+# Kamek's standard NSMBW loader (Treeki/Kamek loader/nsmbw.cpp, "originally by Ninji, with
+# improvements by CLF78, Ryguy, and RoadrunnerWMC"): Riivolution writes it over dead data in
+# main.dol's .init and hooks the blr that ends __init_data (kmBranch(0x800042F4, loadIntoNSMBW)).
+# loadIntoNSMBW removes the disc BCA check and rewrites the boot scene's state table
+# (myBackGround_PhaseMethod) so the REL link phases come first and its loadBinary state fourth;
+# loadBinary then reads /Code/<region><rev>.bin, links it and stores the code address at
+# 0x800014E0. The recomp does the table rewrite and the BCA nop at build time, with the native
+# loader (0x80001800, nsmbw_kamek_loader.cpp) as the fourth state.
+KAMEK_STD_HOOK = 0x800042F4            # blr at the end of __init_data (US Rev 2)
+KAMEK_STD_PHASE_TABLE = 0x803280E0     # myBackGround_PhaseMethod (US)
+KAMEK_STD_BCA_CHECK = (0x800C9FC8, "4BF3C7B9", "60000000")
+KAMEK_STD_CODE_ADDR = 0x800014E0
+
+
+def is_kamek_std_loader_hook(patch, xml_patches):
+    """The XML's `b` from the end of __init_data into a loader blob it also writes."""
+    if patch["offset"] != KAMEK_STD_HOOK or len(patch["value"]) != 4:
+        return False
+    word = struct.unpack(">I", patch["value"])[0]
+    if word >> 26 != 18 or word & 1:
+        return False
+    li = word & 0x03FFFFFC
+    target = KAMEK_STD_HOOK + (li - 0x04000000 if li & 0x02000000 else li)
+    return any(p["valuefile"] and p["offset"] <= target < p["offset"] + len(p["value"]) for p in xml_patches)
+
+
+def apply_kamek_std_loader(image):
+    """loadIntoNSMBW's boot-table rewrite, with the native loader as the binary-loading state."""
+    old = [struct.unpack(">I", image.read(KAMEK_STD_PHASE_TABLE + 4 * i, 4))[0] for i in range(20)]
+    new = old[15:18] + [NEWER_LOADER] + old[0:15] + [old[18], old[19]]
+    image.write(KAMEK_STD_PHASE_TABLE, b"".join(struct.pack(">I", w) for w in new))
+    address, original, value = KAMEK_STD_BCA_CHECK
+    if image.read(address, 4) == bytes.fromhex(original):
+        image.write(address, bytes.fromhex(value))
+    print(f"  + kamek loader: boot table at {KAMEK_STD_PHASE_TABLE:08X} rewritten as loadIntoNSMBW does "
+          f"(state 3 = native loader {NEWER_LOADER:08X}), BCA check removed")
+
+
 def find_kamek2(mod_dir, settings):
     """The Kamek binary for SMNE01 Rev 2: mod.toml [kamek] binary = "<path in the mod folder>", or
     the only file in the mod whose name marks US v2 (Kamek's version names: E2, else E/US/NTSC)."""
@@ -674,9 +712,21 @@ def build_inputs(mod_dir, out_code):
     runtime_patches, low_memory = [], {}
     xml_patches = list(memory_patches(mod_dir))
     has_loader = any(p["valuefile"] and p["offset"] == NEWER_LOADER for p in xml_patches)
+    std_hook = next((p for p in xml_patches if is_kamek_std_loader_hook(p, xml_patches)), None)
+    std_skip = set()
+    if std_hook is not None and not has_loader:
+        word = struct.unpack(">I", std_hook["value"])[0]
+        li = word & 0x03FFFFFC
+        target = KAMEK_STD_HOOK + (li - 0x04000000 if li & 0x02000000 else li)
+        blob = next(p for p in xml_patches if p["valuefile"] and p["offset"] <= target < p["offset"] + len(p["value"]))
+        std_skip = {id(std_hook), id(blob)}
+        print(f"  = Kamek standard loader: {Path(blob['valuefile']).name} at {blob['offset']:08X}, hook at "
+              f"{KAMEK_STD_HOOK:08X}; replaced by the native loader (neither is baked)")
 
     for patch in xml_patches:
         value, address = patch["value"], patch["offset"]
+        if id(patch) in std_skip:
+            continue
         if patch["ocarina"]:
             stats["unsupported"] += 1
             print(f"  ! {patch['source']}: ocarina patch not supported")
@@ -721,11 +771,15 @@ def build_inputs(mod_dir, out_code):
         settings = load_mod_toml(mod_dir).get("kamek", {})
         binary = find_kamek2(mod_dir, settings)
         if binary is not None:
-            loader = find_kamek2_loader(xml_patches, image, settings)
+            loader = NEWER_LOADER if std_skip else find_kamek2_loader(xml_patches, image, settings)
             if loader is None:
                 raise SystemExit(f"  {binary.name} is a Kamek binary but no loader entry was found; "
                                  "set [kamek] loader = 0x... in mod.toml")
             kamek = link_kamek2(binary, image, low_memory, loader)
+            if std_skip:
+                apply_kamek_std_loader(image)
+                # allocAdapter stores the code address here "for optional later use".
+                kamek.game_patches.append((KAMEK_STD_CODE_ADDR, struct.pack(">I", kamek.base)))
     if kamek:
         # The loader runs in the boot scene, after the RELs' static constructors have filled their
         # data (profile tables and objects). Its code patches are baked (constructors never write

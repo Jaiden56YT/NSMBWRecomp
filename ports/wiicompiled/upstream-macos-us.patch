@@ -6644,10 +6644,10 @@ index ff7c71c..4ece636 100644
  } // namespace RuntimeRiivolution
 diff --git a/runtime/src/hle/storage/riivolution_memory.cpp b/runtime/src/hle/storage/riivolution_memory.cpp
 new file mode 100644
-index 0000000..9450796
+index 0000000..5d00daa
 --- /dev/null
 +++ b/runtime/src/hle/storage/riivolution_memory.cpp
-@@ -0,0 +1,323 @@
+@@ -0,0 +1,328 @@
 +// Riivolution <memory> patches for a statically translated game.
 +//
 +// Riivolution writes its memory patches into RAM after the main executable is
@@ -6807,9 +6807,14 @@ index 0000000..9450796
 +    if (const CodeRange* range = FindCodeRange(address, length)) {
 +        ++report.codeNeedsModBuild;
 +        if (codeLines++ < kMaxDetailLines) {
++            // In a mod build the code patches are already in the translation; what is left here is
++            // what the build deliberately replaced (e.g. a Kamek loader and its hook).
++            const bool modBuild = !RuntimeRiivolution::ModImages().empty();
 +            RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": code patch at "
-+                      << Hex(address) << " (" << length << " bytes, " << range->name
-+                      << ") needs a mod build (tools/mod_build.py); not applied" << std::endl;
++                      << Hex(address) << " (" << length << " bytes, " << range->name << ") "
++                      << (modBuild ? "not applied (this mod build replaces it)"
++                                   : "needs a mod build (tools/mod_build.py); not applied")
++                      << std::endl;
 +        }
 +        return;
 +    }

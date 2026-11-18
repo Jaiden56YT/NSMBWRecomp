@@ -13,7 +13,7 @@ each kind, the design for code mods, and what is left.
 | Multi-region XMLs | the same patch listed per region with `original=` | **Works**: only the patch whose `original` matches US Rev 2 is applied |
 | Code memory patches (instructions in main.dol/RELs) | `<memory>` into `.text` | **Works in a mod build**: `tools/mod_build.py` bakes them in and re-translates (~2 min + build) |
 | New code, Newer loader format (NewerSMBW and mods built on its source) | `Loader.bin` + `/NewerRes/System/DLCode/DLRelocs<RV>.bin` | **Works in a mod build**: NewerSMBW 1.30 boots to its title (including its attract-mode replays), its own world map (Koopatlas) and plays 1-1 at 60 fps on the Mac |
-| New code, Kamek 2 binaries (`Kamek\0\0` v1-v3, kamekLoader) | loader in low memory + binary on disc | **Works in a mod build** with a hand-made test mod (section 5b); not yet tried with a released Kamek 2 mod |
+| New code, Kamek 2 binaries (`Kamek\0\0` v1-v3, kamekLoader) | loader + binary on disc | **Works in a mod build**: mkwcat's NSMBW Pipe Randomizer v1.2 (Kamek's standard NSMBW loader) boots, plays and runs its code on the Mac; plus a hand-made test mod (section 5b) |
 | Dolphin texture packs | `Load/Textures/SMN/` | Already supported (`nsmbw_data/texture_replacements/SMN`) |
 | Ocarina/Gecko codes (`ocarina="true"`) | `<memory ocarina>` | Not supported (logged and skipped) |
 
@@ -355,6 +355,32 @@ from boot, while a console's loader installs them when it runs. A hook that fire
 loader runs sees the module's data before its constructors have run (the test mod shows it: the
 counter hook ran twice before the constructor set it to 100).
 
+**Kamek's standard NSMBW loader.** Most Kamek 2 mods use Treeki/Kamek `loader/nsmbw.cpp`.
+Riivolution writes it over dead data in main.dol's `.init` (the Metrowerks string after `memset`,
+e.g. `Code/loader.bin` at `0x800046E4`) and hooks the `blr` ending `__init_data`
+(`kmBranch(0x800042F4, loadIntoNSMBW)`). `loadIntoNSMBW` removes the BCA check (`0x800C9FC8`) and
+rewrites the boot scene's state table at `0x803280E0` to `old[15..17], loadBinary, old[0..14],
+old[18], old[19]` (REL link phases first); `loadBinary` reads `/Code/<region><rev>.bin`
+(`E2.bin` for US Rev 2), links it into the game heap and stores the code address at `0x800014E0`.
+Because the loader lands inside translated `.init`, it cannot simply be run. `mod_build.py`
+recognises it (a `b` at `0x800042F4` into a `valuefile` blob the XML writes), bakes neither the
+loader nor the hook, and does `loadIntoNSMBW`'s work at build time: the same table rewrite with
+the native loader (`0x80001800`) as the fourth state, and the BCA nop; the native loader also
+writes the code address to `0x800014E0`. The runtime refuses the XML's loader and hook (they are
+code patches) and says that the mod build replaces them.
+
+**Released mod: NSMBW Pipe Randomizer v1.2** (mkwcat, MIT; `NSMBW-Pipe-Randomizer-v1.2.zip` from
+the GitHub release, 451,447 bytes, SHA-256 `fc571f00c16b6c46658ba2820c34120a2943bf6f2d5020c4f374007e0bbc7027`; not committed). Unzipped into
+`mods/PipeRandomizer/`. `mod_build.py`: standard loader recognised; `Code/E2.bin` (format v2, 6,876
+bytes code + 0xD60 `.bss`, 139 commands, 17 hooks, no constructors) linked at `0x817ED800`; 40 code
+patches baked (8 of them on relocated REL words, whose relocations were dropped), 7 data patches
+for the native loader; the XML's RNG-mode word at `0x80004028` (in `.init`) baked. Translation
+skipped no entry point. Run: `Kamek loader (native, 0x80001800): PipeRandomizer (E2) linked at
+0x817ED800 (10304 bytes), 7 data patch(es) applied`; boot, title, map, a level and back with no
+errors; the mod's `.bss` flag at `0x817EF834` goes to `0x01000000` in the level and back to 0 on
+the map, i.e. its hooks run. The randomised pipe destinations themselves were not checked (that
+needs entering pipes by hand).
+
 Test (`python3 -I tools/tests/make_kamek2_testmod.py <mods>/KamekTest2`, format version 2): the
 binary (`Code/E2.bin`) and the loader entry (0x80001900, from the boot-table pointer) were found
 automatically; 11 commands, 1 constructor, `.bss` counter. Run: `Kamek loader (native,
@@ -411,8 +437,8 @@ Harness used: run the build with `SDL_AUDIO_DRIVER=dummy XDG_DATA_HOME=<scratch>
 ## 7. Next steps
 
 1. NewerSMBW: play further worlds (bosses, Koopatlas features, the credits) to find what else
-   breaks. Try a released Kamek 2 mod (its loader may be reached by a direct `bl` from game code,
-   which the test mod does not cover).
+   breaks. Pipe Randomizer: play through pipes to see the randomised destinations; try a Kamek 2
+   mod with a non-standard loader.
 2. Re-run the vanilla translation with the fixed translator (REL `.bss` layout) in the main
    checkout and rebuild.
 3. Faster code mods: a mod-aware base translation (no inlining of patchable callees) so only the
