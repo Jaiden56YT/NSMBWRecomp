@@ -779,18 +779,61 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..5e7086b 100644
+index ec62546..f0e1621 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
-@@ -8,7 +8,6 @@
+@@ -8,11 +8,14 @@
  # why WiiCompiled's product model didn't fit before this file existed.
  #
  # Off by default so a normal MKW configure/build is completely unaffected.
 -option(MKW_BUILD_NSMBW "Build the experimental NSMBW recompiled product" OFF)
  
  if(MKW_BUILD_NSMBW)
++    # A mod build (tools/mod_build.py in the NSMBWRecomp repo) points this at its own
++    # re-translated output; the default is the vanilla translation.
++    set(NSMBW_GENERATED_DIR "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw"
++        CACHE PATH "Translator output for NSMBW (data initializer, symbol table, shards)")
      set(NSMBW_SHARD_MANIFEST
-@@ -146,7 +145,7 @@ if(MKW_BUILD_NSMBW)
+-        "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/build_shards/shards.cmake"
++        "${NSMBW_GENERATED_DIR}/build_shards/shards.cmake"
+         CACHE FILEPATH "Translator-owned NSMBW combined shard manifest")
+     if(NOT EXISTS "${NSMBW_SHARD_MANIFEST}")
+         message(FATAL_ERROR
+@@ -35,7 +38,10 @@ if(MKW_BUILD_NSMBW)
+     # 0x00000060 unknown-boot-call stub). Ordinary C++, not translated PPC, so it gets the
+     # normal object-target settings instead of the translated-code compile options.
+     file(GLOB NSMBW_NATIVE_SOURCES CONFIGURE_DEPENDS
+-        "${MKW_RUNTIME_SOURCE_DIR}/../projects/nsmbw/native/*.cpp")
++        "${MKW_RUNTIME_SOURCE_DIR}/../projects/nsmbw/native/*.cpp"
++        # A mod build's generated sources (tools/mod_build.py): its Kamek module image and the
++        # patches outside main.dol/RELs. Empty for the vanilla translation.
++        "${NSMBW_GENERATED_DIR}/mod/*.cpp")
+     if(NSMBW_NATIVE_SOURCES)
+         add_library(nsmbw_native OBJECT ${NSMBW_NATIVE_SOURCES})
+         mkw_configure_object_target(nsmbw_native)
+@@ -47,9 +53,9 @@ if(MKW_BUILD_NSMBW)
+     # about a single dol+rel pair, and every one of those separately-generated files defines the
+     # same extern "C" InitializeDataSections()/IsDataSectionsInitialized() symbols, which would
+     # collide at link time the moment more than one was included.
+-    set(NSMBW_DATA_INIT_FILE "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/data_sections_init.cpp")
+-    set(NSMBW_DATA_INIT_BLOB_ASM "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/data_sections_init_blobs.S")
+-    set(NSMBW_GUEST_SYMBOL_TABLE_FILE "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/guest_symbol_table.cpp")
++    set(NSMBW_DATA_INIT_FILE "${NSMBW_GENERATED_DIR}/data_sections_init.cpp")
++    set(NSMBW_DATA_INIT_BLOB_ASM "${NSMBW_GENERATED_DIR}/data_sections_init_blobs.S")
++    set(NSMBW_GUEST_SYMBOL_TABLE_FILE "${NSMBW_GENERATED_DIR}/guest_symbol_table.cpp")
+     if(NOT EXISTS "${NSMBW_DATA_INIT_FILE}")
+         message(FATAL_ERROR
+             "Missing combined NSMBW data initializer: ${NSMBW_DATA_INIT_FILE}. Run "
+@@ -126,7 +132,7 @@ if(MKW_BUILD_NSMBW)
+     add_library(nsmbw_runtime_common OBJECT ${NSMBW_RUNTIME_COMMON_SOURCES})
+     mkw_configure_object_target(nsmbw_runtime_common)
+     target_include_directories(nsmbw_runtime_common BEFORE PRIVATE
+-        "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw")
++        "${NSMBW_GENERATED_DIR}")
+     target_compile_features(nsmbw_runtime_common PRIVATE cxx_std_20)
+     # MKW_RUNTIME_PRODUCT_NSMBW: distinguishes this compile of the shared runtime/src tree from
+     # mkw_runtime_common's. Needed where a guest-code-address native override in a shared file is
+@@ -146,7 +152,7 @@ if(MKW_BUILD_NSMBW)
          target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
      endif()
  
@@ -799,7 +842,7 @@ index ec62546..5e7086b 100644
      # foreach right at the end of that file - which has already run by the time this file is
      # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
      # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
-@@ -154,7 +153,7 @@ if(MKW_BUILD_NSMBW)
+@@ -154,7 +160,7 @@ if(MKW_BUILD_NSMBW)
      # was compiled without those target features enabled.
      foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
          if(TARGET ${nsmbw_target})
@@ -808,7 +851,7 @@ index ec62546..5e7086b 100644
          endif()
      endforeach()
  
-@@ -199,7 +198,7 @@ if(MKW_BUILD_NSMBW)
+@@ -199,7 +205,7 @@ if(MKW_BUILD_NSMBW)
          target_link_options(NSMBWCompiled PRIVATE -mwindows)
      endif()
      target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
@@ -817,7 +860,7 @@ index ec62546..5e7086b 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +206,16 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +213,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -835,7 +878,7 @@ index ec62546..5e7086b 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +231,24 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +238,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -1189,10 +1232,19 @@ index b859711..37d4f39 100644
  
  MKW_MEMORY_FORCE_INLINE uint8_t FlatRead8(uint32_t address) {
 diff --git a/runtime/include/runtime_config.h b/runtime/include/runtime_config.h
-index 7b3527e..f5056f8 100644
+index 7b3527e..c48c86a 100644
 --- a/runtime/include/runtime_config.h
 +++ b/runtime/include/runtime_config.h
-@@ -162,7 +162,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
+@@ -58,6 +58,8 @@ struct RuntimeUserConfig {
+     // The one canonical Retro Rewind installation, owned and updated by the frontend. Setup records
+     // it here instead of copying the pack, so an asset-only update is visible on the next launch.
+     std::optional<std::string> retroRewindRoot;
++    // [paths] mods_root: folder of mods/<name>/ packs (default: nsmbw_data/mods next to the exe).
++    std::optional<std::string> modsRoot;
+     std::vector<std::string> overlayRoots;
+     // Controller mappings use Wii/GameCube button names as keys and up to two
+     // comma-separated SDL-style physical button names ("south", or
+@@ -162,7 +164,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
  }
  
  inline std::optional<std::filesystem::path> ExecutableDirectory() {
@@ -1204,6 +1256,25 @@ index 7b3527e..f5056f8 100644
      std::wstring buffer(MAX_PATH, L'\0');
      for (;;) {
          const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+@@ -448,6 +453,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
+     config.nandRoot = FindConfigValue<std::string>(document, "paths", "nand_root");
+     config.dvdRoot = FindConfigValue<std::string>(document, "paths", "dvd_root");
+     config.retroRewindRoot = FindConfigValue<std::string>(document, "paths", "retro_rewind_root");
++    config.modsRoot = FindConfigValue<std::string>(document, "paths", "mods_root");
+     if (auto roots = FindConfigValue<std::vector<std::string>>(document, "paths", "overlay_roots")) {
+         for (auto& root : *roots) {
+             root = Trim(root);
+@@ -866,6 +872,10 @@ inline std::filesystem::path ResolvedDvdRoot() {
+ }
+ 
+ /// The canonical Retro Rewind installation the frontend owns, or "" when none is recorded.
++inline std::string ModsRoot(std::string fallback = "") {
++    return Get().modsRoot.value_or(std::move(fallback));
++}
++
+ inline std::string RetroRewindRoot(std::string fallback = "") {
+     return Get().retroRewindRoot.value_or(std::move(fallback));
+ }
 diff --git a/runtime/include/system_bridge.h b/runtime/include/system_bridge.h
 index 1f57f0d..8e4e128 100644
 --- a/runtime/include/system_bridge.h
@@ -2529,10 +2600,80 @@ index 62c4411..365fa9c 100644
      if (!Memory::Contains(kProductCodeAddress, sizeof(kProductCode))) {
          return 0;
 diff --git a/runtime/src/hle/storage/dvd.cpp b/runtime/src/hle/storage/dvd.cpp
-index 5ea4232..adc9560 100644
+index 5ea4232..8aed1c3 100644
 --- a/runtime/src/hle/storage/dvd.cpp
 +++ b/runtime/src/hle/storage/dvd.cpp
-@@ -497,10 +497,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
+@@ -10,6 +10,7 @@
+ // layer's caches must be notified explicitly that these bytes changed.
+ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+ #include "hle/storage/riivolution.h"
++#include "abi_bridge.h"
+ #include "dvd_generated_files.h"
+ #include "ppc_runtime.h"
+ #include "recomp_mod_loader.h"
+@@ -25,6 +26,7 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+ #include <vector>
+ #include <string>
+ #include <map>
++#include <set>
+ #include <unordered_set>
+ #include <filesystem>
+ #include <iostream>
+@@ -73,6 +75,9 @@ struct DVDFileEntry {
+     uint32_t size;
+     uint32_t discOffsetWords = 0;
+     bool isDirectory = false;
++    // Registered by an overlay (mod) root; its first read is logged once.
++    bool fromOverlay = false;
++    mutable bool loggedRead = false;
+ };
+ 
+ struct FstFileEntry {
+@@ -94,6 +99,8 @@ struct PublishedExtent {
+ };
+ static std::vector<PublishedExtent> g_publishedExtents;
+ static bool g_dvdInitialized = false;
++// Set while overlay roots are scanned: entries registered then are mod files.
++static bool g_registeringOverlay = false;
+ static std::vector<FstFileEntry> g_fstFiles;
+ static bool g_fstLoaded = false;
+ static std::unordered_set<std::string> g_loggedReadErrors;
+@@ -397,6 +404,26 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
+         readLength = entry.size - fileOffset;
+     }
+ 
++    // Mod files are logged on their first read; NSMBW_LOG_DVD_FILES=1 logs every file's.
++    static const bool logAllFiles = std::getenv("NSMBW_LOG_DVD_FILES") != nullptr;
++    if ((entry.fromOverlay || logAllFiles) && !entry.loggedRead) {
++        entry.loggedRead = true;
++        RT_LOG(RT_TAG_DVD) << (entry.fromOverlay ? "mod file read: " : "file read: ") << entry.dvdPath
++                  << " <- " << HostPathText(entry.hostPath) << std::endl;
++    }
++
++    // NSMBW_LOG_DVD_READS=<substring>: log every read of a disc path containing it.
++    static const char* readFilter = std::getenv("NSMBW_LOG_DVD_READS");
++    if (readFilter && entry.dvdPath.find(readFilter) != std::string::npos) {
++        RT_LOG(RT_TAG_DVD) << "read " << entry.dvdPath << " offset=0x" << std::hex << fileOffset << " len=0x"
++                  << readLength << " (requested 0x" << length << ")" << std::dec << std::endl;
++        // NSMBW_TRACE_AFTER_READ=<substring>: print the next guest calls after a matching read.
++        static const char* traceAfter = std::getenv("NSMBW_TRACE_AFTER_READ");
++        if (traceAfter && entry.dvdPath.find(traceAfter) != std::string::npos) {
++            DiagRecentCalls::g_traceBudget.store(300, std::memory_order_relaxed);
++        }
++    }
++
+     out.entry = &entry;
+     out.fileOffset = fileOffset;
+     out.readLength = readLength;
+@@ -415,6 +442,7 @@ static void RegisterFileEntry(std::string dvdPath, const fs::path& hostPath, uin
+     fileEntry.hostPath = hostPath;
+     fileEntry.dvdPath = dvdPath;
+     fileEntry.size = size;
++    fileEntry.fromOverlay = g_registeringOverlay;
+ 
+     const int32_t entryNum = static_cast<int32_t>(g_fileEntries.size());
+     g_fileEntries.push_back(std::move(fileEntry));
+@@ -497,10 +525,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
              return;
          }
  
@@ -2567,7 +2708,28 @@ index 5ea4232..adc9560 100644
  
          std::string prefix = virtualPrefix.empty() ? "/" : virtualPrefix;
          if (prefix.back() != '/' && prefix.back() != '\\') {
-@@ -788,7 +811,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
+@@ -703,11 +754,20 @@ static void BuildAndPublishRuntimeFst() {
+         FailRuntimeFst(error.what());
+     }
+ 
++    std::set<std::string> overlayDvdPaths;
++    for (const DVDFileEntry& entry : g_fileEntries) {
++        if (entry.fromOverlay) {
++            overlayDvdPaths.insert(NormalizePath(entry.dvdPath));
++        }
++    }
++
+     std::vector<DVDFileEntry> indexedEntries;
+     indexedEntries.reserve(image.entries.size());
+     for (const DvdFstContract::IndexedEntry& entry : image.entries) {
+         indexedEntries.push_back({entry.hostPath, entry.dvdPath, entry.size,
+                                   entry.discOffsetWords, entry.isDirectory});
++        indexedEntries.back().fromOverlay =
++            !entry.isDirectory && overlayDvdPaths.count(NormalizePath(entry.dvdPath)) != 0;
+     }
+     g_fileEntries = std::move(indexedEntries);
+     g_pathToEntry = std::move(image.pathToEntry);
+@@ -788,7 +848,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
  
  static void InitDvdWaitingQueues()
  {
@@ -2576,7 +2738,7 @@ index 5ea4232..adc9560 100644
      for (uint32_t i = 0; i < 4; ++i) {
          const uint32_t queue = kQueueBase + (i * 8);
          Memory::Write32(queue + 0, queue);
-@@ -802,12 +825,12 @@ static void CompleteDvdCancelState()
+@@ -802,12 +862,12 @@ static void CompleteDvdCancelState()
  
      // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
      // The actual drive work is HLE'd, so complete pending cancel/reset waits.
@@ -2595,7 +2757,7 @@ index 5ea4232..adc9560 100644
  }
  
  // 0x8015EA1C -> DVDInit
-@@ -824,14 +847,14 @@ extern "C" void DVDInit_8015EA1C()
+@@ -824,14 +884,14 @@ extern "C" void DVDInit_8015EA1C()
  
      // 1. Initialize Global Flags (Emulate OS state)
      // These addresses are standard OS globals for DVD context
@@ -2615,7 +2777,19 @@ index 5ea4232..adc9560 100644
      constexpr uint32_t kMagicValue = 0xFEEBDAED;
      for (int i = 0; i < 4; i++) {
          uint32_t ctx = kContextBase + i * 0x20;
-@@ -883,7 +906,7 @@ extern "C" void DVDInit_8015EA1C()
+@@ -867,9 +927,11 @@ extern "C" void DVDInit_8015EA1C()
+     // reverse discovery order: the explicitly configured root outranks the mod
+     // manifest.
+     const size_t vanillaEntryCount = g_fileEntries.size();
++    g_registeringOverlay = true;
+     for (auto overlay = overlays.rbegin(); overlay != overlays.rend(); ++overlay) {
+         ScanOverlayRoot(*overlay);
+     }
++    g_registeringOverlay = false;
+     RT_LOG(RT_TAG_DVD) << "disc index: " << vanillaEntryCount << " disc file(s), "
+               << (g_fileEntries.size() - vanillaEntryCount) << " overlay registration(s) from "
+               << overlays.size() << " root(s)" << std::endl;
+@@ -883,7 +945,7 @@ extern "C" void DVDInit_8015EA1C()
      BuildAndPublishRuntimeFst();
  
      // Initialize the translated DVD filesystem so it can use the published FST.
@@ -2624,7 +2798,7 @@ index 5ea4232..adc9560 100644
      if (TranslatedFunctionRegistry::FindByAddressPtr(kDvdFsInitAddress)) {
          InvokeIndirectCpu(kDvdFsInitAddress, &GetPersistentCpuContext());
      }
-@@ -1196,7 +1219,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
+@@ -1196,7 +1258,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
      CopyToGuestAsDma(buffer, tempBuf.data(), tempBuf.size());
      return finish(true);
  }
@@ -3199,10 +3373,18 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..d23031f 100644
+index 8c96414..ce9053e 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
-@@ -156,23 +156,23 @@ std::vector<Row> BuildRows(int tab) {
+@@ -10,6 +10,7 @@
+ #include "nsmbw_menu_draw.h"
+ #include "nsmbw_movie_skip.h"
+ 
++#include "hle/storage/riivolution.h"
+ #include "memory.h"
+ #include "runtime_config.h"
+ #include "settings_overlay.h"
+@@ -156,23 +157,23 @@ std::vector<Row> BuildRows(int tab) {
  }
  
  // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
@@ -3231,7 +3413,7 @@ index 8c96414..d23031f 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,14 +186,14 @@ bool g_soundPaused = false;
+@@ -186,14 +187,14 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3249,7 +3431,7 @@ index 8c96414..d23031f 100644
  constexpr uint32_t kProcStopBits = 0x2u | 0x4u | 0x8u;
  uint32_t g_procBitsAdded = 0; // only the bits this menu set, so the game's own are never cleared
  
-@@ -234,7 +234,7 @@ void SetGameStopped(bool stopped) {
+@@ -234,7 +235,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3258,6 +3440,227 @@ index 8c96414..d23031f 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
+@@ -254,7 +255,7 @@ void LogMenu(const char* what, const char* why) {
+ 
+ // ---- Screens and state --------------------------------------------------------------------------
+ 
+-enum class Screen { Options, Bindings };
++enum class Screen { Options, Bindings, Mods };
+ Screen g_screen = Screen::Options;
+ 
+ // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
+@@ -271,6 +272,17 @@ struct BindState {
+     bool capturing = false;
+ } g_bind;
+ 
++// The mods screen: every pack in the mods folder with an On / Off switch, opened by the file select's
++// Mods button (ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp). The list is read when the
++// screen opens and after each change (InstalledMods reads the folder; a change writes mod.toml).
++constexpr int kModRowsShown = 5;
++struct ModsState {
++    std::vector<RuntimeRiivolution::InstalledMod> mods;
++    int row = 0;
++    int scroll = 0;
++    bool fromFileSelect = false;
++} g_mods;
++
+ // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
+ // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
+ int BindSlots() { return 4; }
+@@ -278,6 +290,8 @@ int BindSlots() { return 4; }
+ // Set when a menu opened from the pause window has finished closing; the pause input handler
+ // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
+ std::atomic<bool> g_returnToPause{false};
++// The same for the file select: set when the mods screen it opened has finished closing.
++std::atomic<bool> g_modsClosed{false};
+ 
+ // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
+ void Close(const char* why) {
+@@ -299,6 +313,8 @@ void FinishClose() {
+     SetGameStopped(false);
+     if (g.fromPause) g_returnToPause = true;
+     g.fromPause = false;
++    if (g_mods.fromFileSelect) g_modsClosed = true;
++    g_mods.fromFileSelect = false;
+ }
+ 
+ void Open(const char* why, bool fromPause) {
+@@ -319,6 +335,14 @@ void ShowScreen(Screen screen) {
+     g.openedAt = draw::Now();
+ }
+ 
++void OpenMods() {
++    g_mods.mods = RuntimeRiivolution::InstalledMods();
++    g_mods.row = g_mods.scroll = 0;
++    g_mods.fromFileSelect = true;
++    Open("file select", false);
++    g_screen = Screen::Mods;
++}
++
+ void OpenBindings(uint32_t player) {
+     g_bind = BindState{};
+     g_bind.player = player;
+@@ -467,10 +491,46 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+     return false;
+ }
+ 
++bool ModsCommand(Cmd cmd, const char* why) {
++    const int n = int(g_mods.mods.size());
++    switch (cmd) {
++    case Cmd::Up: case Cmd::Down:
++        if (n == 0) break;
++        g_mods.row = ((g_mods.row + (cmd == Cmd::Down ? 1 : -1)) % n + n) % n;
++        if (g_mods.row < g_mods.scroll) g_mods.scroll = g_mods.row;
++        if (g_mods.row >= g_mods.scroll + kModRowsShown) g_mods.scroll = g_mods.row - kModRowsShown + 1;
++        if (n > 1) Play(kSndCursor);
++        break;
++    case Cmd::Left: case Cmd::Right: case Cmd::Select: {
++        if (n == 0) {
++            if (cmd == Cmd::Select) Play(kSndInvalid);
++            break;
++        }
++        const auto& mod = g_mods.mods[size_t(g_mods.row)];
++        if (!RuntimeRiivolution::SetModEnabled(mod.folder, !mod.enabled)) {
++            Play(kSndInvalid);
++            break;
++        }
++        const std::string folder = mod.folder;
++        g_mods.mods = RuntimeRiivolution::InstalledMods();
++        for (int i = 0; i < int(g_mods.mods.size()); ++i) {
++            if (g_mods.mods[size_t(i)].folder == folder) g_mods.row = i;
++        }
++        Play(cmd == Cmd::Select ? kSndDecide : kSndCursor);
++        g.pressPending = cmd == Cmd::Select;
++        break;
++    }
++    case Cmd::Back: case Cmd::Exit: Close(why); Play(kSndBack); return true;
++    default: break;
++    }
++    return false;
++}
++
+ bool Dispatch(Cmd cmd, const char* why) {
+     static constexpr const char* kNames[] = {"up", "down", "left", "right", "select", "back",
+                                              "tab-", "tab+", "clear", "reset", "exit"};
+     LogMenu(kNames[int(cmd)], why);
++    if (g_screen == Screen::Mods) return ModsCommand(cmd, why);
+     return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
+ }
+ 
+@@ -588,7 +648,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+             SetOpen(!g.open);
+             continue;
+         }
+-        if ((action == "tab_prev" || action == "tab_next") && g.open && !g.closing && !g.afterPress) {
++        if ((action == "tab_prev" || action == "tab_next") && g.open && !g.closing && !g.afterPress &&
++            g_screen != Screen::Mods) {
+             Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
+             continue;
+         }
+@@ -807,6 +868,61 @@ void DrawBindings(const draw::Canvas& c) {
+     }
+ }
+ 
++// A mod's name shortened to fit the row beside its switch (Label draws in the game's menu font).
++std::string FitTitle(const std::string& title) {
++    constexpr size_t kMax = 26;
++    if (title.size() <= kMax) return title;
++    return title.substr(0, kMax - 3) + "...";
++}
++
++void DrawMods(const draw::Canvas& c) {
++    const int n = int(g_mods.mods.size());
++    g_mods.row = n == 0 ? 0 : std::clamp(g_mods.row, 0, n - 1);
++    g_mods.scroll = std::clamp(g_mods.scroll, 0, std::max(0, n - kModRowsShown));
++
++    c.Mario("Mods", 0, 132, 40);
++    const draw::TextStyle header{.white = Rgb(200, 215, 230), .outline = true};
++    c.Text(n == 0 ? std::string("No mods installed") : std::to_string(n) + (n == 1 ? " mod installed" : " mods installed"),
++           0, 94, 17, header);
++    c.Rect(0, 70, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
++
++    if (n == 0) {
++        c.Label("Put mod folders in:", 0, 30, 20, Align::Center, false);
++        std::string path = RuntimeConfigFile::PathToUtf8(RuntimeRiivolution::ModsRoot());
++        if (path.size() > 48) path = "..." + path.substr(path.size() - 45);
++        c.Text(path, 0, 0, 15, {.white = Rgb(255, 255, 160), .outline = true});
++    } else {
++        if (n > kModRowsShown) {
++            draw::TextStyle count = header;
++            count.align = Align::Right;
++            c.Text(std::to_string(g_mods.scroll + 1) + "-" + std::to_string(std::min(n, g_mods.scroll + kModRowsShown)) +
++                       " of " + std::to_string(n),
++                   262, 94, 15, count);
++        }
++        for (int k = 0; k < kModRowsShown && g_mods.scroll + k < n; ++k) {
++            const int i = g_mods.scroll + k;
++            const auto& mod = g_mods.mods[size_t(i)];
++            Row r{FitTitle(mod.title), Kind::Toggle, {}, mod.enabled ? 1 : 0, [](int) {}};
++            DrawRow(c, r, kRowY[size_t(k)], i == g_mods.row);
++        }
++    }
++
++    c.Rect(0, -98, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
++    if (n > 0) {
++        const auto& mod = g_mods.mods[size_t(g_mods.row)];
++        std::string note;
++        if (mod.enabled != mod.loaded) note = "Applies after a restart";
++        else if (mod.enabled && mod.hasCode && !mod.codeBuiltIn) note = "Its code needs a mod build (tools/mod_build.py)";
++        if (!note.empty()) {
++            c.Text(note, -262, kPromptY, 16, {.white = Rgb(255, 255, 80), .align = Align::Left, .outline = true});
++        }
++    }
++    DrawPrompts(c, kPromptY, {MenuPrompt("Select", "confirm"), MenuPrompt("Back", "back")});
++}
++
++// Set on the game thread by the file select's Mods button once its press animation has played.
++std::atomic<bool> g_openMods{false};
++
+ // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
+ // window has played its press and out animations; opened here on the next frame. The game already
+ // played its own decide sound.
+@@ -872,9 +988,22 @@ void RunScriptedOpenClose() {
+     }
+ }
+ 
++// NSMBW_MODS_MENU_TEST=<commands>: test runs drive the mods screen without keyboard focus, one
++// command every 40 frames (menu time) once it has opened: d down, u up, s select, b back.
++void RunScriptedModsCommands() {
++    static const char* spec = std::getenv("NSMBW_MODS_MENU_TEST");
++    static size_t next = 0;
++    if (spec == nullptr || spec[next] == '\0' || !g.open || g.closing || g_screen != Screen::Mods) return;
++    if (draw::Now() - g.openedAt < 40.0f * float(next + 1)) return;
++    const char c = spec[next++];
++    Dispatch(c == 'd' ? Cmd::Down : c == 'u' ? Cmd::Up : c == 's' ? Cmd::Select : Cmd::Back, "test");
++}
++
+ void Draw() noexcept {
+     RunScriptedOpenClose();
++    RunScriptedModsCommands();
+     if (!g.open && g_openFromPause.exchange(false)) Open("pause menu", true);
++    if (!g.open && !g.closing && g_openMods.exchange(false)) OpenMods();
+     if (!g.open) OpenOnFirstLaunch();
+     if (!g.open) {
+         ClearHeldIfReleased();
+@@ -906,10 +1035,11 @@ void Draw() noexcept {
+     }
+     const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
+     const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
+-    if (g_screen == Screen::Options || g.closing) c.FillDisplay(Rgb(0, 0, 0, uint8_t(128 * std::clamp(fade, 0.0f, 1.0f))));
++    if (g_screen != Screen::Bindings || g.closing) c.FillDisplay(Rgb(0, 0, 0, uint8_t(128 * std::clamp(fade, 0.0f, 1.0f))));
+     else c.FillDisplay(Rgb(0, 0, 0, 128));
+     c.PauseWindow(0, -2, 588, 334);
+     if (g_screen == Screen::Bindings) DrawBindings(c);
++    else if (g_screen == Screen::Mods) DrawMods(c);
+     else DrawOptions(c);
+     g.pressPending = false;
+ }
+@@ -934,3 +1064,5 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+ extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
+ extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
+ extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
++extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
++extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
 index a63636b..38dc070 100644
 --- a/runtime/src/product/nsmbw_product.cpp
@@ -5352,10 +5755,10 @@ index 9cb9576..10d7d75 100644
      if (!file.is_open()) {
          failure = HostReadFailure::MissingFile;
 diff --git a/runtime/src/product/nsmbw_layout_patch.cpp b/runtime/src/product/nsmbw_layout_patch.cpp
-index 6c7e32b..e6c2b0c 100644
+index 6c7e32b..5e2ea79 100644
 --- a/runtime/src/product/nsmbw_layout_patch.cpp
 +++ b/runtime/src/product/nsmbw_layout_patch.cpp
-@@ -23,6 +23,7 @@
+@@ -23,11 +23,13 @@
  //   BRLAN: same header, then pat1 (group list: count at +10, groups offset at +16, 20 bytes per
  //     group) and pai1 (entry count at +14, entry offset table at the offset in +16; each entry is
  //     self-contained - name (20 bytes), then tags at offsets relative to the entry).
@@ -5363,18 +5766,256 @@ index 6c7e32b..e6c2b0c 100644
  #include "nsmbw_layout_patch.h"
  
  #include "dvd_generated_files.h"
-@@ -463,6 +464,7 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
+ #include "runtime_config.h"
+ 
++#include <algorithm>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
+@@ -462,7 +464,201 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
+     return WriteArchive(arc);
  }
  
++// ---- The file select's Mods button ---------------------------------------------------------------
++//
++// dFileSelect_c (layout fileSelectBase_18) has two buttons under the save files: Free Mode
++// (N_Multi_00 > N_multiButton_00, green) and Coin Battle (N_MultiCoin_00 > N_multiCoin_00,
++// yellow), each a null pane with the button's pictures and texts under it, a group (F00_multi /
++// F01_coinBattle) and tracks in the six *Multi animations. Mods is a third button after them: a
++// copy of Coin Battle's subtree under new names, in group F02_mods, with renamed copies of its
++// tracks. The game code that drives it is ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp.
++//
++// Two things differ from a plain clone:
++//  - Colour. The button colours are pane vertex colours (the base gradient), material colour
++//    registers (the checker pattern and its highlight) and the animations' colour tracks, which
++//    move between an idle and a highlighted colour. Swapping red and blue everywhere in the copy
++//    - panes, its own copies of the materials, and the copied tracks (by target, so the animation
++//    keeps its timing) - turns the yellow-orange button into a cyan-blue one that highlights the
++//    same way. The checker uses Free Mode's "?" mask (immsk_check_01) instead of coins.
++//  - Materials. Colour tracks address a material by name, and a cloned pane still points at its
++//    original's material, so without copies Mods would light up whenever Coin Battle did. Each
++//    picture and text pane of the copy gets its own material, named after the pane.
++// Layout: the animations key only the inner panes' scale, so the three buttons are placed and
++// sized through the outer null panes. The row is 2 * kFileSelectStep wide; at full size and 16:9
++// it would reach past 4:3's 304-unit half width, so 4:3 uses a smaller row.
++
++// Material table (mat1): count at +8, entry offsets (from the section start) from +12. An entry is
++// its name (20 bytes), colour registers c0..c2 (GXColorS10, 8 bytes each) from +20, konst colours
++// from +44, flags at +60 (texture map count in the low nibble), texture maps (index, wrap s, wrap t)
++// from +64. Picture panes keep their material index at +0x5C, text panes at +0x50.
++size_t FindSection(Sectioned& l, const char* magic) {
++    for (size_t i = 0; i < l.sections.size(); ++i) {
++        if (Magic(l.sections[i]) == magic) return i;
++    }
++    throw Failure{std::string("missing section ") + magic};
++}
++
++std::vector<Bytes> MaterialEntries(const Bytes& mat) {
++    const uint16_t count = Get16(mat, 8);
++    std::vector<Bytes> entries;
++    for (uint16_t i = 0; i < count; ++i) {
++        const uint32_t start = Get32(mat, 12 + 4 * i);
++        const uint32_t end = i + 1 < count ? Get32(mat, 12 + 4 * (i + 1)) : uint32_t(mat.size());
++        Require(start < end && end <= mat.size(), "bad mat1");
++        entries.emplace_back(mat.begin() + start, mat.begin() + end);
++    }
++    return entries;
++}
++
++Bytes WriteMaterials(const Bytes& oldHeader, const std::vector<Bytes>& entries) {
++    Bytes out(oldHeader.begin(), oldHeader.begin() + 12);
++    out.resize(12 + 4 * entries.size(), 0);
++    for (size_t i = 0; i < entries.size(); ++i) {
++        Put32(out, 12 + 4 * i, uint32_t(out.size()));
++        out.insert(out.end(), entries[i].begin(), entries[i].end());
++    }
++    Put16(out, 8, uint16_t(entries.size()));
++    Put32(out, 4, uint32_t(out.size()));
++    return out;
++}
++
++uint16_t TextureIndex(Sectioned& l, const std::string& name) {
++    const Bytes& txl = l.sections[FindSection(l, "txl1")];
++    for (uint16_t i = 0, n = Get16(txl, 8); i < n; ++i) {
++        const uint32_t at = 12 + Get32(txl, 12 + 8 * i);
++        if (Name(txl, at, 64) == name) return i;
++    }
++    throw Failure{"missing texture " + name};
++}
++
++void SwapRedBlue(Bytes& b, size_t r, size_t bl) { std::swap(b[r], b[bl]); }
++
++// Gives each picture / text pane in `panes` a copy of its material, named after the pane, with red
++// and blue swapped in its colour registers.
++void CloneMaterialsSwapped(Sectioned& l, const std::vector<std::string>& panes) {
++    const size_t matIndex = FindSection(l, "mat1");
++    std::vector<Bytes> entries = MaterialEntries(l.sections[matIndex]);
++    for (const std::string& name : panes) {
++        Bytes& pane = Pane(l, name);
++        const std::string m = Magic(pane);
++        const size_t field = m == "pic1" ? 0x5C : m == "txt1" ? 0x50 : 0;
++        Require(field != 0, "material clone of a pane without one");
++        const uint16_t index = Get16(pane, field);
++        Require(index < entries.size(), "material index out of range");
++        Bytes copy = entries[index];
++        PutName(copy, 0, 20, name);
++        for (size_t reg = 0; reg < 3; ++reg) { // s16 r, g, b, a per register
++            const size_t at = 20 + 8 * reg;
++            std::swap(copy[at], copy[at + 4]);
++            std::swap(copy[at + 1], copy[at + 5]);
++        }
++        Put16(pane, field, uint16_t(entries.size()));
++        entries.push_back(std::move(copy));
++    }
++    l.sections[matIndex] = WriteMaterials(l.sections[matIndex], entries);
++}
++
++void SetMaterialTexture(Sectioned& l, const std::string& material, uint16_t texture) {
++    Bytes& mat = l.sections[FindSection(l, "mat1")];
++    for (uint16_t i = 0, n = Get16(mat, 8); i < n; ++i) {
++        const uint32_t at = Get32(mat, 12 + 4 * i);
++        if (Name(mat, at, 20) != material) continue;
++        Require((Get32(mat, at + 60) & 0xF) >= 1, "material without a texture");
++        Put16(mat, at + 64, texture);
++        return;
++    }
++    throw Failure{"missing material " + material};
++}
++
++// The four corner colours of a picture pane (+0x4C, RGBA each).
++void SwapPaneVertexColours(Sectioned& l, const std::string& pane) {
++    Bytes& sec = Pane(l, pane);
++    Require(Magic(sec) == "pic1", "vertex colours of a non-picture pane");
++    for (size_t corner = 0; corner < 4; ++corner) SwapRedBlue(sec, 0x4C + 4 * corner, 0x4E + 4 * corner);
++}
++
++void ScalePane(Sectioned& l, const std::string& pane, float scale) {
++    Bytes& sec = Pane(l, pane);
++    PutF(sec, 60, scale);
++    PutF(sec, 64, scale);
++}
++void MovePaneX(Sectioned& l, const std::string& pane, float x) { PutF(Pane(l, pane), 36, x); }
++
++// In the colour tracks of the entries named in `names`, red and blue trade places: RLVC targets
++// 0..15 are the corners' r, g, b, a (16 is the pane's alpha), RLMC targets come in fours (material
++// colour, c0..c2, konst). Swapping the target bytes keeps every key.
++void SwapTrackRedBlue(Sectioned& a, const std::vector<std::string>& names) {
++    for (Bytes& sec : a.sections) {
++        if (Magic(sec) != "pai1") continue;
++        const size_t table = Get32(sec, 16);
++        for (uint16_t e = 0, n = Get16(sec, 14); e < n; ++e) {
++            const size_t entry = Get32(sec, table + e * 4u);
++            if (std::find(names.begin(), names.end(), Name(sec, entry, 20)) == names.end()) continue;
++            for (uint8_t t = 0, tags = sec[entry + 20]; t < tags; ++t) {
++                const size_t tag = entry + Get32(sec, entry + 24 + t * 4u);
++                const std::string kind(sec.begin() + tag, sec.begin() + tag + 4);
++                if (kind != "RLVC" && kind != "RLMC") continue;
++                for (uint8_t g = 0, groups = sec[tag + 4]; g < groups; ++g) {
++                    uint8_t& target = sec[tag + Get32(sec, tag + 8 + g * 4u) + 1];
++                    if (kind == "RLVC" && target >= 16) continue;
++                    if (target % 4 == 0) target += 2;
++                    else if (target % 4 == 2) target -= 2;
++                }
++            }
++        }
++    }
++}
++
++const std::map<std::string, std::string> kModsPaneNames = {
++    {"N_MultiCoin_00", "N_MultiMods_00"}, {"N_multiCoin_00", "N_multiMods_00"},
++    {"P_battleBase_00", "P_modsBase_00"}, {"P_battleLight", "P_modsLight_00"},
++    {"P_battleUPs", "P_modsUPs_00"},      {"T_multiS_01", "T_multiS_02"},
++    {"T_multi_01", "T_multi_02"},         {"W_multiCoin_00", "W_multiMods_00"},
++    {"P_shadow_03", "P_shadow_04"},
++};
++
++Bytes PatchFileSelect(const Bytes& original) {
++    Archive arc = ReadArchive(original);
++    Bytes& lytFile = File(arc, "arc/blyt/fileSelectBase_18.brlyt");
++    Sectioned lyt = ReadSectioned(lytFile);
++
++    CloneSubtree(lyt, "N_MultiCoin_00", kModsPaneNames);
++    CloneMaterialsSwapped(lyt, {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00", "T_multiS_02", "T_multi_02", "P_shadow_04"});
++    SetMaterialTexture(lyt, "P_modsUPs_00", TextureIndex(lyt, "immsk_check_01.tpl"));
++    for (const char* pane : {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"}) SwapPaneVertexColours(lyt, pane);
++    SetText(lyt, "T_multiS_02", "Mods");
++    SetText(lyt, "T_multi_02", "Mods");
++
++    const bool wide = RuntimeConfigFile::WidescreenEnabled(true);
++    const float scale = wide ? 0.9f : 0.78f, step = wide ? 240.0f : 198.0f;
++    for (const char* outer : {"N_Multi_00", "N_MultiCoin_00", "N_MultiMods_00"}) ScalePane(lyt, outer, scale);
++    MovePaneX(lyt, "N_multiButton_00", -step / scale);
++    MovePaneX(lyt, "N_multiCoin_00", 0.0f);
++    MovePaneX(lyt, "N_multiMods_00", step / scale);
++
++    AddGroup(lyt, "F02_mods", {"N_MultiMods_00", "N_multiMods_00", "T_multiS_02", "T_multi_02", "P_shadow_04",
++                               "P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"});
++    lytFile = WriteSectioned(lyt);
++
++    const std::map<std::string, std::string> tracks = {
++        {"N_multiCoin_00", "N_multiMods_00"}, {"P_shadow_03", "P_shadow_04"}, {"P_battleBase_00", "P_modsBase_00"},
++        {"T_multiS_01", "T_multiS_02"},       {"T_multi_01", "T_multi_02"},   {"P_battleUPs", "P_modsUPs_00"},
++        {"P_battleLight", "P_modsLight_00"},
++    };
++    std::vector<std::string> renamed;
++    for (const auto& [from, to] : tracks) renamed.push_back(to);
++    for (const char* anim : {"inMulti", "onMulti", "idleMulti", "hitMulti", "offMulti", "outMulti"}) {
++        Bytes& file = File(arc, std::string("arc/anim/fileSelectBase_18_") + anim + ".brlan");
++        Sectioned a = ReadSectioned(file);
++        ExtendAnimation(a, "F02_mods", tracks);
++        SwapTrackRedBlue(a, renamed);
++        file = WriteSectioned(a);
++    }
++    return WriteArchive(arc);
++}
++
  std::optional<Bytes> ReadFile(const fs::path& path) {
 +    DvdReadContract::CloseCachedDiscFiles();
      std::ifstream f(path, std::ios::binary);
      if (!f) return std::nullopt;
      return Bytes(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+@@ -472,7 +668,7 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
+     const fs::path source = RuntimeDvd::HostPathFor(dvdPath);
+     const auto original = source.empty() ? std::nullopt : ReadFile(source);
+     if (!original) {
+-        std::fprintf(stderr, "[nsmbw][layout] %s not found; the Options button will be missing\n", dvdPath);
++        std::fprintf(stderr, "[nsmbw][layout] %s not found; the button it adds will be missing\n", dvdPath);
+         return false;
+     }
+     try {
+@@ -501,11 +697,14 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
+ 
+ bool g_pauseMenuPatched = false;
+ bool g_mapMenuPatched = false;
++bool g_fileSelectPatched = false;
+ 
+ void GenerateFiles() {
+     g_pauseMenuPatched = Generate("/Layout/pauseMenu/pauseMenu.arc", "pauseMenu.arc", &PatchPauseMenu);
+     g_mapMenuPatched =
+         Generate("/Layout/corseSelectMenu/corseSelectMenu.arc", "corseSelectMenu.arc", &PatchCourseSelectMenu);
++    g_fileSelectPatched =
++        Generate("/Layout/fileSelectBase/fileSelectBase.arc", "fileSelectBase.arc", &PatchFileSelect);
+     // The Wii Remote icon set keeps the game's own bubble: its hop belongs to the remote art.
+     if (RuntimeConfigFile::ButtonIcons("auto") != "wii") {
+         Generate("/Layout/fukidashiInfo/fukidashiInfo.arc", "fukidashiInfo.arc", &PatchFukidashi);
+@@ -520,3 +719,4 @@ void Register() noexcept { RuntimeDvd::SetGeneratedFilesHook(&GenerateFiles); }
+ 
+ extern "C" bool NsmbwPauseMenuHasOptions() { return nsmbw_layout_patch::g_pauseMenuPatched; }
+ extern "C" bool NsmbwMapMenuHasOptions() { return nsmbw_layout_patch::g_mapMenuPatched; }
++extern "C" bool NsmbwFileSelectHasMods() { return nsmbw_layout_patch::g_fileSelectPatched; }
 diff --git a/runtime/src/product/nsmbw_menu_art.cpp b/runtime/src/product/nsmbw_menu_art.cpp
-index 3f78c82..862a7df 100644
+index 3f78c82..59b98a4 100644
 --- a/runtime/src/product/nsmbw_menu_art.cpp
 +++ b/runtime/src/product/nsmbw_menu_art.cpp
+@@ -1,7 +1,7 @@
+ // Reads the options menu's art straight from the extracted disc ([paths] dvd_root/files):
+ //   Layout/pauseMenu/pauseMenu.arc        window frame and button frame textures
+ //   Layout/select_cursor/select_cursor.arc the yellow corner cursor
+-//   EU/<lang>/Font/*.brfnt                the message font and the Mario font
++//   EU|US/<lang>/Font/*.brfnt             the message font and the Mario font
+ // The formats, all big-endian:
+ //   .arc   U8 archive: a node table (directories and files) plus a string table. Some discs wrap
+ //          archives in Yaz0 compression; NSMBW's layout archives are plain U8, but both are handled.
 @@ -13,6 +13,7 @@
  // Layout offsets match the Python tools used to make the mockups (scratchpad arc_extract.py /
  // render_kit.py), which were checked by rendering the stock pause menu and comparing it with a
@@ -5391,6 +6032,34 @@ index 3f78c82..862a7df 100644
      std::ifstream in(path, std::ios::binary);
      if (!in) return false;
      out.assign(std::istreambuf_iterator<char>(in), {});
+@@ -295,15 +297,21 @@ bool LoadArchiveImage(const fs::path& arc, const char* name, Art art) {
+     return false;
+ }
+ 
+-// The fonts are byte-identical in every EU language folder; English first, else any.
++// The fonts are byte-identical in every language folder of a region; English first, else any. The
++// region folder is the disc's: EU/<lang> on PAL, US/<lang> on NTSC-U (the US port looked only in
++// EU/EngEU, so the menu found no font and closed itself as soon as it opened).
+ fs::path FindFontDir(const fs::path& files) {
+-    const fs::path english = files / "EU" / "EngEU" / "Font";
+-    if (fs::exists(english)) return english;
++    for (const char* english : {"US/EngUS", "EU/EngEU"}) {
++        const fs::path dir = files / english / "Font";
++        if (fs::exists(dir)) return dir;
++    }
+     std::error_code ec;
+-    for (const auto& entry : fs::directory_iterator(files / "EU", ec)) {
+-        if (fs::exists(entry.path() / "Font")) return entry.path() / "Font";
++    for (const char* region : {"US", "EU"}) {
++        for (const auto& entry : fs::directory_iterator(files / region, ec)) {
++            if (fs::exists(entry.path() / "Font")) return entry.path() / "Font";
++        }
+     }
+-    return english;
++    return files / "EU" / "EngEU" / "Font";
+ }
+ 
+ bool LoadFont(const fs::path& path, Font& font) {
 diff --git a/runtime/include/isa/ppc_isa_float.h b/runtime/include/isa/ppc_isa_float.h
 index fcd5795..882ba72 100644
 --- a/runtime/include/isa/ppc_isa_float.h
@@ -6225,3 +6894,1072 @@ index 0000000..acaa978
 +
 +}  // namespace GuestFlat
 +#endif  // __SWITCH__
+diff --git a/runtime/src/hle/storage/riivolution.cpp b/runtime/src/hle/storage/riivolution.cpp
+index 7fddf83..92074a0 100644
+--- a/runtime/src/hle/storage/riivolution.cpp
++++ b/runtime/src/hle/storage/riivolution.cpp
+@@ -22,14 +22,28 @@
+ #include <iostream>
+ #include <mutex>
+ #include <sstream>
++#include <cstdlib>
++#include <map>
+ #include <system_error>
+ 
++#include <toml.hpp>
++
+ namespace fs = std::filesystem;
+ 
+ namespace {
+ 
++// Per-pack settings from mods/<name>/mod.toml.
++struct ModSettings {
++    bool enabled = true;
++    int64_t priority = 0;
++    // "Option" or "Section/Option" -> 1-based choice (0 disables).
++    std::vector<RiivolutionContract::OptionSelection> selections;
++    bool hasOptionsTable = false;
++};
++
+ struct RiivoState {
+     std::vector<RuntimeRiivolution::Overlay> overlays;
++    std::map<std::string, ModSettings> modSettings; // by Overlay::modName
+     std::optional<RuntimeRiivolution::SaveRedirect> saveRedirect;
+ };
+ 
+@@ -117,10 +131,107 @@ void RiivoAddRoot(std::vector<RuntimeRiivolution::Overlay>& overlays, fs::path r
+ 
+     RT_LOG(RT_TAG_RIIVOLUTION) << "overlay root (" << (source ? source : "unknown")
+               << "): " << PathToUtf8(normalized) << std::endl;
+-    overlays.push_back({std::move(normalized), std::nullopt});
++    overlays.push_back({std::move(normalized), {}, std::nullopt});
++}
++
++
++ModSettings RiivoReadModSettings(const fs::path& modRoot) {
++    ModSettings settings;
++    const fs::path tomlPath = modRoot / "mod.toml";
++    std::error_code ec;
++    if (!fs::is_regular_file(tomlPath, ec)) {
++        return settings;
++    }
++    try {
++        std::ifstream stream(tomlPath, std::ios::binary);
++        const toml::value document = toml::parse(stream, PathToUtf8(tomlPath));
++        if (document.contains("enabled")) {
++            settings.enabled = document.at("enabled").as_boolean();
++        }
++        if (document.contains("priority")) {
++            settings.priority = document.at("priority").as_integer();
++        }
++        if (document.contains("options")) {
++            settings.hasOptionsTable = true;
++            for (const auto& [key, value] : document.at("options").as_table()) {
++                RiivolutionContract::OptionSelection selection;
++                const std::string name(key);
++                const size_t slash = name.find('/');
++                if (slash != std::string::npos) {
++                    selection.section = name.substr(0, slash);
++                    selection.option = name.substr(slash + 1);
++                } else {
++                    selection.option = name;
++                }
++                if (value.is_boolean()) {
++                    selection.choice = value.as_boolean() ? 1u : 0u;
++                } else {
++                    const auto choice = value.as_integer();
++                    selection.choice = choice < 0 ? 0u : static_cast<uint32_t>(choice);
++                }
++                settings.selections.push_back(std::move(selection));
++            }
++        }
++    } catch (const std::exception& error) {
++        RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(tomlPath) << ": " << error.what()
++                  << " (using defaults)" << std::endl;
++    }
++    return settings;
+ }
+ 
+-std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
++// mods/<name>/ packs: each folder is a virtual SD card root (riivolution/*.xml
++// plus the folders its XML points at), or, without XML, a disc-shaped overlay.
++// Higher mod.toml priority wins, then folder name order.
++void RiivoDiscoverMods(std::vector<RuntimeRiivolution::Overlay>& overlays, RiivoState& state) {
++    const fs::path modsRoot = RuntimeRiivolution::ModsRoot();
++    std::error_code ec;
++    if (!fs::is_directory(modsRoot, ec)) {
++        return;
++    }
++
++    struct Candidate {
++        fs::path root;
++        std::string name;
++        ModSettings settings;
++    };
++    std::vector<Candidate> candidates;
++    for (const auto& entry : fs::directory_iterator(modsRoot, ec)) {
++        if (ec) {
++            break;
++        }
++        std::error_code entryEc;
++        if (!entry.is_directory(entryEc)) {
++            continue;
++        }
++        std::string name = PathToUtf8(entry.path().filename());
++        if (name.empty() || name[0] == '.') {
++            continue;
++        }
++        ModSettings settings = RiivoReadModSettings(entry.path());
++        if (!settings.enabled) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << "mod '" << name << "' is disabled in mod.toml" << std::endl;
++            continue;
++        }
++        candidates.push_back({entry.path(), std::move(name), std::move(settings)});
++    }
++    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
++        if (a.settings.priority != b.settings.priority) {
++            return a.settings.priority > b.settings.priority;
++        }
++        return a.name < b.name;
++    });
++
++    for (auto& candidate : candidates) {
++        const size_t before = overlays.size();
++        RiivoAddRoot(overlays, candidate.root, "mods folder");
++        if (overlays.size() != before) {
++            overlays.back().modName = candidate.name;
++            state.modSettings[candidate.name] = std::move(candidate.settings);
++        }
++    }
++}
++
++std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots(RiivoState& state) {
+     std::vector<RuntimeRiivolution::Overlay> overlays;
+ 
+     // Discovery order is precedence order: DVDInit applies the roots in
+@@ -148,6 +259,8 @@ std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
+         RiivoAddRoot(overlays, root, "recomp mod manifest");
+     }
+ 
++    RiivoDiscoverMods(overlays, state);
++
+     return overlays;
+ }
+ 
+@@ -250,8 +363,121 @@ void RiivoCollectMappings(const RiivolutionContract::Patch& patch, const std::st
+     }
+ }
+ 
+-std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& overlayRoot,
++
++// Riivolution writes memory values as hex digits; spaces and a 0x prefix are tolerated.
++std::optional<std::vector<uint8_t>> RiivoParseHexBytes(std::string_view text) {
++    std::string digits;
++    for (size_t i = 0; i < text.size(); ++i) {
++        const char c = text[i];
++        if (c == '0' && i + 1 < text.size() && (text[i + 1] == 'x' || text[i + 1] == 'X')) {
++            ++i;
++            continue;
++        }
++        if (std::isspace(static_cast<unsigned char>(c))) {
++            continue;
++        }
++        if (!std::isxdigit(static_cast<unsigned char>(c))) {
++            return std::nullopt;
++        }
++        digits.push_back(c);
++    }
++    if (digits.size() % 2 != 0) {
++        return std::nullopt;
++    }
++    std::vector<uint8_t> bytes(digits.size() / 2);
++    for (size_t i = 0; i < bytes.size(); ++i) {
++        bytes[i] = static_cast<uint8_t>(std::stoul(digits.substr(i * 2, 2), nullptr, 16));
++    }
++    return bytes;
++}
++
++void RiivoCollectMemoryPatches(const RiivolutionContract::Patch& patch, const std::string& sdRootGeneric,
++                               const std::string& xmlDirGeneric, const fs::path& xmlFile,
++                               RuntimeRiivolution::PatchSet& set) {
++    if (patch.memoryPatches.empty()) {
++        return;
++    }
++    const std::string patchRoot =
++        RiivolutionContract::ResolvePatchRoot(sdRootGeneric, xmlDirGeneric, patch.root);
++    const std::string source = PathToUtf8(xmlFile.filename()) + ": patch '" + patch.id + "'";
++
++    for (const auto& memory : patch.memoryPatches) {
++        RuntimeRiivolution::MemoryPatch out;
++        out.offset = memory.offset;
++        out.search = memory.search;
++        out.align = memory.align == 0 ? 1u : memory.align;
++        out.ocarina = memory.ocarina;
++        out.source = source;
++
++        if (!memory.valuefile.empty()) {
++            const auto resolved =
++                RiivolutionContract::MakeAbsoluteFromRelative(sdRootGeneric, patchRoot, memory.valuefile);
++            const auto data = resolved ? RiivoReadFile(PathFromUtf8(*resolved)) : std::nullopt;
++            if (!data) {
++                RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << source << ": valuefile '" << memory.valuefile
++                          << "' not found; memory patch at 0x" << std::hex << memory.offset << std::dec
++                          << " skipped" << std::endl;
++                continue;
++            }
++            out.value.assign(data->begin(), data->end());
++            out.valuefileName = memory.valuefile;
++        } else {
++            const auto bytes = RiivoParseHexBytes(memory.value);
++            if (!bytes) {
++                RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << source << ": bad value '" << memory.value
++                          << "' at 0x" << std::hex << memory.offset << std::dec << std::endl;
++                continue;
++            }
++            out.value = *bytes;
++        }
++        if (!memory.original.empty()) {
++            const auto original = RiivoParseHexBytes(memory.original);
++            if (!original) {
++                RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << source << ": bad original '"
++                          << memory.original << "'" << std::endl;
++                continue;
++            }
++            out.original = *original;
++        }
++        if (out.value.empty()) {
++            continue;
++        }
++        set.memoryPatches.push_back(std::move(out));
++    }
++}
++
++// True when every option of the XML is off.
++bool RiivoAllOptionsOff(const RiivolutionContract::Disc& disc) {
++    for (const auto& section : disc.sections) {
++        for (const auto& option : section.options) {
++            if (option.selectedChoice != 0) {
++                return false;
++            }
++        }
++    }
++    return true;
++}
++
++void RiivoEnableFirstChoices(RiivolutionContract::Disc& disc) {
++    for (auto& section : disc.sections) {
++        for (auto& option : section.options) {
++            if (!option.choices.empty()) {
++                option.selectedChoice = 1;
++            }
++        }
++    }
++}
++
++std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const RuntimeRiivolution::Overlay& overlay,
+                                                               RiivoState& state) {
++    const fs::path& overlayRoot = overlay.root;
++    const ModSettings* modSettings = nullptr;
++    if (!overlay.modName.empty()) {
++        const auto found = state.modSettings.find(overlay.modName);
++        if (found != state.modSettings.end()) {
++            modSettings = &found->second;
++        }
++    }
+     const auto xmlSet = RiivoFindXmls(overlayRoot);
+     if (!xmlSet) {
+         return std::nullopt;
+@@ -295,13 +521,34 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+             RiivolutionContract::ApplyConfigDefaults(*disc, *config);
+         }
+         RiivolutionContract::ApplySelections(*disc, manifestSelections);
++        if (modSettings) {
++            RiivolutionContract::ApplySelections(*disc, modSettings->selections);
++            // A pack dropped into mods/ with no choices recorded anywhere would
++            // otherwise do nothing (Riivolution's options default to off). Turn
++            // on each option's first choice, which for NSMBW packs is "Enabled".
++            if (!config && !modSettings->hasOptionsTable && RiivoAllOptionsOff(*disc)) {
++                RiivoEnableFirstChoices(*disc);
++                RT_LOG(RT_TAG_RIIVOLUTION) << "mod '" << overlay.modName
++                          << "': no option choices configured, enabling the first choice of every option"
++                          << " (set them in mod.toml [options])" << std::endl;
++            }
++        }
+ 
+         const auto activePatches = disc->GeneratePatches(gameId);
+         const std::string xmlDirGeneric = RiivoGenericText(xmlFile.parent_path());
+ 
+         const size_t before = set.mappings.size();
++        const size_t memoryBefore = set.memoryPatches.size();
+         for (const auto& patch : activePatches) {
+             RiivoCollectMappings(patch, sdRootGeneric, xmlDirGeneric, set);
++            RiivoCollectMemoryPatches(patch, sdRootGeneric, xmlDirGeneric, xmlFile, set);
++            for (const auto& file : patch.filePatches) {
++                if (file.offset != 0 || file.fileoffset != 0 || file.length != 0) {
++                    RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(xmlFile) << ": partial file patch on "
++                              << file.disc << " (offset/fileoffset/length) is applied as a whole-file replacement"
++                              << std::endl;
++                }
++            }
+         }
+ 
+         // Highest-priority overlay with a <savegame> wins.
+@@ -323,8 +570,8 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+         // failure this layer has: the game boots, plays, and quietly shows
+         // vanilla content. Always say what happened.
+         RT_LOG(RT_TAG_RIIVOLUTION) << PathToUtf8(xmlFile) << ": " << activePatches.size()
+-                  << " active patch(es), " << (set.mappings.size() - before) << " mapping(s)"
+-                  << std::endl;
++                  << " active patch(es), " << (set.mappings.size() - before) << " mapping(s), "
++                  << (set.memoryPatches.size() - memoryBefore) << " memory patch(es)" << std::endl;
+         if (activePatches.empty()) {
+             RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(xmlFile)
+                       << " has no enabled options for " << gameId
+@@ -344,9 +591,9 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+ }
+ 
+ void RiivoInitialize() {
+-    g_riivoState.overlays = RiivoDiscoverRoots();
++    g_riivoState.overlays = RiivoDiscoverRoots(g_riivoState);
+     for (auto& overlay : g_riivoState.overlays) {
+-        overlay.patches = RiivoLoadPatchSet(overlay.root, g_riivoState);
++        overlay.patches = RiivoLoadPatchSet(overlay, g_riivoState);
+     }
+ }
+ 
+@@ -354,6 +601,127 @@ void RiivoInitialize() {
+ 
+ namespace RuntimeRiivolution {
+ 
++fs::path ModsRoot() {
++    const std::string configured = RuntimeConfigFile::ModsRoot();
++    if (!configured.empty()) {
++        return RuntimeNandPath::ResolveConfiguredPath(configured);
++    }
++    if (const char* env = std::getenv("NSMBW_MODS_DIR"); env && *env) {
++        return PathFromUtf8(env);
++    }
++    // Same base as the product's nsmbw_data (texture packs, caches).
++    if (const auto exeDir = RuntimeConfigFile::ExecutableDirectory()) {
++        return *exeDir / "nsmbw_data" / "mods";
++    }
++    return fs::current_path() / "nsmbw_data" / "mods";
++}
++
++namespace {
++// Kamek code in a pack: a Kamek 2 binary (Code/*.bin starting "Kamek\0\0", the standard loader's
++// layout) or NewerSMBW's DLCode*.bin. Bounded walk: packs hold thousands of level files.
++bool RiivoPackHasCode(const fs::path& root) {
++    std::error_code ec;
++    uint32_t visited = 0;
++    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
++         it != end && !ec && visited < 20000; it.increment(ec), ++visited) {
++        if (!it->is_regular_file(ec)) continue;
++        const std::string name = PathToUtf8(it->path().filename());
++        if (name.size() < 4 || name.substr(name.size() - 4) != ".bin") continue;
++        if (name.rfind("DLCode", 0) == 0) return true;
++        std::ifstream f(it->path(), std::ios::binary);
++        char magic[7] = {};
++        if (f.read(magic, 7) && std::string(magic, 7) == std::string("Kamek\0\0", 7)) return true;
++    }
++    return false;
++}
++
++std::string RiivoModTitle(const fs::path& modRoot, const std::string& folder) {
++    const fs::path tomlPath = modRoot / "mod.toml";
++    std::error_code ec;
++    if (!fs::is_regular_file(tomlPath, ec)) return folder;
++    try {
++        std::ifstream stream(tomlPath, std::ios::binary);
++        const toml::value document = toml::parse(stream, PathToUtf8(tomlPath));
++        if (document.contains("name") && document.at("name").is_string()) {
++            const std::string name = document.at("name").as_string();
++            if (!name.empty()) return name;
++        }
++    } catch (const std::exception&) {
++    }
++    return folder;
++}
++} // namespace
++
++std::vector<InstalledMod> InstalledMods() {
++    std::vector<InstalledMod> mods;
++    const fs::path modsRoot = ModsRoot();
++    std::error_code ec;
++    if (!fs::is_directory(modsRoot, ec)) return mods;
++    const auto& overlays = Overlays();
++    for (const auto& entry : fs::directory_iterator(modsRoot, ec)) {
++        std::error_code entryEc;
++        if (!entry.is_directory(entryEc)) continue;
++        InstalledMod mod;
++        mod.folder = PathToUtf8(entry.path().filename());
++        if (mod.folder.empty() || mod.folder[0] == '.') continue;
++        mod.title = RiivoModTitle(entry.path(), mod.folder);
++        mod.enabled = RiivoReadModSettings(entry.path()).enabled;
++        mod.loaded = std::any_of(overlays.begin(), overlays.end(),
++                                 [&](const Overlay& o) { return o.modName == mod.folder; });
++        mod.hasCode = RiivoPackHasCode(entry.path());
++        const std::string prefix = mod.folder + " (";
++        for (const auto& image : ModImages()) {
++            if (image.name.rfind(prefix, 0) == 0) mod.codeBuiltIn = true;
++        }
++        mods.push_back(std::move(mod));
++    }
++    std::sort(mods.begin(), mods.end(), [](const InstalledMod& a, const InstalledMod& b) { return a.title < b.title; });
++    return mods;
++}
++
++bool SetModEnabled(const std::string& folder, bool enabled) {
++    const fs::path dir = ModsRoot() / PathFromUtf8(folder);
++    std::error_code ec;
++    if (folder.empty() || folder.find('/') != std::string::npos || !fs::is_directory(dir, ec)) return false;
++    const fs::path tomlPath = dir / "mod.toml";
++    std::vector<std::string> lines;
++    {
++        std::ifstream in(tomlPath, std::ios::binary);
++        for (std::string line; std::getline(in, line);) lines.push_back(line);
++    }
++    // Replace a top-level `enabled = ...` (before the first [table]); otherwise add one at the top.
++    const std::string value = std::string("enabled = ") + (enabled ? "true" : "false");
++    bool replaced = false;
++    for (std::string& line : lines) {
++        const size_t start = line.find_first_not_of(" \t");
++        if (start == std::string::npos) continue;
++        if (line[start] == '[') break;
++        if (line.compare(start, 7, "enabled") == 0) {
++            const size_t eq = line.find_first_not_of(" \t", start + 7);
++            if (eq != std::string::npos && line[eq] == '=') {
++                line = value;
++                replaced = true;
++                break;
++            }
++        }
++    }
++    if (!replaced) lines.insert(lines.begin(), value);
++    const fs::path temp = dir / "mod.toml.tmp";
++    {
++        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
++        for (const std::string& line : lines) out << line << "\n";
++        if (!out) return false;
++    }
++    fs::rename(temp, tomlPath, ec);
++    if (ec) {
++        fs::remove(temp, ec);
++        return false;
++    }
++    RT_LOG(RT_TAG_RIIVOLUTION) << "mod '" << folder << "' " << (enabled ? "enabled" : "disabled")
++                               << " in mod.toml (applies at the next launch)" << std::endl;
++    return true;
++}
++
+ const std::vector<Overlay>& Overlays() {
+     std::call_once(g_riivoOnce, RiivoInitialize);
+     return g_riivoState.overlays;
+diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
+index ff7c71c..bb43707 100644
+--- a/runtime/src/hle/storage/riivolution.h
++++ b/runtime/src/hle/storage/riivolution.h
+@@ -6,6 +6,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
+ #include <filesystem>
+ #include <optional>
+ #include <string>
+@@ -29,15 +30,31 @@ struct Mapping {
+     bool create = false;
+ };
+ 
++// A <memory> patch from an active Riivolution patch, with its value resolved to bytes
++// (value="..." hex, or the contents of valuefile="...").
++struct MemoryPatch {
++    uint32_t offset = 0;
++    std::vector<uint8_t> value;
++    std::vector<uint8_t> original; // empty: no check
++    bool search = false;           // find `original` in memory, patch the first match
++    uint32_t align = 1;
++    bool ocarina = false;          // value is an Ocarina/Gecko code list (not supported)
++    std::string source;            // "<xml file>: patch <id>" for logs
++    std::string valuefileName;     // set when the value came from valuefile="..."
++};
++
+ struct PatchSet {
+     // In Dolphin's application order (per active patch: files, then folders);
+     // a later mapping for the same disc path wins.
+     std::vector<Mapping> mappings;
+     uint32_t skippedExternals = 0; // externals that do not exist on the host
++    std::vector<MemoryPatch> memoryPatches; // in XML order
+ };
+ 
+ struct Overlay {
+     std::filesystem::path root;
++    // Folder name under the mods root for a mods/<name>/ pack; empty for other roots.
++    std::string modName;
+     // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
+     // overlay directory.
+     std::optional<PatchSet> patches;
+@@ -57,4 +74,69 @@ const std::vector<Overlay>& Overlays();
+ // /title/<id>/data directory is redirected there).
+ const std::optional<SaveRedirect>& GetSaveRedirect();
+ 
++// The folder mods/<name>/ packs are discovered in: [paths] mods_root, else
++// NSMBW_MODS_DIR, else nsmbw_data/mods next to the executable (or the working directory).
++std::filesystem::path ModsRoot();
++
++// A mods/<folder>/ pack as the in-game mods menu shows it (nsmbw_options_menu.cpp). Read from the
++// mods folder on every call, so a change made with SetModEnabled shows straight away; what the
++// running game uses was fixed at startup (`loaded`).
++struct InstalledMod {
++    std::string folder;       // its folder under ModsRoot()
++    std::string title;        // mod.toml `name`, else the folder name
++    bool enabled = true;      // mod.toml `enabled`: what the next launch uses
++    bool loaded = false;      // its files and patches are in use in this session
++    bool hasCode = false;     // carries Kamek code (Code/*.bin with the Kamek header, NewerRes/DLCode*.bin)
++    bool codeBuiltIn = false; // this build has that code linked in (tools/mod_build.py)
++};
++std::vector<InstalledMod> InstalledMods();
++// Writes `enabled = true/false` into mods/<folder>/mod.toml (created if missing; other keys and
++// comments are kept). Takes effect at the next launch. Returns false when it cannot write.
++bool SetModEnabled(const std::string& folder, bool enabled);
++
++// Guest code ranges ([start, end)) whose bytes were translated ahead of time.
++// A <memory> patch inside one cannot take effect at runtime; the product
++// registers its ranges before ApplyMemoryPatches runs.
++void RegisterCodeRange(uint32_t start, uint32_t end, const char* name);
++
++struct MemoryPatchReport {
++    uint32_t applied = 0;           // data patches written to guest RAM
++    uint32_t alreadyApplied = 0;    // bytes already equal the value (e.g. a mod build)
++    uint32_t originalMismatch = 0;  // `original` did not match: other region/version, skipped
++    uint32_t codeNeedsModBuild = 0; // code patch: needs tools/mod_build.py
++    uint32_t unsupported = 0;       // ocarina, unmapped addresses, failed searches
++};
++
++// Applies every active overlay's <memory> patches to guest RAM, lowest
++// priority first (so a higher-priority mod wins on overlap). Data patches are
++// written; code patches are only reported. Safe to call more than once: only
++// the first call does anything.
++const MemoryPatchReport& ApplyMemoryPatches();
++
++// Code mods built by tools/mod_build.py: a Kamek module linked ahead of time at a fixed guest
++// address (translated with the game), and the loader's data patches, which must be written when
++// the game calls the loader (after the RELs' static constructors), not at boot. The generated mod
++// source registers both from a static constructor.
++struct ModImage {
++    uint32_t base = 0;
++    const uint8_t* data = nullptr;
++    uint32_t size = 0;
++    std::string name;
++};
++void RegisterModImage(uint32_t base, const uint8_t* data, uint32_t size, const char* name);
++void RegisterModPatch(uint32_t address, const uint8_t* data, uint32_t size);
++// A Kamek module's static constructor (Kamek 2 binaries list them; the loader calls them after
++// linking). The product's native loader calls them, in registration order.
++void RegisterModCtor(uint32_t address);
++const std::vector<uint32_t>& ModCtors();
++const std::vector<ModImage>& ModImages();
++// Lowest base of any registered image (0 if none): the product keeps the MEM1 arena below it.
++uint32_t ModImagesLowestBase();
++// Copies the images into guest RAM. Call once the OS has finished clearing the arena (the images
++// sit at its top) and before the game creates its heaps.
++void InstallModImages();
++// Writes the registered loader patches; called by the product's native Kamek loader. Returns the
++// number of patches written.
++uint32_t ApplyModLoaderPatches();
++
+ } // namespace RuntimeRiivolution
+diff --git a/runtime/src/hle/storage/riivolution_memory.cpp b/runtime/src/hle/storage/riivolution_memory.cpp
+new file mode 100644
+index 0000000..5d00daa
+--- /dev/null
++++ b/runtime/src/hle/storage/riivolution_memory.cpp
+@@ -0,0 +1,328 @@
++// Riivolution <memory> patches for a statically translated game.
++//
++// Riivolution writes its memory patches into RAM after the main executable is
++// loaded and before it runs. Here the executable's code was translated ahead of
++// time, so only patches to *data* can take effect by writing guest RAM. Patches
++// that land in a registered code range are reported instead: they need the code
++// re-translated with the patch applied (tools/mod_build.py, see docs/mods.md).
++//
++// Matching follows Dolphin's RiivolutionPatcher: a patch with `original` is
++// applied only where memory holds those bytes (that is how one XML carries
++// patches for several regions), and `search` patches find `original` in MEM1
++// (stride `align`) and patch the first match.
++//
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "hle/storage/riivolution.h"
++
++#include "memory.h"
++#include "runtime_config.h"
++#include "runtime_log.h"
++
++#include <cstring>
++#include <iomanip>
++#include <mutex>
++#include <optional>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace {
++
++struct CodeRange {
++    uint32_t start;
++    uint32_t end;
++    std::string name;
++};
++
++std::vector<CodeRange>& CodeRanges() {
++    static std::vector<CodeRange> ranges;
++    return ranges;
++}
++
++const CodeRange* FindCodeRange(uint32_t address, size_t length) {
++    const uint64_t end = static_cast<uint64_t>(address) + length;
++    for (const CodeRange& range : CodeRanges()) {
++        if (address < range.end && end > range.start) {
++            return &range;
++        }
++    }
++    return nullptr;
++}
++
++std::string Hex(uint32_t value) {
++    std::ostringstream text;
++    text << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
++    return text.str();
++}
++
++bool MemoryEquals(uint32_t address, const std::vector<uint8_t>& bytes) {
++    if (bytes.empty() || !Memory::Contains(address, static_cast<uint32_t>(bytes.size()))) {
++        return false;
++    }
++    const void* pointer = Memory::GetPointer(address, static_cast<uint32_t>(bytes.size()));
++    return pointer && std::memcmp(pointer, bytes.data(), bytes.size()) == 0;
++}
++
++// MEM1 as the game sees it (24 MiB); MEM2 is heap the game fills at runtime.
++constexpr uint32_t kSearchStart = 0x80000000u;
++constexpr uint32_t kSearchEnd = 0x81800000u;
++
++std::optional<uint32_t> SearchMemory(const std::vector<uint8_t>& pattern, uint32_t start, uint32_t align) {
++    if (pattern.empty()) {
++        return std::nullopt;
++    }
++    const uint32_t stride = align == 0 ? 1u : align;
++    uint32_t first = start >= kSearchStart && start < kSearchEnd ? start : kSearchStart;
++    first -= (first - kSearchStart) % stride;
++    for (uint32_t address = first; address + pattern.size() <= kSearchEnd; address += stride) {
++        if (MemoryEquals(address, pattern)) {
++            return address;
++        }
++    }
++    return std::nullopt;
++}
++
++constexpr uint32_t kMaxDetailLines = 24;
++
++RuntimeRiivolution::MemoryPatchReport g_report;
++std::once_flag g_applyOnce;
++
++struct BlobRange {
++    uint32_t start;
++    uint32_t end;
++};
++
++// Words of a data patch that point into a blob a valuefile patch loads outside the translated
++// ranges. Such a blob is almost always code (Newer's Loader.bin at 0x80001800, a Kamek -static
++// binary), and the pointer would make the game call it: there is nothing translated there, so
++// the runtime stops with missing_target. Returns the first such word.
++std::optional<uint32_t> PointerIntoBlob(const RuntimeRiivolution::MemoryPatch& patch,
++                                        const std::vector<BlobRange>& blobs) {
++    if (blobs.empty() || !patch.valuefileName.empty() || patch.value.size() < 4 || (patch.offset & 3u) != 0) {
++        return std::nullopt;
++    }
++    for (size_t i = 0; i + 4 <= patch.value.size(); i += 4) {
++        const uint32_t word = (uint32_t(patch.value[i]) << 24) | (uint32_t(patch.value[i + 1]) << 16) |
++                              (uint32_t(patch.value[i + 2]) << 8) | uint32_t(patch.value[i + 3]);
++        for (const BlobRange& blob : blobs) {
++            if (word >= blob.start && word < blob.end) {
++                return word;
++            }
++        }
++    }
++    return std::nullopt;
++}
++
++void ApplyOne(const RuntimeRiivolution::MemoryPatch& patch, const std::string& modLabel,
++              const std::vector<BlobRange>& blobs, RuntimeRiivolution::MemoryPatchReport& report,
++              uint32_t& codeLines) {
++    if (patch.ocarina) {
++        ++report.unsupported;
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source
++                  << ": ocarina memory patches are not supported, skipped" << std::endl;
++        return;
++    }
++
++    uint32_t address = patch.offset;
++    if (patch.search) {
++        const auto found = SearchMemory(patch.original, patch.offset, patch.align);
++        if (!found) {
++            ++report.unsupported;
++            RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source
++                      << ": search patch found no match, skipped" << std::endl;
++            return;
++        }
++        address = *found;
++    }
++
++    const uint32_t length = static_cast<uint32_t>(patch.value.size());
++    if (!Memory::Contains(address, length)) {
++        ++report.unsupported;
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": " << Hex(address)
++                  << " (+" << length << ") is outside guest memory, skipped" << std::endl;
++        return;
++    }
++
++    if (MemoryEquals(address, patch.value)) {
++        ++report.alreadyApplied;
++        return;
++    }
++    if (!patch.search && !patch.original.empty() && !MemoryEquals(address, patch.original)) {
++        // Normal for multi-region XMLs: the patch is for another region/version.
++        ++report.originalMismatch;
++        return;
++    }
++
++    if (const CodeRange* range = FindCodeRange(address, length)) {
++        ++report.codeNeedsModBuild;
++        if (codeLines++ < kMaxDetailLines) {
++            // In a mod build the code patches are already in the translation; what is left here is
++            // what the build deliberately replaced (e.g. a Kamek loader and its hook).
++            const bool modBuild = !RuntimeRiivolution::ModImages().empty();
++            RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": code patch at "
++                      << Hex(address) << " (" << length << " bytes, " << range->name << ") "
++                      << (modBuild ? "not applied (this mod build replaces it)"
++                                   : "needs a mod build (tools/mod_build.py); not applied")
++                      << std::endl;
++        }
++        return;
++    }
++
++    if (const auto target = PointerIntoBlob(patch, blobs)) {
++        ++report.codeNeedsModBuild;
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": data patch at " << Hex(address)
++                  << " points the game at " << Hex(*target)
++                  << ", inside code loaded by a valuefile patch; that code is not translated, so this "
++                  << "patch is skipped (the mod's code needs a mod build)" << std::endl;
++        return;
++    }
++
++    void* pointer = Memory::GetPointer(address, length);
++    if (!pointer) {
++        ++report.unsupported;
++        return;
++    }
++    std::memcpy(pointer, patch.value.data(), length);
++    ++report.applied;
++    // Low memory below the OS globals is where Riivolution loaders put code
++    // (e.g. Newer's Loader.bin at 0x80001800). Nothing translated lives there.
++    if (address >= 0x80001800u && address < 0x80003000u && length > 64) {
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": wrote " << length
++                  << " bytes at " << Hex(address)
++                  << " (low memory); if this is loader code it only runs in a mod build" << std::endl;
++    }
++}
++
++void ApplyAll() {
++    const auto& overlays = RuntimeRiivolution::Overlays();
++    // Lowest priority first, so a higher-priority pack's bytes end up in RAM.
++    for (auto overlay = overlays.rbegin(); overlay != overlays.rend(); ++overlay) {
++        if (!overlay->patches || overlay->patches->memoryPatches.empty()) {
++            continue;
++        }
++        const std::string label =
++            overlay->modName.empty() ? RuntimeConfigFile::PathToUtf8(overlay->root) : "mod '" + overlay->modName + "'";
++        std::vector<BlobRange> blobs;
++        for (const auto& patch : overlay->patches->memoryPatches) {
++            const uint32_t length = static_cast<uint32_t>(patch.value.size());
++            if (!patch.valuefileName.empty() && !patch.search && !FindCodeRange(patch.offset, length)) {
++                blobs.push_back({patch.offset, patch.offset + length});
++            }
++        }
++        RuntimeRiivolution::MemoryPatchReport local;
++        uint32_t codeLines = 0;
++        for (const auto& patch : overlay->patches->memoryPatches) {
++            ApplyOne(patch, label, blobs, local, codeLines);
++        }
++        if (codeLines > kMaxDetailLines) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << label << ": ... " << (codeLines - kMaxDetailLines)
++                      << " more code patch(es)" << std::endl;
++        }
++        RT_LOG(RT_TAG_RIIVOLUTION) << label << ": memory patches: " << local.applied << " applied, "
++                  << local.alreadyApplied << " already in place, " << local.originalMismatch
++                  << " for another region/version, " << local.codeNeedsModBuild
++                  << " code patch(es) needing a mod build, " << local.unsupported << " unsupported"
++                  << std::endl;
++        g_report.applied += local.applied;
++        g_report.alreadyApplied += local.alreadyApplied;
++        g_report.originalMismatch += local.originalMismatch;
++        g_report.codeNeedsModBuild += local.codeNeedsModBuild;
++        g_report.unsupported += local.unsupported;
++    }
++}
++
++} // namespace
++
++namespace {
++
++struct ModPatch {
++    uint32_t address;
++    const uint8_t* data;
++    uint32_t size;
++};
++
++std::vector<RuntimeRiivolution::ModImage>& ModImageList() {
++    static std::vector<RuntimeRiivolution::ModImage> images;
++    return images;
++}
++
++std::vector<ModPatch>& ModPatchList() {
++    static std::vector<ModPatch> patches;
++    return patches;
++}
++
++std::vector<uint32_t>& ModCtorList() {
++    static std::vector<uint32_t> ctors;
++    return ctors;
++}
++
++} // namespace
++
++namespace RuntimeRiivolution {
++
++void RegisterModImage(uint32_t base, const uint8_t* data, uint32_t size, const char* name) {
++    ModImageList().push_back({base, data, size, name ? name : "mod"});
++    RegisterCodeRange(base, base + size, name);
++}
++
++void RegisterModPatch(uint32_t address, const uint8_t* data, uint32_t size) {
++    ModPatchList().push_back({address, data, size});
++}
++
++const std::vector<ModImage>& ModImages() { return ModImageList(); }
++
++void RegisterModCtor(uint32_t address) { ModCtorList().push_back(address); }
++
++const std::vector<uint32_t>& ModCtors() { return ModCtorList(); }
++
++uint32_t ModImagesLowestBase() {
++    uint32_t lowest = 0;
++    for (const ModImage& image : ModImageList()) {
++        if (lowest == 0 || image.base < lowest) {
++            lowest = image.base;
++        }
++    }
++    return lowest;
++}
++
++void InstallModImages() {
++    for (const ModImage& image : ModImageList()) {
++        void* pointer = Memory::Contains(image.base, image.size) ? Memory::GetPointer(image.base, image.size) : nullptr;
++        if (!pointer) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << "ERROR: mod image " << image.name << " at " << Hex(image.base)
++                      << " is outside guest memory" << std::endl;
++            continue;
++        }
++        std::memcpy(pointer, image.data, image.size);
++        RT_LOG(RT_TAG_RIIVOLUTION) << "mod code " << image.name << ": " << image.size << " bytes at "
++                  << Hex(image.base) << " (translated ahead of time)" << std::endl;
++    }
++}
++
++uint32_t ApplyModLoaderPatches() {
++    uint32_t written = 0;
++    for (const ModPatch& patch : ModPatchList()) {
++        if (void* pointer = Memory::Contains(patch.address, patch.size) ? Memory::GetPointer(patch.address, patch.size) : nullptr) {
++            std::memcpy(pointer, patch.data, patch.size);
++            ++written;
++        } else {
++            RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: loader patch at " << Hex(patch.address)
++                      << " is outside guest memory" << std::endl;
++        }
++    }
++    return written;
++}
++
++void RegisterCodeRange(uint32_t start, uint32_t end, const char* name) {
++    if (end > start) {
++        CodeRanges().push_back({start, end, name ? name : "code"});
++    }
++}
++
++const MemoryPatchReport& ApplyMemoryPatches() {
++    std::call_once(g_applyOnce, ApplyAll);
++    return g_report;
++}
++
++} // namespace RuntimeRiivolution
+diff --git a/translator/src/Translator.Core/Parsing/Rel/RelFile.cs b/translator/src/Translator.Core/Parsing/Rel/RelFile.cs
+index 6a71078..6cbd703 100644
+--- a/translator/src/Translator.Core/Parsing/Rel/RelFile.cs
++++ b/translator/src/Translator.Core/Parsing/Rel/RelFile.cs
+@@ -65,7 +65,7 @@ public sealed class RelFile
+         var sectionTableOffset = reader.ReadUInt32();
+ 
+         reader.Seek(0x1C, SeekOrigin.Begin);
+-        _ = reader.ReadUInt32(); // version (unused for now)
++        var version = reader.ReadUInt32();
+         var bssSize = reader.ReadUInt32();
+ 
+         reader.Seek(0x28, SeekOrigin.Begin);
+@@ -84,6 +84,8 @@ public sealed class RelFile
+ 
+         _ = reader.ReadUInt32(); // align (0x40)
+         var bssAlign = reader.ReadUInt32(); // 0x44
++        // fixSize (0x48) exists from header version 3 on.
++        var fixSize = version >= 3 && raw.Length >= 0x4C ? reader.ReadUInt32() : 0u;
+ 
+         // Basic validation
+         if (sectionTableOffset + sectionCount * 8 > raw.Length)
+@@ -110,8 +112,19 @@ public sealed class RelFile
+         // size - included that discarded tail, inflating every REL's memory footprint far beyond
+         // its real one. With 4 RELs placed back-to-back at their real observed addresses, that
+         // inflation is exactly what made each one's computed range run into the next REL's start.
++        //
++        // Where in that block: NSMBW's DynamicModuleControl::do_link() (c_dylink.cpp) links every
++        // fixed REL with bssStart = module + ROUND_UP(fixSize, 0x20), i.e. after the part of the file
++        // OSLinkFixed keeps, not right after the last section. Code built against the console's
++        // layout (Kamek mods such as NewerSMBW, PAL-derived addresses in native overrides) uses
++        // those addresses directly: with BSS at the section end, d_basesNP's BSS sat 0x8F8 bytes
++        // lower than on a console, and NewerSMBW passed a state ID at its console address
++        // (0x809A1DA8) that held a different object here. The section-end rule stays as the
++        // fallback for headers without fixSize (version < 3).
+         var maxSectionExtent = ComputeMaxSectionExtent(sections, bssSectionIndex);
+-        var bssOffset = AlignUp(maxSectionExtent, bssAlign);
++        var bssOffset = fixSize >= maxSectionExtent && fixSize != 0
++            ? AlignUp(fixSize, 0x20)
++            : AlignUp(maxSectionExtent, bssAlign);
+         var totalSize = checked(bssOffset + bssSize);
+         var adjustedSections = ApplyBssLayout(sections, bssSectionIndex, bssOffset, bssSize);
+         var imports = ParseImports(raw, importTableOffset, importTableSize);
+diff --git a/translator/src/Translator.Core/Lifting/PpcLifter.cs b/translator/src/Translator.Core/Lifting/PpcLifter.cs
+index c32cdc6..affebb4 100644
+--- a/translator/src/Translator.Core/Lifting/PpcLifter.cs
++++ b/translator/src/Translator.Core/Lifting/PpcLifter.cs
+@@ -1942,14 +1942,36 @@ public sealed partial class PpcLifter
+                     new IrCall(string.Empty, TargetLabel(ins, validAddresses, preferFallthrough: false), blArgs) 
+                 };
+ 
++            // Conditional branch-and-link reaches the lifter under its simplified mnemonics too
++            // (beql, blel, bdnzl, ...). The game never uses it; hand-written Kamek assembly does
++            // (NewerSMBW: `beql 0x81771E04` at 0x817722F0). The raw BO/BI decode below covers all.
+             case "bcl":
++            case "beql":
++            case "bnel":
++            case "bltl":
++            case "bgtl":
++            case "blel":
++            case "bgel":
++            case "bsol":
++            case "bnsl":
++            case "bdnzl":
++            case "bdzl":
++            case "bdnztl":
++            case "bdnzfl":
++            case "bdztl":
++            case "bdzfl":
+                 {
+                     var rawInstr = ReadRawInstruction(ins);
+                     var bo = (int)((rawInstr >> 21) & 0x1F);
+                     var bi = (int)((rawInstr >> 16) & 0x1F);
+                     var fallthrough = $"0x{ins.EndAddress:X8}";
+                     var targetAddr = ins.BranchTargets.FirstOrDefault();
+-                    var linkedTarget = $"link_branch_{ins.EndAddress:X8}_{targetAddr:X8}";
++                    // A target inside this function is the `bcl 20,31,$+4` get-PC idiom (or a local
++                    // subroutine): set LR and jump. Anything else is a conditional call to another
++                    // function, lowered as LR = return address, call, continue at the fallthrough.
++                    var linkedTarget = validAddresses.Contains(targetAddr)
++                        ? $"link_branch_{ins.EndAddress:X8}_{targetAddr:X8}"
++                        : $"link_call_{ins.EndAddress:X8}_{targetAddr:X8}";
+                     var instructions = new List<IrInstruction>();
+                     if ((bo & 0x04) == 0)
+                     {
+diff --git a/translator/src/Translator.Core/Translation/FunctionTranslator.cs b/translator/src/Translator.Core/Translation/FunctionTranslator.cs
+index 34bb2aa..27bdcdf 100644
+--- a/translator/src/Translator.Core/Translation/FunctionTranslator.cs
++++ b/translator/src/Translator.Core/Translation/FunctionTranslator.cs
+@@ -881,6 +881,17 @@ public sealed class FunctionTranslator
+             return true;
+         }
+ 
++        if (TryParseLinkBranchLabel(label, "link_call_", out fallthrough, out var callTarget))
++        {
++            block = new IrBasicBlock(label, new IrInstruction[]
++            {
++                new IrAssign("lr", IrValue.Imm((int)fallthrough)),
++                new IrCall(string.Empty, $"0x{callTarget:X8}", BuildAbiCallArgs()),
++                new IrJump($"0x{fallthrough:X8}")
++            });
++            return true;
++        }
++
+         if (TryParseLinkBranchLabel(label, LinkBranchPrefix, out fallthrough, out var target))
+         {
+             block = new IrBasicBlock(label, new IrInstruction[]
+diff --git a/translator/src/Translator.Cli/Program.cs b/translator/src/Translator.Cli/Program.cs
+index 8aaf19d..250f2de 100644
+--- a/translator/src/Translator.Cli/Program.cs
++++ b/translator/src/Translator.Cli/Program.cs
+@@ -1112,6 +1112,16 @@ int RunTranslateRecursive(string[] argsTail)
+                 {
+                     Console.WriteLine($"[translator]   skipped map entry 0x{address:X8}: {reason}");
+                 }
++                // TRANSLATOR_LOG_SKIPS_FROM=<hex address>: also list every skipped entry at or above it
++                // (e.g. a mod's code module, whose entries are otherwise hidden behind the REL ones).
++                if (Environment.GetEnvironmentVariable("TRANSLATOR_LOG_SKIPS_FROM") is { Length: > 0 } fromText &&
++                    uint.TryParse(fromText.Replace("0x", ""), System.Globalization.NumberStyles.HexNumber, null, out var from))
++                {
++                    foreach (var (address, reason) in speculativeSkips.Where(skip => skip.Address >= from).OrderBy(static skip => skip.Address))
++                    {
++                        Console.WriteLine($"[translator]   skipped map entry 0x{address:X8}: {reason}");
++                    }
++                }
+                 Console.WriteLine(
+                     $"[translator] Skipped {speculativeSkips.Count:N0} map entry/entries that did not translate; " +
+                     "these are seeded only by the map and are never reached by a call.");
+diff --git a/runtime/src/product/nsmbw_layout_patch.h b/runtime/src/product/nsmbw_layout_patch.h
+index c296d35..28f0dfc 100644
+--- a/runtime/src/product/nsmbw_layout_patch.h
++++ b/runtime/src/product/nsmbw_layout_patch.h
+@@ -15,3 +15,5 @@ void Register() noexcept;
+ extern "C" bool NsmbwPauseMenuHasOptions();
+ // The same for the world-map menu (corseSelectMenu.arc, nsmbw_map_options.cpp).
+ extern "C" bool NsmbwMapMenuHasOptions();
++// The file select's Mods button (fileSelectBase.arc; ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp).
++extern "C" bool NsmbwFileSelectHasMods();
+diff --git a/runtime/src/product/nsmbw_options_menu.h b/runtime/src/product/nsmbw_options_menu.h
+index 17930ea..f61afca 100644
+--- a/runtime/src/product/nsmbw_options_menu.h
++++ b/runtime/src/product/nsmbw_options_menu.h
+@@ -7,6 +7,8 @@
+ // settings (settings_overlay::settings); Controls shows which controller drives each player.
+ // Keyboard: arrows move and change, Enter / Z select, Esc / Backspace go back, Q / E switch tabs.
+ // Controller: d-pad or left stick, A select, B back, LB / RB tabs, Start closes.
++// It also has the Mods screen (the packs in the mods folder, each with an On / Off switch), opened
++// by the file select's Mods button through NsmbwModsMenuRequestOpen.
+ namespace nsmbw_options_menu {
+ // Hands the menu to settings_overlay (F10 opens it; Shift+F10 the old F10 bar). Once at startup.
+ void Register() noexcept;
+@@ -17,3 +19,8 @@ int32_t TakeSound() noexcept;
+ // The same for the KPAD override (projects/nsmbw/native), which plays it with the game's
+ // SndAudioMgr::startSystemSe.
+ extern "C" int32_t NsmbwOptionsMenuTakeSound();
++
++// The file select's Mods button (ports/wiicompiled/native_us/nsmbw_file_select_mods.cpp): opens the
++// mods screen on the next frame, and reports once that it has finished closing.
++extern "C" void NsmbwModsMenuRequestOpen();
++extern "C" bool NsmbwModsMenuTakeClosed();

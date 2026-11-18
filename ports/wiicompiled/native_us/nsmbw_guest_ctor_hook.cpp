@@ -35,13 +35,18 @@
 #include "memory.h"
 #include "ppc_runtime.h"
 #include "abi_bridge.h"
+#include "hle/storage/riivolution.h"
 
+#include <cstdio>
 #include <cstring>
 
 extern "C" void Nsmbw_RunGuestConstructorsOnce(CpuContext* ctx);
 
 // The relocated REL blobs InitializeDataSections() embeds; addresses and sizes match
-// generated_nsmbw/data_sections_init.cpp.
+// generated_nsmbw/data_sections_init.cpp as translated before 2026-11-17. Since then the translator
+// places each REL's .bss where the console's do_link does (module + ROUND_UP(fixSize, 0x20)), which
+// makes the blobs longer by the gap before .bss; the extra bytes are .bss, all zero, and OSInit has
+// already cleared this memory, so these sizes stay correct for both layouts.
 extern "C" const uint8_t kData_d_basesNP[];
 extern "C" const uint8_t kData_d_en_bossNP[];
 extern "C" const uint8_t kData_d_enemiesNP[];
@@ -73,6 +78,55 @@ void RestoreRelImages()
     }
 }
 
+// Kamek code of a mod build (tools/mod_build.py): linked ahead of time just below the MEM1 arena's
+// top (0x817F0040) and translated with the game. On a console NewerSMBW's loader allocates it
+// from the game heap at boot; here its address has to be fixed, so the arena's top is lowered
+// below the code before main() builds the heaps from it (dSystem::fixArena, 0x800E51A0, reads
+// OSGetMEM1ArenaHi).
+//
+// The image itself is copied in after the guest constructors (InstallKamekImages below): the
+// runtime runs every constructor with r1 = 0x817F0040, so their stack frames land in the top of
+// that range. The first version copied it before them and left a 64 KiB gap below 0x817F0040
+// instead; that gap was memory a console does not lose, and NewerSMBW's 4-player title replays
+// then failed to load their 4th file (the decompressing loader's temporary buffer did not fit).
+// Translated code never reads instructions from guest RAM, only the module's data, and nothing
+// reaches the module before main().
+constexpr uint32_t kOSGetMEM1ArenaHi = 0x801ABE60u;
+constexpr uint32_t kOSSetMEM1ArenaHi = 0x801ABEC0u;
+
+void ReserveKamekModules(CpuContext* ctx)
+{
+    const uint32_t lowest = RuntimeRiivolution::ModImagesLowestBase();
+    if (lowest == 0) {
+        return;
+    }
+    InvokeDirectCpu<kOSGetMEM1ArenaHi>(ctx);
+    const uint32_t arenaHi = ctx->gpr[3];
+    if (arenaHi > lowest) {
+        ctx->gpr[3] = lowest;
+        InvokeDirectCpu<kOSSetMEM1ArenaHi>(ctx);
+        std::printf("[riivolution] MEM1 arena hi 0x%08X -> 0x%08X for mod code\n", arenaHi, lowest);
+    }
+}
+
+// Riivolution <memory> patches (mods/<name>/riivolution/*.xml). Riivolution writes them after
+// the DOL is loaded and before __start; here that point is just after the REL images are back
+// (so patches to REL data stick) and before any constructor runs. The ranges below are the
+// translated .text of main.dol and the four RELs (from the DOL header and each REL's section
+// table at its US load address): a patch inside one is reported, not written, because the
+// translated code would never see it (docs/mods.md, "Code patches").
+void ApplyRiivolutionMemoryPatches(CpuContext* ctx)
+{
+    RuntimeRiivolution::RegisterCodeRange(0x80004000u, 0x800066C0u, "main.dol .init");
+    RuntimeRiivolution::RegisterCodeRange(0x80006780u, 0x802ED9E0u, "main.dol .text");
+    RuntimeRiivolution::RegisterCodeRange(0x807685E0u, 0x8076A598u, "d_profileNP .text");
+    RuntimeRiivolution::RegisterCodeRange(0x8076D7B0u, 0x80933784u, "d_basesNP .text");
+    RuntimeRiivolution::RegisterCodeRange(0x809A2DD0u, 0x80ACD1F8u, "d_enemiesNP .text");
+    RuntimeRiivolution::RegisterCodeRange(0x80B1CA50u, 0x80B73A7Cu, "d_en_bossNP .text");
+    ReserveKamekModules(ctx);
+    RuntimeRiivolution::ApplyMemoryPatches();
+}
+
 } // namespace
 
 extern "C" void NsmbwGuestCtorHook_80004040(CpuContext* ctx)
@@ -85,8 +139,14 @@ extern "C" void NsmbwGuestCtorHook_80004040(CpuContext* ctx)
     if (!restored) {
         restored = true;
         RestoreRelImages();
+        ApplyRiivolutionMemoryPatches(ctx);
     }
     Nsmbw_RunGuestConstructorsOnce(ctx);
+    static bool modImagesInstalled = false;
+    if (!modImagesInstalled) {
+        modImagesInstalled = true;
+        RuntimeRiivolution::InstallModImages();
+    }
 
     ctx->gpr[13] = savedSda;
     ctx->gpr[2] = savedSda2;

@@ -78,6 +78,13 @@ SD layout (dist/nsmbw2): switch/nsmbw2/{nsmbw2.nro, dsp_coef.bin, initial_pipeli
 initial_texture_preload.txt, wii_bootstrap/, WiiCompiled/Config.toml (dvd_root =
 /switch/nsmbw/extracted)}; log in switch/nsmbw2/nsmbw.log.
 
+## Mods (2026-11-17)
+Riivolution packs go in `nsmbw_data/mods/<Mod>/` (Switch: `/switch/nsmbw2/nsmbw_data/mods`; or
+`[paths] mods_root`). File replacements and data `<memory>` patches apply at run time; code patches
+need a mod build: `python3 -I tools/mod_build.py <mod dir> --build` re-translates with them baked in.
+Survey, design and status: `docs/mods.md`. In game, the file select's third button (Mods) lists the
+packs with On / Off switches (writes `mod.toml`; applies at the next launch).
+
 ## Next
 1. Mac build of upstream's runtime + aurora (Metal via Dawn): NEON versions of the x86
    SIMD in runtime/include/isa (ppc_isa_float.h, ppc_isa_quantized.h, ppc_isa_fpenv.h),

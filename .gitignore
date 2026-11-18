@@ -18,3 +18,4 @@ ryujinx-test/
 logs/
 tools/__pycache__/
 ryujinx-official/
+ports/wiicompiled/mod_builds/
