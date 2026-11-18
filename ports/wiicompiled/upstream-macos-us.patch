@@ -779,18 +779,49 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..5e7086b 100644
+index ec62546..67dba6e 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
-@@ -8,7 +8,6 @@
+@@ -8,11 +8,14 @@
  # why WiiCompiled's product model didn't fit before this file existed.
  #
  # Off by default so a normal MKW configure/build is completely unaffected.
 -option(MKW_BUILD_NSMBW "Build the experimental NSMBW recompiled product" OFF)
  
  if(MKW_BUILD_NSMBW)
++    # A mod build (tools/mod_build.py in the NSMBWRecomp repo) points this at its own
++    # re-translated output; the default is the vanilla translation.
++    set(NSMBW_GENERATED_DIR "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw"
++        CACHE PATH "Translator output for NSMBW (data initializer, symbol table, shards)")
      set(NSMBW_SHARD_MANIFEST
-@@ -146,7 +145,7 @@ if(MKW_BUILD_NSMBW)
+-        "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/build_shards/shards.cmake"
++        "${NSMBW_GENERATED_DIR}/build_shards/shards.cmake"
+         CACHE FILEPATH "Translator-owned NSMBW combined shard manifest")
+     if(NOT EXISTS "${NSMBW_SHARD_MANIFEST}")
+         message(FATAL_ERROR
+@@ -47,9 +50,9 @@ if(MKW_BUILD_NSMBW)
+     # about a single dol+rel pair, and every one of those separately-generated files defines the
+     # same extern "C" InitializeDataSections()/IsDataSectionsInitialized() symbols, which would
+     # collide at link time the moment more than one was included.
+-    set(NSMBW_DATA_INIT_FILE "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/data_sections_init.cpp")
+-    set(NSMBW_DATA_INIT_BLOB_ASM "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/data_sections_init_blobs.S")
+-    set(NSMBW_GUEST_SYMBOL_TABLE_FILE "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw/guest_symbol_table.cpp")
++    set(NSMBW_DATA_INIT_FILE "${NSMBW_GENERATED_DIR}/data_sections_init.cpp")
++    set(NSMBW_DATA_INIT_BLOB_ASM "${NSMBW_GENERATED_DIR}/data_sections_init_blobs.S")
++    set(NSMBW_GUEST_SYMBOL_TABLE_FILE "${NSMBW_GENERATED_DIR}/guest_symbol_table.cpp")
+     if(NOT EXISTS "${NSMBW_DATA_INIT_FILE}")
+         message(FATAL_ERROR
+             "Missing combined NSMBW data initializer: ${NSMBW_DATA_INIT_FILE}. Run "
+@@ -126,7 +129,7 @@ if(MKW_BUILD_NSMBW)
+     add_library(nsmbw_runtime_common OBJECT ${NSMBW_RUNTIME_COMMON_SOURCES})
+     mkw_configure_object_target(nsmbw_runtime_common)
+     target_include_directories(nsmbw_runtime_common BEFORE PRIVATE
+-        "${MKW_RUNTIME_SOURCE_DIR}/../generated_nsmbw")
++        "${NSMBW_GENERATED_DIR}")
+     target_compile_features(nsmbw_runtime_common PRIVATE cxx_std_20)
+     # MKW_RUNTIME_PRODUCT_NSMBW: distinguishes this compile of the shared runtime/src tree from
+     # mkw_runtime_common's. Needed where a guest-code-address native override in a shared file is
+@@ -146,7 +149,7 @@ if(MKW_BUILD_NSMBW)
          target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
      endif()
  
@@ -799,7 +830,7 @@ index ec62546..5e7086b 100644
      # foreach right at the end of that file - which has already run by the time this file is
      # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
      # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
-@@ -154,7 +153,7 @@ if(MKW_BUILD_NSMBW)
+@@ -154,7 +157,7 @@ if(MKW_BUILD_NSMBW)
      # was compiled without those target features enabled.
      foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
          if(TARGET ${nsmbw_target})
@@ -808,7 +839,7 @@ index ec62546..5e7086b 100644
          endif()
      endforeach()
  
-@@ -199,7 +198,7 @@ if(MKW_BUILD_NSMBW)
+@@ -199,7 +202,7 @@ if(MKW_BUILD_NSMBW)
          target_link_options(NSMBWCompiled PRIVATE -mwindows)
      endif()
      target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
@@ -817,7 +848,7 @@ index ec62546..5e7086b 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +206,16 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +210,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -835,7 +866,7 @@ index ec62546..5e7086b 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +231,24 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +235,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -1189,10 +1220,19 @@ index b859711..37d4f39 100644
  
  MKW_MEMORY_FORCE_INLINE uint8_t FlatRead8(uint32_t address) {
 diff --git a/runtime/include/runtime_config.h b/runtime/include/runtime_config.h
-index 7b3527e..f5056f8 100644
+index 7b3527e..c48c86a 100644
 --- a/runtime/include/runtime_config.h
 +++ b/runtime/include/runtime_config.h
-@@ -162,7 +162,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
+@@ -58,6 +58,8 @@ struct RuntimeUserConfig {
+     // The one canonical Retro Rewind installation, owned and updated by the frontend. Setup records
+     // it here instead of copying the pack, so an asset-only update is visible on the next launch.
+     std::optional<std::string> retroRewindRoot;
++    // [paths] mods_root: folder of mods/<name>/ packs (default: nsmbw_data/mods next to the exe).
++    std::optional<std::string> modsRoot;
+     std::vector<std::string> overlayRoots;
+     // Controller mappings use Wii/GameCube button names as keys and up to two
+     // comma-separated SDL-style physical button names ("south", or
+@@ -162,7 +164,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
  }
  
  inline std::optional<std::filesystem::path> ExecutableDirectory() {
@@ -1204,6 +1244,25 @@ index 7b3527e..f5056f8 100644
      std::wstring buffer(MAX_PATH, L'\0');
      for (;;) {
          const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+@@ -448,6 +453,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
+     config.nandRoot = FindConfigValue<std::string>(document, "paths", "nand_root");
+     config.dvdRoot = FindConfigValue<std::string>(document, "paths", "dvd_root");
+     config.retroRewindRoot = FindConfigValue<std::string>(document, "paths", "retro_rewind_root");
++    config.modsRoot = FindConfigValue<std::string>(document, "paths", "mods_root");
+     if (auto roots = FindConfigValue<std::vector<std::string>>(document, "paths", "overlay_roots")) {
+         for (auto& root : *roots) {
+             root = Trim(root);
+@@ -866,6 +872,10 @@ inline std::filesystem::path ResolvedDvdRoot() {
+ }
+ 
+ /// The canonical Retro Rewind installation the frontend owns, or "" when none is recorded.
++inline std::string ModsRoot(std::string fallback = "") {
++    return Get().modsRoot.value_or(std::move(fallback));
++}
++
+ inline std::string RetroRewindRoot(std::string fallback = "") {
+     return Get().retroRewindRoot.value_or(std::move(fallback));
+ }
 diff --git a/runtime/include/system_bridge.h b/runtime/include/system_bridge.h
 index 1f57f0d..8e4e128 100644
 --- a/runtime/include/system_bridge.h
@@ -2511,10 +2570,60 @@ index 62c4411..365fa9c 100644
      if (!Memory::Contains(kProductCodeAddress, sizeof(kProductCode))) {
          return 0;
 diff --git a/runtime/src/hle/storage/dvd.cpp b/runtime/src/hle/storage/dvd.cpp
-index 5ea4232..adc9560 100644
+index 5ea4232..bca2923 100644
 --- a/runtime/src/hle/storage/dvd.cpp
 +++ b/runtime/src/hle/storage/dvd.cpp
-@@ -497,10 +497,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
+@@ -25,6 +25,7 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+ #include <vector>
+ #include <string>
+ #include <map>
++#include <set>
+ #include <unordered_set>
+ #include <filesystem>
+ #include <iostream>
+@@ -73,6 +74,9 @@ struct DVDFileEntry {
+     uint32_t size;
+     uint32_t discOffsetWords = 0;
+     bool isDirectory = false;
++    // Registered by an overlay (mod) root; its first read is logged once.
++    bool fromOverlay = false;
++    mutable bool loggedRead = false;
+ };
+ 
+ struct FstFileEntry {
+@@ -94,6 +98,8 @@ struct PublishedExtent {
+ };
+ static std::vector<PublishedExtent> g_publishedExtents;
+ static bool g_dvdInitialized = false;
++// Set while overlay roots are scanned: entries registered then are mod files.
++static bool g_registeringOverlay = false;
+ static std::vector<FstFileEntry> g_fstFiles;
+ static bool g_fstLoaded = false;
+ static std::unordered_set<std::string> g_loggedReadErrors;
+@@ -397,6 +403,14 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
+         readLength = entry.size - fileOffset;
+     }
+ 
++    // Mod files are logged on their first read; NSMBW_LOG_DVD_FILES=1 logs every file's.
++    static const bool logAllFiles = std::getenv("NSMBW_LOG_DVD_FILES") != nullptr;
++    if ((entry.fromOverlay || logAllFiles) && !entry.loggedRead) {
++        entry.loggedRead = true;
++        RT_LOG(RT_TAG_DVD) << (entry.fromOverlay ? "mod file read: " : "file read: ") << entry.dvdPath
++                  << " <- " << HostPathText(entry.hostPath) << std::endl;
++    }
++
+     out.entry = &entry;
+     out.fileOffset = fileOffset;
+     out.readLength = readLength;
+@@ -415,6 +429,7 @@ static void RegisterFileEntry(std::string dvdPath, const fs::path& hostPath, uin
+     fileEntry.hostPath = hostPath;
+     fileEntry.dvdPath = dvdPath;
+     fileEntry.size = size;
++    fileEntry.fromOverlay = g_registeringOverlay;
+ 
+     const int32_t entryNum = static_cast<int32_t>(g_fileEntries.size());
+     g_fileEntries.push_back(std::move(fileEntry));
+@@ -497,10 +512,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
              return;
          }
  
@@ -2549,7 +2658,28 @@ index 5ea4232..adc9560 100644
  
          std::string prefix = virtualPrefix.empty() ? "/" : virtualPrefix;
          if (prefix.back() != '/' && prefix.back() != '\\') {
-@@ -788,7 +811,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
+@@ -703,11 +741,20 @@ static void BuildAndPublishRuntimeFst() {
+         FailRuntimeFst(error.what());
+     }
+ 
++    std::set<std::string> overlayDvdPaths;
++    for (const DVDFileEntry& entry : g_fileEntries) {
++        if (entry.fromOverlay) {
++            overlayDvdPaths.insert(NormalizePath(entry.dvdPath));
++        }
++    }
++
+     std::vector<DVDFileEntry> indexedEntries;
+     indexedEntries.reserve(image.entries.size());
+     for (const DvdFstContract::IndexedEntry& entry : image.entries) {
+         indexedEntries.push_back({entry.hostPath, entry.dvdPath, entry.size,
+                                   entry.discOffsetWords, entry.isDirectory});
++        indexedEntries.back().fromOverlay =
++            !entry.isDirectory && overlayDvdPaths.count(NormalizePath(entry.dvdPath)) != 0;
+     }
+     g_fileEntries = std::move(indexedEntries);
+     g_pathToEntry = std::move(image.pathToEntry);
+@@ -788,7 +835,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
  
  static void InitDvdWaitingQueues()
  {
@@ -2558,7 +2688,7 @@ index 5ea4232..adc9560 100644
      for (uint32_t i = 0; i < 4; ++i) {
          const uint32_t queue = kQueueBase + (i * 8);
          Memory::Write32(queue + 0, queue);
-@@ -802,12 +825,12 @@ static void CompleteDvdCancelState()
+@@ -802,12 +849,12 @@ static void CompleteDvdCancelState()
  
      // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
      // The actual drive work is HLE'd, so complete pending cancel/reset waits.
@@ -2577,7 +2707,7 @@ index 5ea4232..adc9560 100644
  }
  
  // 0x8015EA1C -> DVDInit
-@@ -824,14 +847,14 @@ extern "C" void DVDInit_8015EA1C()
+@@ -824,14 +871,14 @@ extern "C" void DVDInit_8015EA1C()
  
      // 1. Initialize Global Flags (Emulate OS state)
      // These addresses are standard OS globals for DVD context
@@ -2597,7 +2727,19 @@ index 5ea4232..adc9560 100644
      constexpr uint32_t kMagicValue = 0xFEEBDAED;
      for (int i = 0; i < 4; i++) {
          uint32_t ctx = kContextBase + i * 0x20;
-@@ -883,7 +906,7 @@ extern "C" void DVDInit_8015EA1C()
+@@ -867,9 +914,11 @@ extern "C" void DVDInit_8015EA1C()
+     // reverse discovery order: the explicitly configured root outranks the mod
+     // manifest.
+     const size_t vanillaEntryCount = g_fileEntries.size();
++    g_registeringOverlay = true;
+     for (auto overlay = overlays.rbegin(); overlay != overlays.rend(); ++overlay) {
+         ScanOverlayRoot(*overlay);
+     }
++    g_registeringOverlay = false;
+     RT_LOG(RT_TAG_DVD) << "disc index: " << vanillaEntryCount << " disc file(s), "
+               << (g_fileEntries.size() - vanillaEntryCount) << " overlay registration(s) from "
+               << overlays.size() << " root(s)" << std::endl;
+@@ -883,7 +932,7 @@ extern "C" void DVDInit_8015EA1C()
      BuildAndPublishRuntimeFst();
  
      // Initialize the translated DVD filesystem so it can use the published FST.
@@ -2606,7 +2748,7 @@ index 5ea4232..adc9560 100644
      if (TranslatedFunctionRegistry::FindByAddressPtr(kDvdFsInitAddress)) {
          InvokeIndirectCpu(kDvdFsInitAddress, &GetPersistentCpuContext());
      }
-@@ -1196,7 +1219,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
+@@ -1196,7 +1245,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
      CopyToGuestAsDma(buffer, tempBuf.data(), tempBuf.size());
      return finish(true);
  }
@@ -6015,3 +6157,681 @@ index f12c21f..69b11c0 100644
  // Installs the generation/notification hooks into aurora. Called once after
  // aurora_initialize; until then (and if guest RAM cannot be resolved) aurora
  // digests its source bytes on every validation, which is the old behaviour.
+diff --git a/runtime/src/hle/storage/riivolution.cpp b/runtime/src/hle/storage/riivolution.cpp
+index 7fddf83..c3f5c0a 100644
+--- a/runtime/src/hle/storage/riivolution.cpp
++++ b/runtime/src/hle/storage/riivolution.cpp
+@@ -22,14 +22,28 @@
+ #include <iostream>
+ #include <mutex>
+ #include <sstream>
++#include <cstdlib>
++#include <map>
+ #include <system_error>
+ 
++#include <toml.hpp>
++
+ namespace fs = std::filesystem;
+ 
+ namespace {
+ 
++// Per-pack settings from mods/<name>/mod.toml.
++struct ModSettings {
++    bool enabled = true;
++    int64_t priority = 0;
++    // "Option" or "Section/Option" -> 1-based choice (0 disables).
++    std::vector<RiivolutionContract::OptionSelection> selections;
++    bool hasOptionsTable = false;
++};
++
+ struct RiivoState {
+     std::vector<RuntimeRiivolution::Overlay> overlays;
++    std::map<std::string, ModSettings> modSettings; // by Overlay::modName
+     std::optional<RuntimeRiivolution::SaveRedirect> saveRedirect;
+ };
+ 
+@@ -117,10 +131,107 @@ void RiivoAddRoot(std::vector<RuntimeRiivolution::Overlay>& overlays, fs::path r
+ 
+     RT_LOG(RT_TAG_RIIVOLUTION) << "overlay root (" << (source ? source : "unknown")
+               << "): " << PathToUtf8(normalized) << std::endl;
+-    overlays.push_back({std::move(normalized), std::nullopt});
++    overlays.push_back({std::move(normalized), {}, std::nullopt});
++}
++
++
++ModSettings RiivoReadModSettings(const fs::path& modRoot) {
++    ModSettings settings;
++    const fs::path tomlPath = modRoot / "mod.toml";
++    std::error_code ec;
++    if (!fs::is_regular_file(tomlPath, ec)) {
++        return settings;
++    }
++    try {
++        std::ifstream stream(tomlPath, std::ios::binary);
++        const toml::value document = toml::parse(stream, PathToUtf8(tomlPath));
++        if (document.contains("enabled")) {
++            settings.enabled = document.at("enabled").as_boolean();
++        }
++        if (document.contains("priority")) {
++            settings.priority = document.at("priority").as_integer();
++        }
++        if (document.contains("options")) {
++            settings.hasOptionsTable = true;
++            for (const auto& [key, value] : document.at("options").as_table()) {
++                RiivolutionContract::OptionSelection selection;
++                const std::string name(key);
++                const size_t slash = name.find('/');
++                if (slash != std::string::npos) {
++                    selection.section = name.substr(0, slash);
++                    selection.option = name.substr(slash + 1);
++                } else {
++                    selection.option = name;
++                }
++                if (value.is_boolean()) {
++                    selection.choice = value.as_boolean() ? 1u : 0u;
++                } else {
++                    const auto choice = value.as_integer();
++                    selection.choice = choice < 0 ? 0u : static_cast<uint32_t>(choice);
++                }
++                settings.selections.push_back(std::move(selection));
++            }
++        }
++    } catch (const std::exception& error) {
++        RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(tomlPath) << ": " << error.what()
++                  << " (using defaults)" << std::endl;
++    }
++    return settings;
++}
++
++// mods/<name>/ packs: each folder is a virtual SD card root (riivolution/*.xml
++// plus the folders its XML points at), or, without XML, a disc-shaped overlay.
++// Higher mod.toml priority wins, then folder name order.
++void RiivoDiscoverMods(std::vector<RuntimeRiivolution::Overlay>& overlays, RiivoState& state) {
++    const fs::path modsRoot = RuntimeRiivolution::ModsRoot();
++    std::error_code ec;
++    if (!fs::is_directory(modsRoot, ec)) {
++        return;
++    }
++
++    struct Candidate {
++        fs::path root;
++        std::string name;
++        ModSettings settings;
++    };
++    std::vector<Candidate> candidates;
++    for (const auto& entry : fs::directory_iterator(modsRoot, ec)) {
++        if (ec) {
++            break;
++        }
++        std::error_code entryEc;
++        if (!entry.is_directory(entryEc)) {
++            continue;
++        }
++        std::string name = PathToUtf8(entry.path().filename());
++        if (name.empty() || name[0] == '.') {
++            continue;
++        }
++        ModSettings settings = RiivoReadModSettings(entry.path());
++        if (!settings.enabled) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << "mod '" << name << "' is disabled in mod.toml" << std::endl;
++            continue;
++        }
++        candidates.push_back({entry.path(), std::move(name), std::move(settings)});
++    }
++    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
++        if (a.settings.priority != b.settings.priority) {
++            return a.settings.priority > b.settings.priority;
++        }
++        return a.name < b.name;
++    });
++
++    for (auto& candidate : candidates) {
++        const size_t before = overlays.size();
++        RiivoAddRoot(overlays, candidate.root, "mods folder");
++        if (overlays.size() != before) {
++            overlays.back().modName = candidate.name;
++            state.modSettings[candidate.name] = std::move(candidate.settings);
++        }
++    }
+ }
+ 
+-std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
++std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots(RiivoState& state) {
+     std::vector<RuntimeRiivolution::Overlay> overlays;
+ 
+     // Discovery order is precedence order: DVDInit applies the roots in
+@@ -148,6 +259,8 @@ std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
+         RiivoAddRoot(overlays, root, "recomp mod manifest");
+     }
+ 
++    RiivoDiscoverMods(overlays, state);
++
+     return overlays;
+ }
+ 
+@@ -250,8 +363,121 @@ void RiivoCollectMappings(const RiivolutionContract::Patch& patch, const std::st
+     }
+ }
+ 
+-std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& overlayRoot,
++
++// Riivolution writes memory values as hex digits; spaces and a 0x prefix are tolerated.
++std::optional<std::vector<uint8_t>> RiivoParseHexBytes(std::string_view text) {
++    std::string digits;
++    for (size_t i = 0; i < text.size(); ++i) {
++        const char c = text[i];
++        if (c == '0' && i + 1 < text.size() && (text[i + 1] == 'x' || text[i + 1] == 'X')) {
++            ++i;
++            continue;
++        }
++        if (std::isspace(static_cast<unsigned char>(c))) {
++            continue;
++        }
++        if (!std::isxdigit(static_cast<unsigned char>(c))) {
++            return std::nullopt;
++        }
++        digits.push_back(c);
++    }
++    if (digits.size() % 2 != 0) {
++        return std::nullopt;
++    }
++    std::vector<uint8_t> bytes(digits.size() / 2);
++    for (size_t i = 0; i < bytes.size(); ++i) {
++        bytes[i] = static_cast<uint8_t>(std::stoul(digits.substr(i * 2, 2), nullptr, 16));
++    }
++    return bytes;
++}
++
++void RiivoCollectMemoryPatches(const RiivolutionContract::Patch& patch, const std::string& sdRootGeneric,
++                               const std::string& xmlDirGeneric, const fs::path& xmlFile,
++                               RuntimeRiivolution::PatchSet& set) {
++    if (patch.memoryPatches.empty()) {
++        return;
++    }
++    const std::string patchRoot =
++        RiivolutionContract::ResolvePatchRoot(sdRootGeneric, xmlDirGeneric, patch.root);
++    const std::string source = PathToUtf8(xmlFile.filename()) + ": patch '" + patch.id + "'";
++
++    for (const auto& memory : patch.memoryPatches) {
++        RuntimeRiivolution::MemoryPatch out;
++        out.offset = memory.offset;
++        out.search = memory.search;
++        out.align = memory.align == 0 ? 1u : memory.align;
++        out.ocarina = memory.ocarina;
++        out.source = source;
++
++        if (!memory.valuefile.empty()) {
++            const auto resolved =
++                RiivolutionContract::MakeAbsoluteFromRelative(sdRootGeneric, patchRoot, memory.valuefile);
++            const auto data = resolved ? RiivoReadFile(PathFromUtf8(*resolved)) : std::nullopt;
++            if (!data) {
++                RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << source << ": valuefile '" << memory.valuefile
++                          << "' not found; memory patch at 0x" << std::hex << memory.offset << std::dec
++                          << " skipped" << std::endl;
++                continue;
++            }
++            out.value.assign(data->begin(), data->end());
++            out.valuefileName = memory.valuefile;
++        } else {
++            const auto bytes = RiivoParseHexBytes(memory.value);
++            if (!bytes) {
++                RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << source << ": bad value '" << memory.value
++                          << "' at 0x" << std::hex << memory.offset << std::dec << std::endl;
++                continue;
++            }
++            out.value = *bytes;
++        }
++        if (!memory.original.empty()) {
++            const auto original = RiivoParseHexBytes(memory.original);
++            if (!original) {
++                RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << source << ": bad original '"
++                          << memory.original << "'" << std::endl;
++                continue;
++            }
++            out.original = *original;
++        }
++        if (out.value.empty()) {
++            continue;
++        }
++        set.memoryPatches.push_back(std::move(out));
++    }
++}
++
++// True when every option of the XML is off.
++bool RiivoAllOptionsOff(const RiivolutionContract::Disc& disc) {
++    for (const auto& section : disc.sections) {
++        for (const auto& option : section.options) {
++            if (option.selectedChoice != 0) {
++                return false;
++            }
++        }
++    }
++    return true;
++}
++
++void RiivoEnableFirstChoices(RiivolutionContract::Disc& disc) {
++    for (auto& section : disc.sections) {
++        for (auto& option : section.options) {
++            if (!option.choices.empty()) {
++                option.selectedChoice = 1;
++            }
++        }
++    }
++}
++
++std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const RuntimeRiivolution::Overlay& overlay,
+                                                               RiivoState& state) {
++    const fs::path& overlayRoot = overlay.root;
++    const ModSettings* modSettings = nullptr;
++    if (!overlay.modName.empty()) {
++        const auto found = state.modSettings.find(overlay.modName);
++        if (found != state.modSettings.end()) {
++            modSettings = &found->second;
++        }
++    }
+     const auto xmlSet = RiivoFindXmls(overlayRoot);
+     if (!xmlSet) {
+         return std::nullopt;
+@@ -295,13 +521,34 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+             RiivolutionContract::ApplyConfigDefaults(*disc, *config);
+         }
+         RiivolutionContract::ApplySelections(*disc, manifestSelections);
++        if (modSettings) {
++            RiivolutionContract::ApplySelections(*disc, modSettings->selections);
++            // A pack dropped into mods/ with no choices recorded anywhere would
++            // otherwise do nothing (Riivolution's options default to off). Turn
++            // on each option's first choice, which for NSMBW packs is "Enabled".
++            if (!config && !modSettings->hasOptionsTable && RiivoAllOptionsOff(*disc)) {
++                RiivoEnableFirstChoices(*disc);
++                RT_LOG(RT_TAG_RIIVOLUTION) << "mod '" << overlay.modName
++                          << "': no option choices configured, enabling the first choice of every option"
++                          << " (set them in mod.toml [options])" << std::endl;
++            }
++        }
+ 
+         const auto activePatches = disc->GeneratePatches(gameId);
+         const std::string xmlDirGeneric = RiivoGenericText(xmlFile.parent_path());
+ 
+         const size_t before = set.mappings.size();
++        const size_t memoryBefore = set.memoryPatches.size();
+         for (const auto& patch : activePatches) {
+             RiivoCollectMappings(patch, sdRootGeneric, xmlDirGeneric, set);
++            RiivoCollectMemoryPatches(patch, sdRootGeneric, xmlDirGeneric, xmlFile, set);
++            for (const auto& file : patch.filePatches) {
++                if (file.offset != 0 || file.fileoffset != 0 || file.length != 0) {
++                    RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(xmlFile) << ": partial file patch on "
++                              << file.disc << " (offset/fileoffset/length) is applied as a whole-file replacement"
++                              << std::endl;
++                }
++            }
+         }
+ 
+         // Highest-priority overlay with a <savegame> wins.
+@@ -323,8 +570,8 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+         // failure this layer has: the game boots, plays, and quietly shows
+         // vanilla content. Always say what happened.
+         RT_LOG(RT_TAG_RIIVOLUTION) << PathToUtf8(xmlFile) << ": " << activePatches.size()
+-                  << " active patch(es), " << (set.mappings.size() - before) << " mapping(s)"
+-                  << std::endl;
++                  << " active patch(es), " << (set.mappings.size() - before) << " mapping(s), "
++                  << (set.memoryPatches.size() - memoryBefore) << " memory patch(es)" << std::endl;
+         if (activePatches.empty()) {
+             RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(xmlFile)
+                       << " has no enabled options for " << gameId
+@@ -344,9 +591,9 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+ }
+ 
+ void RiivoInitialize() {
+-    g_riivoState.overlays = RiivoDiscoverRoots();
++    g_riivoState.overlays = RiivoDiscoverRoots(g_riivoState);
+     for (auto& overlay : g_riivoState.overlays) {
+-        overlay.patches = RiivoLoadPatchSet(overlay.root, g_riivoState);
++        overlay.patches = RiivoLoadPatchSet(overlay, g_riivoState);
+     }
+ }
+ 
+@@ -354,6 +601,21 @@ void RiivoInitialize() {
+ 
+ namespace RuntimeRiivolution {
+ 
++fs::path ModsRoot() {
++    const std::string configured = RuntimeConfigFile::ModsRoot();
++    if (!configured.empty()) {
++        return RuntimeNandPath::ResolveConfiguredPath(configured);
++    }
++    if (const char* env = std::getenv("NSMBW_MODS_DIR"); env && *env) {
++        return PathFromUtf8(env);
++    }
++    // Same base as the product's nsmbw_data (texture packs, caches).
++    if (const auto exeDir = RuntimeConfigFile::ExecutableDirectory()) {
++        return *exeDir / "nsmbw_data" / "mods";
++    }
++    return fs::current_path() / "nsmbw_data" / "mods";
++}
++
+ const std::vector<Overlay>& Overlays() {
+     std::call_once(g_riivoOnce, RiivoInitialize);
+     return g_riivoState.overlays;
+diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
+index ff7c71c..80ae656 100644
+--- a/runtime/src/hle/storage/riivolution.h
++++ b/runtime/src/hle/storage/riivolution.h
+@@ -6,6 +6,7 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
+ #include <filesystem>
+ #include <optional>
+ #include <string>
+@@ -29,15 +30,31 @@ struct Mapping {
+     bool create = false;
+ };
+ 
++// A <memory> patch from an active Riivolution patch, with its value resolved to bytes
++// (value="..." hex, or the contents of valuefile="...").
++struct MemoryPatch {
++    uint32_t offset = 0;
++    std::vector<uint8_t> value;
++    std::vector<uint8_t> original; // empty: no check
++    bool search = false;           // find `original` in memory, patch the first match
++    uint32_t align = 1;
++    bool ocarina = false;          // value is an Ocarina/Gecko code list (not supported)
++    std::string source;            // "<xml file>: patch <id>" for logs
++    std::string valuefileName;     // set when the value came from valuefile="..."
++};
++
+ struct PatchSet {
+     // In Dolphin's application order (per active patch: files, then folders);
+     // a later mapping for the same disc path wins.
+     std::vector<Mapping> mappings;
+     uint32_t skippedExternals = 0; // externals that do not exist on the host
++    std::vector<MemoryPatch> memoryPatches; // in XML order
+ };
+ 
+ struct Overlay {
+     std::filesystem::path root;
++    // Folder name under the mods root for a mods/<name>/ pack; empty for other roots.
++    std::string modName;
+     // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
+     // overlay directory.
+     std::optional<PatchSet> patches;
+@@ -57,4 +74,27 @@ const std::vector<Overlay>& Overlays();
+ // /title/<id>/data directory is redirected there).
+ const std::optional<SaveRedirect>& GetSaveRedirect();
+ 
++// The folder mods/<name>/ packs are discovered in: [paths] mods_root, else
++// NSMBW_MODS_DIR, else nsmbw_data/mods next to the executable (or the working directory).
++std::filesystem::path ModsRoot();
++
++// Guest code ranges ([start, end)) whose bytes were translated ahead of time.
++// A <memory> patch inside one cannot take effect at runtime; the product
++// registers its ranges before ApplyMemoryPatches runs.
++void RegisterCodeRange(uint32_t start, uint32_t end, const char* name);
++
++struct MemoryPatchReport {
++    uint32_t applied = 0;           // data patches written to guest RAM
++    uint32_t alreadyApplied = 0;    // bytes already equal the value (e.g. a mod build)
++    uint32_t originalMismatch = 0;  // `original` did not match: other region/version, skipped
++    uint32_t codeNeedsModBuild = 0; // code patch: needs tools/mod_build.py
++    uint32_t unsupported = 0;       // ocarina, unmapped addresses, failed searches
++};
++
++// Applies every active overlay's <memory> patches to guest RAM, lowest
++// priority first (so a higher-priority mod wins on overlap). Data patches are
++// written; code patches are only reported. Safe to call more than once: only
++// the first call does anything.
++const MemoryPatchReport& ApplyMemoryPatches();
++
+ } // namespace RuntimeRiivolution
+diff --git a/runtime/src/hle/storage/riivolution_memory.cpp b/runtime/src/hle/storage/riivolution_memory.cpp
+new file mode 100644
+index 0000000..a609a02
+--- /dev/null
++++ b/runtime/src/hle/storage/riivolution_memory.cpp
+@@ -0,0 +1,245 @@
++// Riivolution <memory> patches for a statically translated game.
++//
++// Riivolution writes its memory patches into RAM after the main executable is
++// loaded and before it runs. Here the executable's code was translated ahead of
++// time, so only patches to *data* can take effect by writing guest RAM. Patches
++// that land in a registered code range are reported instead: they need the code
++// re-translated with the patch applied (tools/mod_build.py, see docs/mods.md).
++//
++// Matching follows Dolphin's RiivolutionPatcher: a patch with `original` is
++// applied only where memory holds those bytes (that is how one XML carries
++// patches for several regions), and `search` patches find `original` in MEM1
++// (stride `align`) and patch the first match.
++//
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "hle/storage/riivolution.h"
++
++#include "memory.h"
++#include "runtime_config.h"
++#include "runtime_log.h"
++
++#include <cstring>
++#include <iomanip>
++#include <mutex>
++#include <optional>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace {
++
++struct CodeRange {
++    uint32_t start;
++    uint32_t end;
++    std::string name;
++};
++
++std::vector<CodeRange>& CodeRanges() {
++    static std::vector<CodeRange> ranges;
++    return ranges;
++}
++
++const CodeRange* FindCodeRange(uint32_t address, size_t length) {
++    const uint64_t end = static_cast<uint64_t>(address) + length;
++    for (const CodeRange& range : CodeRanges()) {
++        if (address < range.end && end > range.start) {
++            return &range;
++        }
++    }
++    return nullptr;
++}
++
++std::string Hex(uint32_t value) {
++    std::ostringstream text;
++    text << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
++    return text.str();
++}
++
++bool MemoryEquals(uint32_t address, const std::vector<uint8_t>& bytes) {
++    if (bytes.empty() || !Memory::Contains(address, static_cast<uint32_t>(bytes.size()))) {
++        return false;
++    }
++    const void* pointer = Memory::GetPointer(address, static_cast<uint32_t>(bytes.size()));
++    return pointer && std::memcmp(pointer, bytes.data(), bytes.size()) == 0;
++}
++
++// MEM1 as the game sees it (24 MiB); MEM2 is heap the game fills at runtime.
++constexpr uint32_t kSearchStart = 0x80000000u;
++constexpr uint32_t kSearchEnd = 0x81800000u;
++
++std::optional<uint32_t> SearchMemory(const std::vector<uint8_t>& pattern, uint32_t start, uint32_t align) {
++    if (pattern.empty()) {
++        return std::nullopt;
++    }
++    const uint32_t stride = align == 0 ? 1u : align;
++    uint32_t first = start >= kSearchStart && start < kSearchEnd ? start : kSearchStart;
++    first -= (first - kSearchStart) % stride;
++    for (uint32_t address = first; address + pattern.size() <= kSearchEnd; address += stride) {
++        if (MemoryEquals(address, pattern)) {
++            return address;
++        }
++    }
++    return std::nullopt;
++}
++
++constexpr uint32_t kMaxDetailLines = 24;
++
++RuntimeRiivolution::MemoryPatchReport g_report;
++std::once_flag g_applyOnce;
++
++struct BlobRange {
++    uint32_t start;
++    uint32_t end;
++};
++
++// Words of a data patch that point into a blob a valuefile patch loads outside the translated
++// ranges. Such a blob is almost always code (Newer's Loader.bin at 0x80001800, a Kamek -static
++// binary), and the pointer would make the game call it: there is nothing translated there, so
++// the runtime stops with missing_target. Returns the first such word.
++std::optional<uint32_t> PointerIntoBlob(const RuntimeRiivolution::MemoryPatch& patch,
++                                        const std::vector<BlobRange>& blobs) {
++    if (blobs.empty() || !patch.valuefileName.empty() || patch.value.size() < 4 || (patch.offset & 3u) != 0) {
++        return std::nullopt;
++    }
++    for (size_t i = 0; i + 4 <= patch.value.size(); i += 4) {
++        const uint32_t word = (uint32_t(patch.value[i]) << 24) | (uint32_t(patch.value[i + 1]) << 16) |
++                              (uint32_t(patch.value[i + 2]) << 8) | uint32_t(patch.value[i + 3]);
++        for (const BlobRange& blob : blobs) {
++            if (word >= blob.start && word < blob.end) {
++                return word;
++            }
++        }
++    }
++    return std::nullopt;
++}
++
++void ApplyOne(const RuntimeRiivolution::MemoryPatch& patch, const std::string& modLabel,
++              const std::vector<BlobRange>& blobs, RuntimeRiivolution::MemoryPatchReport& report,
++              uint32_t& codeLines) {
++    if (patch.ocarina) {
++        ++report.unsupported;
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source
++                  << ": ocarina memory patches are not supported, skipped" << std::endl;
++        return;
++    }
++
++    uint32_t address = patch.offset;
++    if (patch.search) {
++        const auto found = SearchMemory(patch.original, patch.offset, patch.align);
++        if (!found) {
++            ++report.unsupported;
++            RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source
++                      << ": search patch found no match, skipped" << std::endl;
++            return;
++        }
++        address = *found;
++    }
++
++    const uint32_t length = static_cast<uint32_t>(patch.value.size());
++    if (!Memory::Contains(address, length)) {
++        ++report.unsupported;
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": " << Hex(address)
++                  << " (+" << length << ") is outside guest memory, skipped" << std::endl;
++        return;
++    }
++
++    if (MemoryEquals(address, patch.value)) {
++        ++report.alreadyApplied;
++        return;
++    }
++    if (!patch.search && !patch.original.empty() && !MemoryEquals(address, patch.original)) {
++        // Normal for multi-region XMLs: the patch is for another region/version.
++        ++report.originalMismatch;
++        return;
++    }
++
++    if (const CodeRange* range = FindCodeRange(address, length)) {
++        ++report.codeNeedsModBuild;
++        if (codeLines++ < kMaxDetailLines) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": code patch at "
++                      << Hex(address) << " (" << length << " bytes, " << range->name
++                      << ") needs a mod build (tools/mod_build.py); not applied" << std::endl;
++        }
++        return;
++    }
++
++    if (const auto target = PointerIntoBlob(patch, blobs)) {
++        ++report.codeNeedsModBuild;
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": data patch at " << Hex(address)
++                  << " points the game at " << Hex(*target)
++                  << ", inside code loaded by a valuefile patch; that code is not translated, so this "
++                  << "patch is skipped (the mod's code needs a mod build)" << std::endl;
++        return;
++    }
++
++    void* pointer = Memory::GetPointer(address, length);
++    if (!pointer) {
++        ++report.unsupported;
++        return;
++    }
++    std::memcpy(pointer, patch.value.data(), length);
++    ++report.applied;
++    // Low memory below the OS globals is where Riivolution loaders put code
++    // (e.g. Newer's Loader.bin at 0x80001800). Nothing translated lives there.
++    if (address >= 0x80001800u && address < 0x80003000u && length > 64) {
++        RT_LOG(RT_TAG_RIIVOLUTION) << modLabel << ": " << patch.source << ": wrote " << length
++                  << " bytes at " << Hex(address)
++                  << " (low memory); if this is loader code it only runs in a mod build" << std::endl;
++    }
++}
++
++void ApplyAll() {
++    const auto& overlays = RuntimeRiivolution::Overlays();
++    // Lowest priority first, so a higher-priority pack's bytes end up in RAM.
++    for (auto overlay = overlays.rbegin(); overlay != overlays.rend(); ++overlay) {
++        if (!overlay->patches || overlay->patches->memoryPatches.empty()) {
++            continue;
++        }
++        const std::string label =
++            overlay->modName.empty() ? RuntimeConfigFile::PathToUtf8(overlay->root) : "mod '" + overlay->modName + "'";
++        std::vector<BlobRange> blobs;
++        for (const auto& patch : overlay->patches->memoryPatches) {
++            const uint32_t length = static_cast<uint32_t>(patch.value.size());
++            if (!patch.valuefileName.empty() && !patch.search && !FindCodeRange(patch.offset, length)) {
++                blobs.push_back({patch.offset, patch.offset + length});
++            }
++        }
++        RuntimeRiivolution::MemoryPatchReport local;
++        uint32_t codeLines = 0;
++        for (const auto& patch : overlay->patches->memoryPatches) {
++            ApplyOne(patch, label, blobs, local, codeLines);
++        }
++        if (codeLines > kMaxDetailLines) {
++            RT_LOG(RT_TAG_RIIVOLUTION) << label << ": ... " << (codeLines - kMaxDetailLines)
++                      << " more code patch(es)" << std::endl;
++        }
++        RT_LOG(RT_TAG_RIIVOLUTION) << label << ": memory patches: " << local.applied << " applied, "
++                  << local.alreadyApplied << " already in place, " << local.originalMismatch
++                  << " for another region/version, " << local.codeNeedsModBuild
++                  << " code patch(es) needing a mod build, " << local.unsupported << " unsupported"
++                  << std::endl;
++        g_report.applied += local.applied;
++        g_report.alreadyApplied += local.alreadyApplied;
++        g_report.originalMismatch += local.originalMismatch;
++        g_report.codeNeedsModBuild += local.codeNeedsModBuild;
++        g_report.unsupported += local.unsupported;
++    }
++}
++
++} // namespace
++
++namespace RuntimeRiivolution {
++
++void RegisterCodeRange(uint32_t start, uint32_t end, const char* name) {
++    if (end > start) {
++        CodeRanges().push_back({start, end, name ? name : "code"});
++    }
++}
++
++const MemoryPatchReport& ApplyMemoryPatches() {
++    std::call_once(g_applyOnce, ApplyAll);
++    return g_report;
++}
++
++} // namespace RuntimeRiivolution

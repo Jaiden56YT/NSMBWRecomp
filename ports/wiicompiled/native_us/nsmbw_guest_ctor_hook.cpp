@@ -35,6 +35,7 @@
 #include "memory.h"
 #include "ppc_runtime.h"
 #include "abi_bridge.h"
+#include "hle/storage/riivolution.h"
 
 #include <cstring>
 
@@ -73,6 +74,23 @@ void RestoreRelImages()
     }
 }
 
+// Riivolution <memory> patches (mods/<name>/riivolution/*.xml). Riivolution writes them after
+// the DOL is loaded and before __start; here that point is just after the REL images are back
+// (so patches to REL data stick) and before any constructor runs. The ranges below are the
+// translated .text of main.dol and the four RELs (from the DOL header and each REL's section
+// table at its US load address): a patch inside one is reported, not written, because the
+// translated code would never see it (docs/mods.md, "Code patches").
+void ApplyRiivolutionMemoryPatches()
+{
+    RuntimeRiivolution::RegisterCodeRange(0x80004000u, 0x800066C0u, "main.dol .init");
+    RuntimeRiivolution::RegisterCodeRange(0x80006780u, 0x802ED9E0u, "main.dol .text");
+    RuntimeRiivolution::RegisterCodeRange(0x807685E0u, 0x8076A598u, "d_profileNP .text");
+    RuntimeRiivolution::RegisterCodeRange(0x8076D7B0u, 0x80933784u, "d_basesNP .text");
+    RuntimeRiivolution::RegisterCodeRange(0x809A2DD0u, 0x80ACD1F8u, "d_enemiesNP .text");
+    RuntimeRiivolution::RegisterCodeRange(0x80B1CA50u, 0x80B73A7Cu, "d_en_bossNP .text");
+    RuntimeRiivolution::ApplyMemoryPatches();
+}
+
 } // namespace
 
 extern "C" void NsmbwGuestCtorHook_80004040(CpuContext* ctx)
@@ -85,6 +103,7 @@ extern "C" void NsmbwGuestCtorHook_80004040(CpuContext* ctx)
     if (!restored) {
         restored = true;
         RestoreRelImages();
+        ApplyRiivolutionMemoryPatches();
     }
     Nsmbw_RunGuestConstructorsOnce(ctx);
 
