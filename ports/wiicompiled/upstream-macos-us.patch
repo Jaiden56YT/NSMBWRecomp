@@ -3662,10 +3662,10 @@ index 8c96414..ce9053e 100644
 +extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
 +extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..38dc070 100644
+index a63636b..e3a5b1d 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
-@@ -37,8 +37,10 @@
+@@ -37,14 +37,22 @@
  #include <chrono>
  #include <csignal>
  #include <cstdio>
@@ -3676,7 +3676,19 @@ index a63636b..38dc070 100644
  #include <filesystem>
  #include <iomanip>
  #include <ios>
-@@ -84,12 +86,12 @@ namespace {
+ #include <optional>
+ #include <sstream>
+ #include <thread>
++#if !defined(_WIN32) && !defined(__SWITCH__)
++#include <climits>
++#include <fcntl.h>
++#include <sys/file.h>
++#include <unistd.h>
++#endif
+ 
+ #if defined(_WIN32)
+ #include <windows.h>
+@@ -84,12 +92,12 @@ namespace {
  //     retail disc image header (New Super Mario Bros. Wii (Europe) (Rev 1).rvz, offset 0x58 in
  //     the RVZ container - "SMNP" + "01" + disc 0 + version 1), not guessed or copied from MKW.
  //   - MEM1 arena lo: derived from wiimj2d.dol's own BSS end (its header's bss_addr+bss_size =
@@ -3691,7 +3703,7 @@ index a63636b..38dc070 100644
  //     which is conservative but not derived from NSMBW's own arena-init code).
  void SeedLowMemDefaults() {
      struct SeedEntry { uint32_t address; uint32_t value; const char* label; };
-@@ -97,13 +99,13 @@ void SeedLowMemDefaults() {
+@@ -97,13 +105,13 @@ void SeedLowMemDefaults() {
      const uint32_t mem2Size = static_cast<uint32_t>(Memory::kMem2Size);
      const uint32_t mem1End = Memory::kMem1CachedBase + mem1Size;
      // _stack_addr, read from __init_registers (0x80004234-0x80004238: lis r1,-0x7fbd;
@@ -3709,7 +3721,7 @@ index a63636b..38dc070 100644
      const uint32_t physicalMem2End = Memory::kMem2CachedBase + mem2Size;
      constexpr uint32_t kIosReservedSize = 0x20000u;
      constexpr uint32_t kIPCArenaSize = 0x20000u;
-@@ -117,8 +119,8 @@ void SeedLowMemDefaults() {
+@@ -117,8 +125,8 @@ void SeedLowMemDefaults() {
      constexpr uint32_t kDvdFstReserveSize = 0x200000u;
      g_dvdFstReservedSize = kDvdFstReserveSize;
      g_dvdFstReservedBase = ipcBufLo - kDvdFstReserveSize;
@@ -3720,7 +3732,7 @@ index a63636b..38dc070 100644
      // Same retail-vs-NDEV test as OS__GetConsoleType_8019f33c (os_init.cpp) - kept in sync so a
      // guest read of this field and a guest call to OSGetConsoleType() never disagree.
      constexpr uint32_t kRetailMem2Size = 64u * 1024u * 1024u;
-@@ -137,10 +139,10 @@ void SeedLowMemDefaults() {
+@@ -137,10 +145,10 @@ void SeedLowMemDefaults() {
          // func_801AA940 itself gets a chance to run, so without this the cache is seen as NULL and
          // that read permanently fails - the actual root cause of the OSSleepThread hang traced this
          // session. This isn't a guess: it's the exact value func_801AA940 would itself store here.
@@ -3733,7 +3745,7 @@ index a63636b..38dc070 100644
          {0x80003180u, kGameCode, "OS app game code"},
          {0x80003194u, kGameCode, "OS app gamename"},
          {0x800000F8u, static_cast<uint32_t>(TimeBaseContract::kBusClockHz), "__OSBusClock"},
-@@ -179,23 +181,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
+@@ -179,23 +187,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
  
  // Mirrors main.cpp's SeedCpuContext(): r1 is the initial stack pointer. NSMBW's manifest
  // (projects/nsmbw/nsmbw.yml) declares memory.base=0x80000000, memory.size=0x01800000, so guest
@@ -3763,7 +3775,7 @@ index a63636b..38dc070 100644
  // d_en_bossNP was excluded for two stacked reasons this session, both now fixed:
  //   1. RelFile.cs's ApplyRelocations mis-resolved cross-module relocations (reusing the
  //      currently-relocating module's own baseAddress/Sections instead of the target module's),
-@@ -206,8 +208,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -206,8 +214,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  //      Decomp's real loader (DynamicModuleControl::do_link, source/dol/cLib/c_dylink.cpp) reads
  //      the whole file, links it, then shrinks the heap block to fixSize+bssSize - discarding that
  //      tail. Using the full file length as "resident size" inflated every REL's footprint enough
@@ -3774,7 +3786,7 @@ index a63636b..38dc070 100644
  //      total resident size - is now placed right after the last real section, matching
  //      do_link()'s actual behavior. With that fix, all four RELs' real footprints are
  //      non-overlapping and pack contiguously (small gaps of a few hundred bytes between them,
-@@ -222,14 +224,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -222,14 +230,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  // the retail .rel headers: prologSection is 1 and prologOffset is 0 for all four, and section 1
  // starts at file offset 0xF0 (0xE0 for d_profileNP), just past each header and section table.
  // Cross-checked against the translated bodies: func_80768680 is d_profileNP's real _prolog (it
@@ -3794,7 +3806,7 @@ index a63636b..38dc070 100644
  };
  
  // A bad guest constructor must not take down the whole boot sequence - matches
-@@ -239,7 +241,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
+@@ -239,7 +247,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
      MkwJmpBuf jumpBuf;
      g_sehJumpTarget = &jumpBuf;
      if (MKW_SETJMP(jumpBuf) == 0) {
@@ -3803,7 +3815,7 @@ index a63636b..38dc070 100644
          InvokeIndirectCpu(address, &cpu);
      } else {
          std::fprintf(stderr,
-@@ -271,6 +273,12 @@ void RunGuestConstructors(CpuContext& cpu) {
+@@ -271,6 +279,12 @@ void RunGuestConstructors(CpuContext& cpu) {
  
      std::printf("[nsmbw] Running REL _prolog (static constructors) for each of the 4 RELs...\n");
      for (uint32_t prolog : kRelPrologAddresses) {
@@ -3816,7 +3828,92 @@ index a63636b..38dc070 100644
          InvokeGuestCallGuarded(prolog, cpu, "REL _prolog");
      }
  
-@@ -338,7 +346,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+@@ -322,10 +336,83 @@ std::filesystem::path NsmbwDataDir() {
+     return std::filesystem::current_path() / "nsmbw_data";
+ }
+ 
++// Several copies of the game at once (netplay tests run two to five on one Mac) must not share
++// the per-run caches:
++//  - nsmbw_data/Cache: the pipeline/shader sqlite databases ("database is locked" between copies)
++//    and the crash marker. A second copy found the first one's marker (armed while it runs), took
++//    it for a crash and deleted the databases the first copy had open.
++//  - Metal's own compiled-shader cache. Every unbundled Mac program shares one folder for it,
++//    $DARWIN_USER_CACHE_DIR/com.apple.metal, and with several copies compiling their boot
++//    pipelines at once one of them often crashed inside Apple's cache lookup (fscache_find_and_retain,
++//    SIGSEGV/SIGBUS in the first resolve_pass): 7 of 35 launches of five copies at once. 0 of 20
++//    with a Metal folder per copy, 0 of 20 with a Cache per copy, 0 of 20 with both (2026-11-18).
++// So each copy takes the first free instance slot, held by an flock that the OS drops when the
++// process ends (a crash included). Slot 0, the usual single copy, keeps nsmbw_data/Cache; slot n
++// uses nsmbw_data/Cache-n, which persists, so a test that starts n copies reuses n warm caches.
++// On the Mac a second slot, counted per user (Metal's folder is shared by every build), picks
++// Metal's cache folder: $DARWIN_USER_CACHE_DIR/NSMBWCompiled-n/com.apple.metal. Windows and the
++// Switch keep one shared Cache as before.
++#if !defined(_WIN32) && !defined(__SWITCH__)
++#define NSMBW_INSTANCE_SLOTS 1
++// First free slot n whose lock file <dir>/<prefix>n.lock can be locked; the descriptor stays open
++// (and locked) for the life of the process. -1 if all 16 are taken or the folder is unusable.
++int ClaimInstanceSlot(const std::filesystem::path& dir, const char* prefix) {
++    std::error_code ec;
++    std::filesystem::create_directories(dir, ec);
++    for (int slot = 0; slot < 16; ++slot) {
++        const auto path = dir / (std::string(prefix) + std::to_string(slot) + ".lock");
++        const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
++        if (fd < 0) return -1;
++        if (::flock(fd, LOCK_EX | LOCK_NB) == 0) return slot;
++        ::close(fd);
++    }
++    return -1;
++}
++#endif
++
++std::filesystem::path NsmbwCacheDir() {
++    static const std::filesystem::path dir = [] {
++        const auto dataDir = NsmbwDataDir();
++        int slot = 0;
++#if defined(NSMBW_INSTANCE_SLOTS)
++        slot = ClaimInstanceSlot(dataDir, ".instance-");
++        if (slot < 0) {
++            std::printf("[nsmbw] no free instance slot in %s: sharing Cache with another copy\n",
++                        dataDir.string().c_str());
++            slot = 0;
++        }
++#endif
++        auto cacheDir = dataDir / (slot == 0 ? std::string("Cache") : "Cache-" + std::to_string(slot));
++        if (slot != 0) std::printf("[nsmbw] instance slot %d: cache %s\n", slot, cacheDir.string().c_str());
++        return cacheDir;
++    }();
++    return dir;
++}
++
++#if defined(__APPLE__)
++// Private but exported by libSystem (Chromium and WebKit use it for their helper processes): from
++// here on confstr(_CS_DARWIN_USER_CACHE_DIR / _CS_DARWIN_USER_TEMP_DIR) returns <dir>/<suffix>/,
++// and Metal keeps its shader cache there. Must run before anything creates a Metal device.
++// NSMBW_SHARED_METAL_CACHE=1 keeps the old shared folder.
++extern "C" bool _set_user_dir_suffix(const char* suffix) __attribute__((weak_import));
++
++void UsePrivateMetalShaderCache() {
++    if (_set_user_dir_suffix == nullptr || AURORA_ENV("NSMBW_SHARED_METAL_CACHE") != nullptr) return;
++    char buffer[PATH_MAX];
++    if (::confstr(_CS_DARWIN_USER_CACHE_DIR, buffer, sizeof(buffer)) == 0) return;
++    const int slot = ClaimInstanceSlot(buffer, "NSMBWCompiled-metal-");
++    if (slot < 0) return;
++    const std::string suffix = "NSMBWCompiled-" + std::to_string(slot);
++    if (!_set_user_dir_suffix(suffix.c_str())) return;
++    if (::confstr(_CS_DARWIN_USER_CACHE_DIR, buffer, sizeof(buffer)) == 0) return;
++    std::printf("[nsmbw] Metal shader cache: %scom.apple.metal\n", buffer);
++}
++#endif
++
+ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+     std::error_code ec;
+     const auto dataDir = NsmbwDataDir();
+-    const auto cacheDir = dataDir / "Cache";
++    const auto cacheDir = NsmbwCacheDir();
+     std::filesystem::create_directories(cacheDir, ec);
+     static const std::string userPath = dataDir.string();
+     static const std::string cachePath = cacheDir.string();
+@@ -338,7 +425,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
      config.logLevel = LOG_INFO;
      config.windowWidth = 640;
      config.windowHeight = 480;
@@ -3828,7 +3925,7 @@ index a63636b..38dc070 100644
      config.allowJoystickBackgroundEvents = true;
      // Mirror main.cpp's MKW init: skip the display copy's vertical deflicker filter (default on,
      // as in Dolphin). Left zero-initialised, the filter ran on every frame while the F10 checkbox
-@@ -358,6 +370,13 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+@@ -358,6 +449,13 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
      config.mem2Size = 0;
  
      outInfo = aurora_initialize(0, nullptr, &config);
@@ -3842,7 +3939,7 @@ index a63636b..38dc070 100644
      // Apply the render scale saved by the F10 menu (Config.toml video.resolution_multiplier; 0 =
      // match window size). Unlike MKW's main.cpp path, this init never called VISetFrameBufferScale,
      // so the saved value only took effect after re-selecting it in the menu. NSMBW_RES_SCALE=<n>
-@@ -733,7 +752,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -733,7 +831,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
      }
      std::error_code ec;
  
@@ -3851,7 +3948,7 @@ index a63636b..38dc070 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +802,265 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -783,7 +881,265 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  void NsmbwEnsureDiscFolder();
  
@@ -4028,7 +4125,7 @@ index a63636b..38dc070 100644
 +}
 +// Translated guest calls are real nested native calls (the Windows build links a 16 MiB stack for
 +// this), so the game runs on a thread with a large stack; the log goes to the SD card.
- int main() {
++int main() {
 +    SwitchThreadCacheEnable();
 +    chdir("/switch/nsmbw2");
 +    setenv("XDG_DATA_HOME", "/switch/nsmbw2", 1);
@@ -4112,12 +4209,24 @@ index a63636b..38dc070 100644
 +}
 +static int NsmbwMain() {
 +#else
-+int main() {
+ int main() {
 +#endif
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1140,7 @@ int main() {
+@@ -829,7 +1185,10 @@ int main() {
+     }
+     {
+         std::error_code ec;
+-        const auto cacheDir = NsmbwDataDir() / "Cache";
++#if defined(__APPLE__)
++        UsePrivateMetalShaderCache();
++#endif
++        const auto cacheDir = NsmbwCacheDir();
+         std::filesystem::create_directories(cacheDir, ec);
+         ResetPersistentStateForCleanRun(cacheDir);
+         g_crashMarkerPath = (cacheDir / kCrashMarkerName).string();
+@@ -863,7 +1222,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -4126,7 +4235,7 @@ index a63636b..38dc070 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1250,21 @@ int main() {
+@@ -973,7 +1332,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -4148,7 +4257,7 @@ index a63636b..38dc070 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1359,11 @@ int main() {
+@@ -1068,11 +1441,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
