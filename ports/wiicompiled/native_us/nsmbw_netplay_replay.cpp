@@ -52,6 +52,8 @@
 #include <unistd.h>
 
 extern "C" uint32_t g_nsmbwCurrentSceneProfile;
+// runtime/src/product/nsmbw_product.cpp: flush the pipeline-cache writer, clear the crash marker.
+extern "C" void NsmbwPrepareImmediateExit();
 
 namespace {
 constexpr uint32_t kMem1Base = 0x80000000u, kMem1Size = 0x01800000u;
@@ -236,6 +238,10 @@ extern "C" void NsmbwReplayBeginFrame() {
         Flush();
         if (g.record) std::fclose(g.record);
         if (g.hashes) std::fclose(g.hashes);
+        // _exit skips atexit, where aurora writes out its queued pipeline recipes and the product
+        // clears its crash marker. Left armed, the marker made every replay launch wipe the
+        // pipeline cache and compile everything cold ("previous run did not exit cleanly").
+        NsmbwPrepareImmediateExit();
         std::fflush(stderr);
         _exit(0);
     }
