@@ -13,6 +13,7 @@
 //                               (<hashes>.f<N>.mem1 / .mem2), to find which bytes differ.
 //   NSMBW_REPLAY_EXIT_AT=<n>    exit the process at game frame n (after flushing the files).
 //   NSMBW_REPLAY_SEED=<hex>     the random seed every run uses (default 0x4E534D42; see ApplySeed).
+//   NSMBW_REPLAY_HOST_AUDIO=1   keep audio paced by the host clock (see AdvanceAudio).
 //   NSMBW_LOG_KPAD_CALLERS=1    log the first KPAD reads with their guest LR (frame-boundary check).
 // Any of the first three switches the KPAD override (nsmbw_kpad_overrides.cpp) into frame mode:
 // input is sampled once per game frame instead of once per VI tick, because lockstep has to count
@@ -182,6 +183,17 @@ void DumpRegion(uint32_t base, uint32_t size, const std::string& path) {
     }
 }
 
+// Audio: the AI DMA callback drives the sound engine (BGM fades, sound timers the scenes wait
+// on), and the runtime normally paces it by the host clock, so two runs reached the movie scene
+// 5 frames apart. In frame mode it is advanced here instead, by exactly one NTSC frame
+// (1001/60000 s) per game frame, at the same point of every frame (Audio_HLE_AdvanceFrame).
+// Before the first game frame the host clock still paces it (the boot has no input to sync).
+void AdvanceAudio() {
+    if (!g.frameMode || std::getenv("NSMBW_REPLAY_HOST_AUDIO")) return;
+    const auto at = [](uint64_t n) { return n * 1001000000ull / 60000ull; };
+    Audio_HLE_AdvanceFrame(static_cast<uint32_t>(at(g.frame + 1) - at(g.frame)));
+}
+
 void Flush() {
     if (g.record) std::fflush(g.record);
     if (g.hashes) std::fflush(g.hashes);
@@ -197,6 +209,7 @@ extern "C" bool NsmbwReplayFrameMode() {
 extern "C" void NsmbwReplayBeginFrame() {
     Init();
     ApplySeed();
+    AdvanceAudio();
     uint32_t tick = 0;
     Memory::TryRead32(kViRetraceCountAddr, tick);
     if (g.hashes) {

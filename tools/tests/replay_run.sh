@@ -21,5 +21,7 @@ else
   envs+=(NSMBW_REPLAY_PLAY=$1); shift
 fi
 cd $build
-env $envs "$@" ./NSMBWCompiled > $out/log.txt 2>&1 || true
-grep "\[replay\]" $out/log.txt | tail -3
+rc=0
+env $envs "$@" ./NSMBWCompiled > $out/log.txt 2>&1 || rc=$?
+print "exit status $rc" >> $out/log.txt
+grep "\[replay\]\|^exit status" $out/log.txt | tail -3

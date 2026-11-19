@@ -1552,7 +1552,7 @@ index 0000000..a1354eb
 +}  // namespace GuestFlat
 +#endif  // __SWITCH__
 diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
-index 421ca42..e471353 100644
+index 421ca42..81b5457 100644
 --- a/runtime/src/hle/audio/audio.cpp
 +++ b/runtime/src/hle/audio/audio.cpp
 @@ -30,20 +30,29 @@ constexpr uint32_t kBytesPerSample = 2u;
@@ -1654,6 +1654,64 @@ index 421ca42..e471353 100644
              if (g_ai.tickActive) {
                  return;
              }
+@@ -616,8 +630,47 @@ int64_t ConsumeAudioPollDeltaMicros()
+ std::atomic<uint64_t> g_pollCalls{0};
+ std::atomic<uint64_t> g_pollNanos{0};
+ 
++// Frame-driven audio (NSMBW online play, docs/online-play.md in the NSMBW repo). Lockstep needs
++// every machine to run the AI DMA callback (which advances the sound engine: BGM fades, sound
++// timers the scenes wait on) at the same game frame, so the host clock cannot pace it. After the
++// first Audio_HLE_AdvanceFrame call the clock-paced polls below do nothing, and audio advances
++// only by the time each game frame passes in, at the frame boundary.
++std::atomic<bool> g_audioFrameDriven{false};
++
++void Audio_HLE_AdvanceFrame(uint32_t micros)
++{
++    static uint64_t pendingMicros = 0;
++    g_audioFrameDriven.store(true, std::memory_order_relaxed);
++    pendingMicros += micros;
++    // The frame boundary (the controller read) runs with guest interrupts off, and the audio
++    // runs there anyway, the way an interrupt handler would: with interrupts off and the
++    // scheduler held, so the threads it wakes run later, as after a real interrupt. Waiting for
++    // a later point instead (the next re-enable, or the next poll) was tried: the first
++    // re-enable can be on a loader thread deep in its 64 KB host stack (overflow), and the
++    // next poll comes at a host-timed moment, so whether audio ran in a frame varied.
++    GuestInterruptCallbackContext interrupt;
++    CpuContext* cpu = interrupt.get();
++    OS_HLE_BeginDeferredGuestCallbacks();
++    try {
++        MusicAttenuation::TickGuest();
++        Audio_HLE_Tick(cpu, static_cast<uint32_t>(pendingMicros));
++        pendingMicros = 0;
++        // Audio_HLE_Tick delivers at most kMaxBlocksPerTick blocks; deliver the whole frame.
++        for (int i = 0; i < 8; ++i) {
++            Audio_HLE_Tick(cpu, 0);
++        }
++    } catch (...) {
++        OS_HLE_EndDeferredGuestCallbacks();
++        throw;
++    }
++    OS_HLE_EndDeferredGuestCallbacks();
++}
++
+ void Audio_HLE_Poll(CpuContext* ctx)
+ {
++    if (g_audioFrameDriven.load(std::memory_order_relaxed)) {
++        return;
++    }
+     static const bool timed = std::getenv("NSMBW_LOG_AUDIO_BACKLOG") != nullptr;
+     const auto start = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+     MusicAttenuation::TickGuest();
+@@ -632,6 +685,9 @@ void Audio_HLE_Poll(CpuContext* ctx)
+ 
+ void Audio_HLE_PollDeferred()
+ {
++    if (g_audioFrameDriven.load(std::memory_order_relaxed)) {
++        return;
++    }
+     if (!OS_HLE_InterruptsEnabled()) {
+         // Leave the elapsed interval unconsumed so the next poll still sees it.
+         return;
 diff --git a/runtime/src/hle/audio/ax_effects.cpp b/runtime/src/hle/audio/ax_effects.cpp
 index a30a4ac..1e2b70c 100644
 --- a/runtime/src/hle/audio/ax_effects.cpp
@@ -7753,3 +7811,17 @@ index 17930ea..f61afca 100644
 +// mods screen on the next frame, and reports once that it has finished closing.
 +extern "C" void NsmbwModsMenuRequestOpen();
 +extern "C" bool NsmbwModsMenuTakeClosed();
+diff --git a/runtime/include/hle_stubs.h b/runtime/include/hle_stubs.h
+index 92ea526..66f8eec 100644
+--- a/runtime/include/hle_stubs.h
++++ b/runtime/include/hle_stubs.h
+@@ -26,6 +26,9 @@ void Audio_HLE_Poll(CpuContext* ctx);
+ // OS_HLE_ProcessAlarmsDeferred does, so it is safe to call from the middle of an
+ // arbitrary translated function.
+ void Audio_HLE_PollDeferred();
++// Frame-driven audio for lockstep play: advance the AI DMA clock by one game frame. The first call
++// turns the host-clock polls above off for the rest of the run.
++void Audio_HLE_AdvanceFrame(uint32_t micros);
+ bool OS_HLE_InterruptsEnabled() noexcept;
+ extern "C" void OS_HLE_ProcessAlarmsDeferred(int maxToProcess);
+ extern "C" void OS_HLE_BeginDeferredGuestCallbacks();

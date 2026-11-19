@@ -5,10 +5,11 @@ friend's), the room fills up, and everyone goes back to the menu and plays NSMBW
 co-op (up to four players), with the remote players' inputs arriving over the network. Free Mode
 and Coin Battle come along for free, because the design synchronises input, not game modes.
 
-Status: design, plus step 0 (the determinism check, section 8a) built and run on the Mac.
+Status: design, plus step 0 (the determinism check, sections 8a and 8b) built and run on the Mac.
 Section 8 is the build order. Step 0's answer: input + seed + frame counting reproduce the game
-state, but the audio engine's timing reaches scene transitions, so lockstep needs audio driven by
-game frames before it can hold (section 8a).
+state; the audio engine's timing reached scene transitions until audio was driven by game frames
+(8b). With that, replays match the recording frame for frame through boot, title, movie, map and
+two courses.
 
 ## 1. Summary of the decisions
 
@@ -166,7 +167,8 @@ Ordered by how likely they are to hurt.
    level timing follows the music. If that beat information reaches gameplay through a
    wall-clock path, two machines diverge within seconds. Fix if so: in a session, drive the AX /
    sequence update from game frames (a fixed number of audio frames per game frame, the audio
-   output resampling / stretching to absorb the difference).
+   output resampling / stretching to absorb the difference). Confirmed and fixed for frame mode by
+   step 0 (section 8b): the game-setup scene waits on the audio engine.
 2. **Other clock reads.** `OSGetTime` / `OSGetTick` / the VI tick read by gameplay code (RNG
    seeding, timers, "wait one tick" loops like the one `nsmbw_tick_read_pump.cpp` documents). Fix:
    in a session, the game thread sees a time derived from the frame counter.
@@ -316,6 +318,54 @@ How to re-run (from the repo root, with the Mac build in `third_party/NSMBWiicom
 (The ignored ranges are OS / audio-engine statics and REL-area words holding timestamps and VI-tick copies; leave
 them in to see everything.) Hashing every frame slows the game to about half speed; that does not
 affect the result, since the comparison is per game frame.
+
+## 8b. Step 0, audio driven by game frames (2026-11-18, Mac)
+
+Change: in frame mode (any `NSMBW_REPLAY_*` switch), audio no longer follows the host clock. At
+each game frame boundary `nsmbw_netplay_replay.cpp` passes exactly one NTSC frame (1001/60000 s,
+summed so there is no drift) to a new runtime entry, `Audio_HLE_AdvanceFrame`
+(`runtime/src/hle/audio/audio.cpp`, carried in `ports/wiicompiled/upstream-macos-us.patch`). It
+runs the AI DMA callback for all the 3 ms audio blocks that time covers, there and then; after its
+first call the runtime's clock-paced audio polls (scheduler, VI wait) do nothing. Before the first
+game frame (boot) the clock still paces audio. `NSMBW_REPLAY_HOST_AUDIO=1` keeps the old pacing,
+for comparison. Normal play is unchanged.
+
+Where in the frame the audio runs matters, and two choices failed before the one kept:
+- The frame boundary is the controller read, and the game has interrupts off there. Holding the
+  audio until interrupts come back on (as hardware would hold a DMA interrupt), on any thread:
+  replays matched, but about 1 run in 4 crashed (SIGBUS) entering the game-setup scene. The first
+  re-enable was sometimes on a loader thread deep in its 64 KB host stack (libco stacks are 64 KB
+  on the Mac, `fiber_manager.cpp`), and the audio callback on top overflowed it.
+- Holding it until the reading thread re-enables them, or else the next scheduler / VI-wait poll:
+  no crash, but that poll comes at a host-timed moment, so whether a frame's audio had run yet
+  varied; one run starved the audio and never left the boot scene.
+- Kept: run it at the boundary itself, interrupts off, with the scheduler held (the way an
+  interrupt handler runs; the threads it wakes run afterwards). The controller read's critical
+  section does not touch the audio engine.
+
+Result (record once, then five replays started at the same time, 4000 frames each, same test
+input as 8a): four replays match the recording on every frame - the same scene on all 4000 frames
+(boot 3, strap 230, title 337, game setup 587, movie 936, map 1153, course 2052/2166, map 2659,
+course 2952/3066, map 3955), and every memory page identical except five static pages
+(0x80340000, 0x80380000, 0x803C0000, 0x80400000, 0x80740000) that already differ at frames 0-2,
+before any game frame ran, plus two MEM2 pages on one frame (340). The audio heap, the sound
+engine's state and the 0x80D1C318 word from 8a no longer differ: they followed the audio clock.
+The fifth replay crashed (SIGSEGV) during boot, before its first game frame and before any of
+this code runs; the same happened in the previous round, always to the first of the five
+processes started together. That is a start-up problem with several instances at once (they also
+fight over the pipeline-cache database: "database is locked"), not a determinism one - followed up
+separately.
+
+Also learnt: the movie-skip request only works on a frame where the movie is in its playing state;
+the self-test's press times were set for clock-paced audio, so without `NSMBW_TEST_INPUT` the
+recording stays in the movie (deterministically, in every replay too).
+
+Still open before step 1:
+- what the five static pages hold (dump them at frame 0; probably boot-time host values such as
+  timestamps, since they never change the game's course);
+- the audio output: in a session the host's audio device has to play blocks made at the game's
+  pace, so it needs a small buffer and stretching / dropping when the game runs slow or fast;
+- the start-up crash with several instances.
 
 ## 9. Open questions for the user
 
