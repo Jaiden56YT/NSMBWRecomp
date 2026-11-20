@@ -1011,7 +1011,7 @@ index a654b92..b1a9ee4 100644
      g_lrs[slot] = lr;
  }
 diff --git a/runtime/include/guest_flat_memory.h b/runtime/include/guest_flat_memory.h
-index e33573a..72a073d 100644
+index e33573a..d757027 100644
 --- a/runtime/include/guest_flat_memory.h
 +++ b/runtime/include/guest_flat_memory.h
 @@ -19,6 +19,25 @@ inline constexpr uintptr_t kFixedFlatGuestBase = 0x0000'1000'0000'0000ull;
@@ -1022,15 +1022,15 @@ index e33573a..72a073d 100644
 +// The Switch has no address-space reservation with aliased views, so guest memory is one
 +// block addressed through a 16-entry table, one entry per top address nibble: MEM1's
 +// physical/cached/uncached views (0x0, 0x8, 0xC) share a slot, MEM2's (0x1, 0x9, 0xD) another,
-+// the locked cache (0xE) a third; every other nibble maps to a small scratch area (mask 0).
-+struct SwitchSegment {
-+    uint8_t* host;
-+    uint32_t mask;
-+};
-+extern SwitchSegment g_switchSegments[16];
++// the locked cache (0xE) a third; every other nibble maps to a scratch area.
++// Every slot uses the same mask (MEM2's 128 MiB), so an access is one table load, an AND with a
++// constant, the load and a byte swap (a per-slot mask cost a dependent load and two more
++// instructions on every guest access). The layout (guest_flat_memory_switch.cpp) keeps
++// slot + 128 MiB inside the allocation for every slot. Hidden: a direct reference, no GOT load.
++inline constexpr uint32_t kSwitchSegmentMask = 0x07FFFFFFu;
++extern uint8_t* g_switchSegmentHost[16] __attribute__((visibility("hidden")));
 +inline uint8_t* SwitchFlatHost(uint32_t address) {
-+    const SwitchSegment& seg = g_switchSegments[address >> 28];
-+    return seg.host + (address & seg.mask);
++    return g_switchSegmentHost[address >> 28] + (address & kSwitchSegmentMask);
 +}
 +#define MKW_FLAT_HOST(address) (GuestFlat::SwitchFlatHost(static_cast<uint32_t>(address)))
 +#else
@@ -1461,10 +1461,10 @@ index 43f8b7b..eb73921 100644
 +#endif  // !__SWITCH__
 diff --git a/runtime/src/guest_flat_memory_switch.cpp b/runtime/src/guest_flat_memory_switch.cpp
 new file mode 100644
-index 0000000..a1354eb
+index 0000000..acaa978
 --- /dev/null
 +++ b/runtime/src/guest_flat_memory_switch.cpp
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,95 @@
 +// Guest memory on the Nintendo Switch (libnx).
 +//
 +// The PC builds reserve a 4 GiB address range and map each guest region into it twice (a
@@ -1475,7 +1475,11 @@ index 0000000..a1354eb
 +//   0x0/0x8/0xC -> MEM1 slot (32 MiB: 24 MiB MEM1 + the 2 MiB Kamek overlay at 0x81800000)
 +//   0x1/0x9/0xD -> MEM2 slot (Memory::kMem2Size)
 +//   0xE         -> locked cache slot (2 MiB, as the PC build backs it)
-+//   anything else -> a 64-byte scratch area with mask 0 (stray accesses land there harmlessly)
++//   anything else -> a 128 MiB scratch area (stray accesses land there harmlessly)
++// Every slot is addressed with the same 128 MiB mask, so the block is laid out
++// [locked cache][MEM1][MEM2] and each slot's start + 128 MiB stays inside it. An offset past a
++// slot's own size (a wild pointer; it faults on a Wii) reaches the next slot instead of
++// wrapping inside its own.
 +// MMIO never reaches this path: FlatMmioNeedsPolicy sends it to the checked accessors first.
 +// Page-protection features are no-ops: there is no fault interception on the Switch.
 +#if defined(__SWITCH__)
@@ -1489,21 +1493,23 @@ index 0000000..a1354eb
 +
 +namespace GuestFlat {
 +
-+SwitchSegment g_switchSegments[16];
++uint8_t* g_switchSegmentHost[16];
++static_assert(Memory::kMem2Size == size_t{kSwitchSegmentMask} + 1u, "slots use MEM2's mask");
 +
 +namespace {
 +constexpr uint32_t kMem1Slot = 0x02000000u;
 +constexpr uint32_t kLockedCacheSlot = 0x00200000u;
++constexpr uint32_t kSlotSpan = kSwitchSegmentMask + 1u;
 +uint8_t* g_block = nullptr;
 +size_t g_blockSize = 0;
-+alignas(64) uint8_t g_scratch[64];
++uint8_t* g_scratch = nullptr;
 +bool g_active = false;
 +
 +uint32_t SlotFor(uint32_t address, uint32_t& slotSize) {
 +    switch (address >> 28) {
-+    case 0x0: case 0x8: case 0xC: slotSize = kMem1Slot; return 0;
-+    case 0x1: case 0x9: case 0xD: slotSize = static_cast<uint32_t>(Memory::kMem2Size); return kMem1Slot;
-+    case 0xE: slotSize = kLockedCacheSlot; return kMem1Slot + static_cast<uint32_t>(Memory::kMem2Size);
++    case 0xE: slotSize = kLockedCacheSlot; return 0;
++    case 0x0: case 0x8: case 0xC: slotSize = kMem1Slot; return kLockedCacheSlot;
++    case 0x1: case 0x9: case 0xD: slotSize = static_cast<uint32_t>(Memory::kMem2Size); return kLockedCacheSlot + kMem1Slot;
 +    default: slotSize = 0; return 0;
 +    }
 +}
@@ -1516,13 +1522,16 @@ index 0000000..a1354eb
 +        g_blockSize = kMem1Slot + Memory::kMem2Size + kLockedCacheSlot;
 +        g_block = static_cast<uint8_t*>(aligned_alloc(0x10000, g_blockSize));
 +        if (!g_block) throw std::runtime_error("Switch: could not allocate guest memory");
++        g_scratch = static_cast<uint8_t*>(aligned_alloc(0x10000, kSlotSpan));
++        if (!g_scratch) throw std::runtime_error("Switch: could not allocate the guest scratch area");
 +    }
 +    std::memset(g_block, 0, g_blockSize);
-+    for (int i = 0; i < 16; i++) g_switchSegments[i] = SwitchSegment{g_scratch, 0u};
 +    for (uint32_t nib = 0; nib < 16; nib++) {
 +        uint32_t size = 0;
 +        const uint32_t offset = SlotFor(nib << 28, size);
-+        if (size) g_switchSegments[nib] = SwitchSegment{g_block + offset, size - 1u};
++        if (size && offset + size_t{kSlotSpan} > g_blockSize)
++            throw std::runtime_error("Switch: guest slot layout leaves a slot's mask outside the block");
++        g_switchSegmentHost[nib] = size ? g_block + offset : g_scratch;
 +    }
 +    for (const auto& r : regions) {
 +        uint32_t size = 0;
@@ -1853,10 +1862,60 @@ index c56e2bb..3d00082 100644
          }
          value &= ~kExiCrTstart;
 diff --git a/runtime/src/hle/gx/gx_dl.cpp b/runtime/src/hle/gx/gx_dl.cpp
-index cb8e87e..f760a41 100644
+index cb8e87e..77c7486 100644
 --- a/runtime/src/hle/gx/gx_dl.cpp
 +++ b/runtime/src/hle/gx/gx_dl.cpp
-@@ -1107,7 +1107,7 @@ static void ApplyAuroraArrayIfChanged(GXAttr attr, const void* data, uint32_t si
+@@ -3,6 +3,7 @@
+ #include "gx_cp_decode.h"
+ #include "isa/big_endian.h"
+ 
++#include <cstdio>
+ #include <cstdlib>
+ #include <unordered_map>
+ 
+@@ -537,8 +538,17 @@ struct DlScanCacheProbe {
+     uint64_t contentDigest = 0;
+     bool digestValid = false;
+     uint64_t writeGeneration = kDlWriteGenerationUntracked;
++    bool hadEntry = false;
++    bool fastHit = false;
+ };
+ 
++// Scan cache hit/miss counts, printed every 30000 display-list calls (NSMBW_LOG_INTERP).
++struct DlScanCacheStats {
++    uint64_t calls = 0, tooBig = 0, fastHits = 0, digestHits = 0, missNew = 0, missChanged = 0,
++             nested = 0, clears = 0, storedNoDraw = 0, storedDraw = 0;
++};
++static DlScanCacheStats g_dlScanStats;
++
+ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr, uint32_t nbytes,
+                                          uint64_t layoutHash) {
+     DlScanCacheProbe probe{};
+@@ -548,6 +558,7 @@ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr,
+     const uint64_t key = DlScanCacheKey(listAddr, nbytes, layoutHash);
+     const auto it = s_cache.entries.find(key);
+     if (it != s_cache.entries.end()) {
++        probe.hadEntry = true;
+         auto& record = it->second;
+         const auto& entry = record.result;
+         const bool identityMatches = entry.listAddr == CanonicalizeGxMainRamAddress(listAddr) &&
+@@ -559,6 +570,7 @@ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr,
+             probe.record = &record;
+             probe.contentDigest = record.contentDigest;
+             probe.digestValid = true;
++            probe.fastHit = true;
+         } else {
+             probe.contentDigest = DlContentDigest(list, nbytes);
+             probe.digestValid = true;
+@@ -595,6 +607,7 @@ static void StoreDlScanCache(uint32_t listAddr, uint32_t nbytes, uint64_t layout
+         s_cache.storedCommandBytes - replacedBytes + incomingBytes > kDlScanCacheMaxStoredBytes) {
+         s_cache.entries.clear();
+         s_cache.storedCommandBytes = 0;
++        ++g_dlScanStats.clears;
+         replacing = false;
+         replacedBytes = 0;
+     }
+@@ -1107,7 +1120,7 @@ static void ApplyAuroraArrayIfChanged(GXAttr attr, const void* data, uint32_t si
      if (applied.valid && applied.data == data && applied.size == size && applied.stride == stride) {
          return;
      }
@@ -1865,6 +1924,66 @@ index cb8e87e..f760a41 100644
      applied.data = data;
      applied.size = size;
      applied.stride = stride;
+@@ -1365,12 +1378,43 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
+             allowScanCache ? ProbeDlScanCache(list, listAddr, nbytes, scanLayoutHash)
+                            : DlScanCacheProbe{};
+         const DlScanCacheRecord* cached = probe.record;
++        {
++            auto& st = g_dlScanStats;
++            ++st.calls;
++            if (!allowScanCache) ++st.tooBig;
++            else if (probe.fastHit) ++st.fastHits;
++            else if (cached != nullptr) ++st.digestHits;
++            else if (probe.hadEntry) ++st.missChanged;
++            else ++st.missNew;
++            static const bool s_log = std::getenv("NSMBW_LOG_INTERP") != nullptr;
++            if (s_log && st.calls % 30000 == 0) {
++                std::fprintf(stderr,
++                             "[dl-scan-cache] calls %llu: fast hits %llu, digest hits %llu, new %llu, "
++                             "changed %llu, too big %llu, nested (not stored) %llu, clears %llu, stored no-draw %llu, "
++                             "stored draw %llu\n",
++                             (unsigned long long)st.calls, (unsigned long long)st.fastHits,
++                             (unsigned long long)st.digestHits, (unsigned long long)st.missNew,
++                             (unsigned long long)st.missChanged, (unsigned long long)st.tooBig,
++                             (unsigned long long)st.nested, (unsigned long long)st.clears,
++                             (unsigned long long)st.storedNoDraw, (unsigned long long)st.storedDraw);
++            }
++        }
+ 
+         // The scan a cached record came from already walked the list for this,
+         // so only a miss pays for DisplayListMayContainDraw.
+         const bool mayContainDraw =
+             (cached != nullptr) ? cached->mayContainDraw : DisplayListMayContainDraw(list, nbytes);
+         if (!mayContainDraw) {
++            // Remember register-only lists too: without a record every call re-walked the list
++            // (run46: ~60% of display-list calls were misses with no entry).
++            if (cached == nullptr && allowScanCache) {
++                ++g_dlScanStats.storedNoDraw;
++                DlScanCacheEntry entry{};
++                const uint64_t contentDigest =
++                    probe.digestValid ? probe.contentDigest : DlContentDigest(list, nbytes);
++                StoreDlScanCache(listAddr, nbytes, scanLayoutHash, contentDigest, probe.writeGeneration,
++                                 false, entry, {}, nullptr, 0u);
++            }
+             EnsureAuroraFrameActive();
+             GXMarkFrameWork();
+             GXCallDisplayList(list, nbytes);
+@@ -1461,6 +1505,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
+             // Nested lists stay uncached: the digest only covers the outer list, so a
+             // rewritten callee would go undetected. Everything else is cacheable since the
+             // scan/flatten are pure functions of the list bytes and the layout-hash cache key.
++            if (dlHasNestedDl) ++g_dlScanStats.nested;
+             if (allowScanCache && scanOk && !dlHasNestedDl && (!needsFlatten || flattenOk)) {
+                 DlScanCacheEntry entry{};
+                 entry.listAddr = CanonicalizeGxMainRamAddress(listAddr);
+@@ -1484,6 +1529,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
+ 
+                 const uint64_t contentDigest =
+                     probe.digestValid ? probe.contentDigest : DlContentDigest(list, nbytes);
++                ++g_dlScanStats.storedDraw;
+                 StoreDlScanCache(listAddr, nbytes, scanLayoutHash, contentDigest,
+                                  probe.writeGeneration, mayContainDraw, entry, std::move(cpWrites),
+                                  storeFlattened ? flattened.data() : nullptr,
 diff --git a/runtime/src/hle/gx/gx_egg.cpp b/runtime/src/hle/gx/gx_egg.cpp
 index 8a9fd75..8bb0a3f 100644
 --- a/runtime/src/hle/gx/gx_egg.cpp
@@ -3707,10 +3826,10 @@ index 8c96414..ce9053e 100644
 +extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
 +extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..413003e 100644
+index a63636b..7cbcbf7 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
-@@ -37,8 +37,10 @@
+@@ -37,14 +37,22 @@
  #include <chrono>
  #include <csignal>
  #include <cstdio>
@@ -3721,7 +3840,19 @@ index a63636b..413003e 100644
  #include <filesystem>
  #include <iomanip>
  #include <ios>
-@@ -84,12 +86,12 @@ namespace {
+ #include <optional>
+ #include <sstream>
+ #include <thread>
++#if !defined(_WIN32) && !defined(__SWITCH__)
++#include <climits>
++#include <fcntl.h>
++#include <sys/file.h>
++#include <unistd.h>
++#endif
+ 
+ #if defined(_WIN32)
+ #include <windows.h>
+@@ -84,12 +92,12 @@ namespace {
  //     retail disc image header (New Super Mario Bros. Wii (Europe) (Rev 1).rvz, offset 0x58 in
  //     the RVZ container - "SMNP" + "01" + disc 0 + version 1), not guessed or copied from MKW.
  //   - MEM1 arena lo: derived from wiimj2d.dol's own BSS end (its header's bss_addr+bss_size =
@@ -3736,7 +3867,7 @@ index a63636b..413003e 100644
  //     which is conservative but not derived from NSMBW's own arena-init code).
  void SeedLowMemDefaults() {
      struct SeedEntry { uint32_t address; uint32_t value; const char* label; };
-@@ -97,13 +99,13 @@ void SeedLowMemDefaults() {
+@@ -97,13 +105,13 @@ void SeedLowMemDefaults() {
      const uint32_t mem2Size = static_cast<uint32_t>(Memory::kMem2Size);
      const uint32_t mem1End = Memory::kMem1CachedBase + mem1Size;
      // _stack_addr, read from __init_registers (0x80004234-0x80004238: lis r1,-0x7fbd;
@@ -3754,7 +3885,7 @@ index a63636b..413003e 100644
      const uint32_t physicalMem2End = Memory::kMem2CachedBase + mem2Size;
      constexpr uint32_t kIosReservedSize = 0x20000u;
      constexpr uint32_t kIPCArenaSize = 0x20000u;
-@@ -117,8 +119,8 @@ void SeedLowMemDefaults() {
+@@ -117,8 +125,8 @@ void SeedLowMemDefaults() {
      constexpr uint32_t kDvdFstReserveSize = 0x200000u;
      g_dvdFstReservedSize = kDvdFstReserveSize;
      g_dvdFstReservedBase = ipcBufLo - kDvdFstReserveSize;
@@ -3765,7 +3896,7 @@ index a63636b..413003e 100644
      // Same retail-vs-NDEV test as OS__GetConsoleType_8019f33c (os_init.cpp) - kept in sync so a
      // guest read of this field and a guest call to OSGetConsoleType() never disagree.
      constexpr uint32_t kRetailMem2Size = 64u * 1024u * 1024u;
-@@ -137,10 +139,10 @@ void SeedLowMemDefaults() {
+@@ -137,10 +145,10 @@ void SeedLowMemDefaults() {
          // func_801AA940 itself gets a chance to run, so without this the cache is seen as NULL and
          // that read permanently fails - the actual root cause of the OSSleepThread hang traced this
          // session. This isn't a guess: it's the exact value func_801AA940 would itself store here.
@@ -3778,7 +3909,7 @@ index a63636b..413003e 100644
          {0x80003180u, kGameCode, "OS app game code"},
          {0x80003194u, kGameCode, "OS app gamename"},
          {0x800000F8u, static_cast<uint32_t>(TimeBaseContract::kBusClockHz), "__OSBusClock"},
-@@ -179,23 +181,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
+@@ -179,23 +187,23 @@ constexpr uint32_t kNsmbwEntryAddress = 0x80004050u;
  
  // Mirrors main.cpp's SeedCpuContext(): r1 is the initial stack pointer. NSMBW's manifest
  // (projects/nsmbw/nsmbw.yml) declares memory.base=0x80000000, memory.size=0x01800000, so guest
@@ -3808,7 +3939,7 @@ index a63636b..413003e 100644
  // d_en_bossNP was excluded for two stacked reasons this session, both now fixed:
  //   1. RelFile.cs's ApplyRelocations mis-resolved cross-module relocations (reusing the
  //      currently-relocating module's own baseAddress/Sections instead of the target module's),
-@@ -206,8 +208,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -206,8 +214,8 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  //      Decomp's real loader (DynamicModuleControl::do_link, source/dol/cLib/c_dylink.cpp) reads
  //      the whole file, links it, then shrinks the heap block to fixSize+bssSize - discarding that
  //      tail. Using the full file length as "resident size" inflated every REL's footprint enough
@@ -3819,7 +3950,7 @@ index a63636b..413003e 100644
  //      total resident size - is now placed right after the last real section, matching
  //      do_link()'s actual behavior. With that fix, all four RELs' real footprints are
  //      non-overlapping and pack contiguously (small gaps of a few hundred bytes between them,
-@@ -222,14 +224,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
+@@ -222,14 +230,14 @@ constexpr uint32_t kDolCtorEnd = 0x802EDFC0u;
  // the retail .rel headers: prologSection is 1 and prologOffset is 0 for all four, and section 1
  // starts at file offset 0xF0 (0xE0 for d_profileNP), just past each header and section table.
  // Cross-checked against the translated bodies: func_80768680 is d_profileNP's real _prolog (it
@@ -3839,7 +3970,7 @@ index a63636b..413003e 100644
  };
  
  // A bad guest constructor must not take down the whole boot sequence - matches
-@@ -239,7 +241,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
+@@ -239,7 +247,7 @@ void InvokeGuestCallGuarded(uint32_t address, CpuContext& cpu, const char* label
      MkwJmpBuf jumpBuf;
      g_sehJumpTarget = &jumpBuf;
      if (MKW_SETJMP(jumpBuf) == 0) {
@@ -3848,7 +3979,7 @@ index a63636b..413003e 100644
          InvokeIndirectCpu(address, &cpu);
      } else {
          std::fprintf(stderr,
-@@ -271,6 +273,12 @@ void RunGuestConstructors(CpuContext& cpu) {
+@@ -271,6 +279,12 @@ void RunGuestConstructors(CpuContext& cpu) {
  
      std::printf("[nsmbw] Running REL _prolog (static constructors) for each of the 4 RELs...\n");
      for (uint32_t prolog : kRelPrologAddresses) {
@@ -3861,7 +3992,92 @@ index a63636b..413003e 100644
          InvokeGuestCallGuarded(prolog, cpu, "REL _prolog");
      }
  
-@@ -338,7 +346,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+@@ -322,10 +336,83 @@ std::filesystem::path NsmbwDataDir() {
+     return std::filesystem::current_path() / "nsmbw_data";
+ }
+ 
++// Several copies of the game at once (netplay tests run two to five on one Mac) must not share
++// the per-run caches:
++//  - nsmbw_data/Cache: the pipeline/shader sqlite databases ("database is locked" between copies)
++//    and the crash marker. A second copy found the first one's marker (armed while it runs), took
++//    it for a crash and deleted the databases the first copy had open.
++//  - Metal's own compiled-shader cache. Every unbundled Mac program shares one folder for it,
++//    $DARWIN_USER_CACHE_DIR/com.apple.metal, and with several copies compiling their boot
++//    pipelines at once one of them often crashed inside Apple's cache lookup (fscache_find_and_retain,
++//    SIGSEGV/SIGBUS in the first resolve_pass): 7 of 35 launches of five copies at once. 0 of 20
++//    with a Metal folder per copy, 0 of 20 with a Cache per copy, 0 of 20 with both (2026-11-18).
++// So each copy takes the first free instance slot, held by an flock that the OS drops when the
++// process ends (a crash included). Slot 0, the usual single copy, keeps nsmbw_data/Cache; slot n
++// uses nsmbw_data/Cache-n, which persists, so a test that starts n copies reuses n warm caches.
++// On the Mac a second slot, counted per user (Metal's folder is shared by every build), picks
++// Metal's cache folder: $DARWIN_USER_CACHE_DIR/NSMBWCompiled-n/com.apple.metal. Windows and the
++// Switch keep one shared Cache as before.
++#if !defined(_WIN32) && !defined(__SWITCH__)
++#define NSMBW_INSTANCE_SLOTS 1
++// First free slot n whose lock file <dir>/<prefix>n.lock can be locked; the descriptor stays open
++// (and locked) for the life of the process. -1 if all 16 are taken or the folder is unusable.
++int ClaimInstanceSlot(const std::filesystem::path& dir, const char* prefix) {
++    std::error_code ec;
++    std::filesystem::create_directories(dir, ec);
++    for (int slot = 0; slot < 16; ++slot) {
++        const auto path = dir / (std::string(prefix) + std::to_string(slot) + ".lock");
++        const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
++        if (fd < 0) return -1;
++        if (::flock(fd, LOCK_EX | LOCK_NB) == 0) return slot;
++        ::close(fd);
++    }
++    return -1;
++}
++#endif
++
++std::filesystem::path NsmbwCacheDir() {
++    static const std::filesystem::path dir = [] {
++        const auto dataDir = NsmbwDataDir();
++        int slot = 0;
++#if defined(NSMBW_INSTANCE_SLOTS)
++        slot = ClaimInstanceSlot(dataDir, ".instance-");
++        if (slot < 0) {
++            std::printf("[nsmbw] no free instance slot in %s: sharing Cache with another copy\n",
++                        dataDir.string().c_str());
++            slot = 0;
++        }
++#endif
++        auto cacheDir = dataDir / (slot == 0 ? std::string("Cache") : "Cache-" + std::to_string(slot));
++        if (slot != 0) std::printf("[nsmbw] instance slot %d: cache %s\n", slot, cacheDir.string().c_str());
++        return cacheDir;
++    }();
++    return dir;
++}
++
++#if defined(__APPLE__)
++// Private but exported by libSystem (Chromium and WebKit use it for their helper processes): from
++// here on confstr(_CS_DARWIN_USER_CACHE_DIR / _CS_DARWIN_USER_TEMP_DIR) returns <dir>/<suffix>/,
++// and Metal keeps its shader cache there. Must run before anything creates a Metal device.
++// NSMBW_SHARED_METAL_CACHE=1 keeps the old shared folder.
++extern "C" bool _set_user_dir_suffix(const char* suffix) __attribute__((weak_import));
++
++void UsePrivateMetalShaderCache() {
++    if (_set_user_dir_suffix == nullptr || AURORA_ENV("NSMBW_SHARED_METAL_CACHE") != nullptr) return;
++    char buffer[PATH_MAX];
++    if (::confstr(_CS_DARWIN_USER_CACHE_DIR, buffer, sizeof(buffer)) == 0) return;
++    const int slot = ClaimInstanceSlot(buffer, "NSMBWCompiled-metal-");
++    if (slot < 0) return;
++    const std::string suffix = "NSMBWCompiled-" + std::to_string(slot);
++    if (!_set_user_dir_suffix(suffix.c_str())) return;
++    if (::confstr(_CS_DARWIN_USER_CACHE_DIR, buffer, sizeof(buffer)) == 0) return;
++    std::printf("[nsmbw] Metal shader cache: %scom.apple.metal\n", buffer);
++}
++#endif
++
+ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+     std::error_code ec;
+     const auto dataDir = NsmbwDataDir();
+-    const auto cacheDir = dataDir / "Cache";
++    const auto cacheDir = NsmbwCacheDir();
+     std::filesystem::create_directories(cacheDir, ec);
+     static const std::string userPath = dataDir.string();
+     static const std::string cachePath = cacheDir.string();
+@@ -338,7 +425,11 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
      config.logLevel = LOG_INFO;
      config.windowWidth = 640;
      config.windowHeight = 480;
@@ -3873,7 +4089,7 @@ index a63636b..413003e 100644
      config.allowJoystickBackgroundEvents = true;
      // Mirror main.cpp's MKW init: skip the display copy's vertical deflicker filter (default on,
      // as in Dolphin). Left zero-initialised, the filter ran on every frame while the F10 checkbox
-@@ -358,6 +370,13 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
+@@ -358,6 +449,13 @@ bool InitializeAuroraWindow(AuroraInfo& outInfo) {
      config.mem2Size = 0;
  
      outInfo = aurora_initialize(0, nullptr, &config);
@@ -3887,7 +4103,7 @@ index a63636b..413003e 100644
      // Apply the render scale saved by the F10 menu (Config.toml video.resolution_multiplier; 0 =
      // match window size). Unlike MKW's main.cpp path, this init never called VISetFrameBufferScale,
      // so the saved value only took effect after re-selecting it in the menu. NSMBW_RES_SCALE=<n>
-@@ -733,7 +752,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -733,7 +831,7 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
      }
      std::error_code ec;
  
@@ -3896,7 +4112,7 @@ index a63636b..413003e 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -781,9 +800,260 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -781,9 +879,276 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
  } // namespace
  
@@ -4093,6 +4309,22 @@ index a63636b..413003e 100644
 +    // card cost the game thread time); the terminate handler below flushes before aborting.
 +    std::freopen("/switch/nsmbw2/nsmbw.log", "w", stdout);
 +    std::freopen("/switch/nsmbw2/nsmbw_err.log", "w", stderr);
++    // Atmosphere writes crash reports outside the folder the test station can read, so copy any new
++    // ones next to the logs (crash_reports/<name>) for the station to fetch.
++    {
++        std::error_code ec;
++        const std::filesystem::path dst = "/switch/nsmbw2/crash_reports";
++        for (const char* src : {"/atmosphere/crash_reports", "/atmosphere/fatal_reports"}) {
++            for (const auto& entry : std::filesystem::directory_iterator(src, ec)) {
++                if (!entry.is_regular_file(ec)) continue;
++                std::filesystem::create_directories(dst, ec);
++                const auto target = dst / entry.path().filename();
++                if (std::filesystem::exists(target, ec)) continue;
++                std::filesystem::copy_file(entry.path(), target, ec);
++                std::fprintf(stderr, "[switch] copied crash report %s\n", entry.path().filename().c_str());
++            }
++        }
++    }
 +    setenv("SDL_SWITCH_NO_EGL_SURFACE", "1", 1);
 +    setenv("NSMBW_LOG_INTERP", "1", 0);  // frame timing / idle / shader-compile stats every 2 s
 +    setenv("AURORA_LOG_WORKER_TIMING", "1", 0);  // frame worker phase timings every 120 frames
@@ -4157,7 +4389,19 @@ index a63636b..413003e 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1133,7 @@ int main() {
+@@ -829,7 +1194,10 @@ int main() {
+     }
+     {
+         std::error_code ec;
+-        const auto cacheDir = NsmbwDataDir() / "Cache";
++#if defined(__APPLE__)
++        UsePrivateMetalShaderCache();
++#endif
++        const auto cacheDir = NsmbwCacheDir();
+         std::filesystem::create_directories(cacheDir, ec);
+         ResetPersistentStateForCleanRun(cacheDir);
+         g_crashMarkerPath = (cacheDir / kCrashMarkerName).string();
+@@ -863,7 +1231,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -4166,7 +4410,7 @@ index a63636b..413003e 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1243,21 @@ int main() {
+@@ -973,7 +1341,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -4188,7 +4432,7 @@ index a63636b..413003e 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1352,11 @@ int main() {
+@@ -1068,11 +1450,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
@@ -4218,10 +4462,10 @@ index 104ff0d..d99697d 100644
  } // namespace
 diff --git a/runtime/src/switch_posix_stubs.cpp b/runtime/src/switch_posix_stubs.cpp
 new file mode 100644
-index 0000000..285e7fc
+index 0000000..2b05b6e
 --- /dev/null
 +++ b/runtime/src/switch_posix_stubs.cpp
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,252 @@
 +// POSIX calls newlib does not provide on the Switch, referenced by code that never runs there
 +// (SQLite's file-ownership handling, the desktop disc-extraction helper). They fail cleanly.
 +#if defined(__SWITCH__)
@@ -4331,12 +4575,14 @@ index 0000000..285e7fc
 +// go to /switch/nsmbw2/profile_<n>.txt (n = window index mod 40) and are cleared, so startup and
 +// gameplay land in different files. Addresses are absolute; "main=" gives the load base.
 +#include <array>
++#include <malloc.h>
 +#include <atomic>
 +#include <cstdio>
 +#include <map>
 +#include <string>
 +#include <algorithm>
 +extern "C" int main();
++void GxEfbCopyDestinationStats(size_t& count, uint32_t& largest);  // gx_copy.cpp
 +namespace {
 +std::atomic<Handle> g_profThreads[2];
 +bool ReadableWord(uint64_t addr) {
@@ -4404,6 +4650,21 @@ index 0000000..285e7fc
 +            put(std::snprintf(line, sizeof(line), "main=0x%llx\nwindow %u uptime %.0f s\n",
 +                              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(&main)), window,
 +                              armTicksToNs(now - start) / 1e9));
++            {
++                // Memory watch (run 43 crashed after ~15 min at a level load): process memory in
++                // use vs the application limit, and the newlib heap's in-use / arena bytes.
++                u64 usedMem = 0, totalMem = 0;
++                svcGetInfo(&usedMem, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
++                svcGetInfo(&totalMem, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
++                const struct mallinfo mi = mallinfo();
++                size_t efbCopies = 0;
++                uint32_t efbLargest = 0;
++                GxEfbCopyDestinationStats(efbCopies, efbLargest);
++                std::fprintf(stderr, "[mem] uptime %.0f s: process %.1f / %.1f MiB, malloc in use %.1f MiB of arena %.1f MiB, "
++                             "efb copy destinations %zu (largest %u bytes)\n",
++                             armTicksToNs(now - start) / 1e9, usedMem / 1048576.0, totalMem / 1048576.0,
++                             mi.uordblks / 1048576.0, mi.arena / 1048576.0, efbCopies, efbLargest);
++            }
 +            for (int sl = 0; sl < 2; ++sl) {
 +                put(std::snprintf(line, sizeof(line), "slot %d total %llu\n", sl,
 +                                  static_cast<unsigned long long>(totals[sl])));
@@ -7844,3 +8105,61 @@ index 92ea526..109d5f6 100644
  bool OS_HLE_InterruptsEnabled() noexcept;
  extern "C" void OS_HLE_ProcessAlarmsDeferred(int maxToProcess);
  extern "C" void OS_HLE_BeginDeferredGuestCallbacks();
+diff --git a/runtime/src/hle/gx/gx_copy.cpp b/runtime/src/hle/gx/gx_copy.cpp
+index 156ba23..3ea5814 100644
+--- a/runtime/src/hle/gx/gx_copy.cpp
++++ b/runtime/src/hle/gx/gx_copy.cpp
+@@ -27,16 +27,47 @@ void RememberEfbCopyDestination(uint32_t addr, uint32_t size) {
+     if (size == 0) {
+         return;
+     }
+-    std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
+-    g_efbCopyDestinations[CanonicalizeGxMainRamAddress(addr)] = size;
+-    // A conservative monotonic maximum lets invalidation jump directly to
+-    // the only map interval that could overlap instead of walking every copy
+-    // destination on every DCStoreRange.
+-    g_largestEfbCopyDestination = std::max(g_largestEfbCopyDestination, size);
++    const uint32_t start = CanonicalizeGxMainRamAddress(addr);
++    const uint64_t end = static_cast<uint64_t>(start) + size;
++    std::vector<uint32_t> retired;
++    {
++        std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
++        // The new copy overwrites any older destination it overlaps, so those entries (and their
++        // GPU textures) are dead. Without this, destinations at addresses that are never flushed
++        // again piled up for the whole session: the walk in InvalidateEfbCopyDestinationsForRange
++        // runs on every DCStoreRange, and the game slowed down the longer it ran (run44, 58 -> 50
++        // fps on the title level over 30 minutes).
++        const uint64_t earliest = start > g_largestEfbCopyDestination ? start - g_largestEfbCopyDestination : 0;
++        for (auto it = g_efbCopyDestinations.lower_bound(static_cast<uint32_t>(earliest));
++             it != g_efbCopyDestinations.end() && static_cast<uint64_t>(it->first) < end;) {
++            const uint64_t otherEnd = static_cast<uint64_t>(it->first) + it->second;
++            if (it->first == start || otherEnd <= start) {
++                ++it;
++                continue;
++            }
++            retired.push_back(it->first);
++            it = g_efbCopyDestinations.erase(it);
++        }
++        g_efbCopyDestinations[start] = size;
++        // A conservative monotonic maximum lets invalidation jump directly to
++        // the only map interval that could overlap instead of walking every copy
++        // destination on every DCStoreRange.
++        g_largestEfbCopyDestination = std::max(g_largestEfbCopyDestination, size);
++    }
++    for (const uint32_t copyAddr : retired) {
++        GXDestroyCopyTex(GuestToHostPtr(copyAddr));
++    }
+ }
+ 
+ } // namespace
+ 
++// For the periodic [mem] line: how many EFB copy destinations are tracked, and the largest size.
++void GxEfbCopyDestinationStats(size_t& count, uint32_t& largest) {
++    std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
++    count = g_efbCopyDestinations.size();
++    largest = g_largestEfbCopyDestination;
++}
++
+ void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
+     if (size == 0) {
+         return;
