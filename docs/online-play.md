@@ -326,9 +326,10 @@ each game frame boundary `nsmbw_netplay_replay.cpp` passes exactly one NTSC fram
 summed so there is no drift) to a new runtime entry, `Audio_HLE_AdvanceFrame`
 (`runtime/src/hle/audio/audio.cpp`, carried in `ports/wiicompiled/upstream-macos-us.patch`). It
 runs the AI DMA callback for all the 3 ms audio blocks that time covers, there and then; after its
-first call the runtime's clock-paced audio polls (scheduler, VI wait) do nothing. Before the first
-game frame (boot) the clock still paces audio. `NSMBW_REPLAY_HOST_AUDIO=1` keeps the old pacing,
-for comparison. Normal play is unchanged.
+first call the runtime's clock-paced audio polls (scheduler, VI wait) do nothing. In frame mode they
+are off from process start (`Audio_HLE_SetFrameDriven`), so no audio time passes before the first
+game frame either; see the follow-up below. `NSMBW_REPLAY_HOST_AUDIO=1` keeps the old pacing, for
+comparison. Normal play is unchanged.
 
 Where in the frame the audio runs matters, and two choices failed before the one kept:
 - The frame boundary is the controller read, and the game has interrupts off there. Holding the
@@ -360,12 +361,34 @@ Also learnt: the movie-skip request only works on a frame where the movie is in 
 the self-test's press times were set for clock-paced audio, so without `NSMBW_TEST_INPUT` the
 recording stays in the movie (deterministically, in every replay too).
 
+Follow-up (2026-11-19):
+- **The five static pages hold host-clock values only.** Byte diffs at frames 10 and 2000:
+  `OSGetTime` stamps (an array of 64-bit times at 0x8037BFA4, single stamps in 0x8038F874-0x8038F88C,
+  0x80395A6C, 0x803FC9A4, 0x8040556C, 0x80429F9C, 0x8042A67C, 0x80760218-0x807602BC), the VI retrace
+  count (0x8042A86C) with its copies and counters that follow it (0x80412F80, 0x807602A0,
+  0x80760338/0x8076033C), and a few timing statistics (0x803FC904-0x803FC90C). The game reads these
+  without its course changing in any test so far, but they are exactly risk 2: a session should
+  still give the game frame-derived time.
+- **The boot's audio was still on the host clock, and that showed under load.** The boot-crash
+  session saw one replay in 20, under load, diverge at frame 3, where the boot scene is created
+  and the seed fixed. The pages were the same set as one of the failed runs above (0x80C40000,
+  0x80D00000, 0x815C0000, 0x91A00000, 0x91F40000). Until the first game frame the host clock still
+  paced audio, so how far the sound engine had got when the boot scene was created depended on
+  load. Now frame mode takes audio off the host clock from process start; the boot does not need
+  audio before its first controller read. Check: one recording, then three rounds of six replays
+  under load (starts 4 s apart): 18 of 18 identical to the recording on all 1200 frames outside
+  the clock pages. The gap was rare (about 1 in 20), so this is good evidence, not proof.
+- **Six-run test, staggered.** One recording and five replays started 15 s apart, 4000 frames, the
+  8a test input: 5 of 5 match on every frame (scene for scene; memory except the clock pages), no
+  crash. Starting them together is what crashed; the boot-crash session fixed that on its own
+  branches (`claude/determined-pascal-af97e8`: one shader / pipeline cache per running copy;
+  `claude/replay-clear-marker`: the replay's `_exit` clears the crash marker, so a replay no longer
+  makes the next launch wipe the cache). Not merged here yet.
+
 Still open before step 1:
-- what the five static pages hold (dump them at frame 0; probably boot-time host values such as
-  timestamps, since they never change the game's course);
 - the audio output: in a session the host's audio device has to play blocks made at the game's
   pace, so it needs a small buffer and stretching / dropping when the game runs slow or fast;
-- the start-up crash with several instances.
+- frame-derived time for the clock reads above (risk 2).
 
 ## 9. Open questions for the user
 

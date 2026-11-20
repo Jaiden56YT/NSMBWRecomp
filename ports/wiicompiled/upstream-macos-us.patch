@@ -1552,7 +1552,7 @@ index 0000000..a1354eb
 +}  // namespace GuestFlat
 +#endif  // __SWITCH__
 diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
-index 421ca42..81b5457 100644
+index 421ca42..f8d68c7 100644
 --- a/runtime/src/hle/audio/audio.cpp
 +++ b/runtime/src/hle/audio/audio.cpp
 @@ -30,20 +30,29 @@ constexpr uint32_t kBytesPerSample = 2u;
@@ -1654,7 +1654,7 @@ index 421ca42..81b5457 100644
              if (g_ai.tickActive) {
                  return;
              }
-@@ -616,8 +630,47 @@ int64_t ConsumeAudioPollDeltaMicros()
+@@ -616,8 +630,52 @@ int64_t ConsumeAudioPollDeltaMicros()
  std::atomic<uint64_t> g_pollCalls{0};
  std::atomic<uint64_t> g_pollNanos{0};
  
@@ -1664,6 +1664,11 @@ index 421ca42..81b5457 100644
 +// first Audio_HLE_AdvanceFrame call the clock-paced polls below do nothing, and audio advances
 +// only by the time each game frame passes in, at the frame boundary.
 +std::atomic<bool> g_audioFrameDriven{false};
++
++void Audio_HLE_SetFrameDriven()
++{
++    g_audioFrameDriven.store(true, std::memory_order_relaxed);
++}
 +
 +void Audio_HLE_AdvanceFrame(uint32_t micros)
 +{
@@ -1702,7 +1707,7 @@ index 421ca42..81b5457 100644
      static const bool timed = std::getenv("NSMBW_LOG_AUDIO_BACKLOG") != nullptr;
      const auto start = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
      MusicAttenuation::TickGuest();
-@@ -632,6 +685,9 @@ void Audio_HLE_Poll(CpuContext* ctx)
+@@ -632,6 +690,9 @@ void Audio_HLE_Poll(CpuContext* ctx)
  
  void Audio_HLE_PollDeferred()
  {
@@ -7812,16 +7817,19 @@ index 17930ea..f61afca 100644
 +extern "C" void NsmbwModsMenuRequestOpen();
 +extern "C" bool NsmbwModsMenuTakeClosed();
 diff --git a/runtime/include/hle_stubs.h b/runtime/include/hle_stubs.h
-index 92ea526..66f8eec 100644
+index 92ea526..109d5f6 100644
 --- a/runtime/include/hle_stubs.h
 +++ b/runtime/include/hle_stubs.h
-@@ -26,6 +26,9 @@ void Audio_HLE_Poll(CpuContext* ctx);
+@@ -26,6 +26,12 @@ void Audio_HLE_Poll(CpuContext* ctx);
  // OS_HLE_ProcessAlarmsDeferred does, so it is safe to call from the middle of an
  // arbitrary translated function.
  void Audio_HLE_PollDeferred();
 +// Frame-driven audio for lockstep play: advance the AI DMA clock by one game frame. The first call
 +// turns the host-clock polls above off for the rest of the run.
 +void Audio_HLE_AdvanceFrame(uint32_t micros);
++// Turns the host-clock polls off from the start, before the first Audio_HLE_AdvanceFrame (so no
++// audio time passes before the first game frame either).
++void Audio_HLE_SetFrameDriven();
  bool OS_HLE_InterruptsEnabled() noexcept;
  extern "C" void OS_HLE_ProcessAlarmsDeferred(int maxToProcess);
  extern "C" void OS_HLE_BeginDeferredGuestCallbacks();

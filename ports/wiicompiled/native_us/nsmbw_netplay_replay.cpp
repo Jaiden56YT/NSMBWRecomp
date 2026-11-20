@@ -187,12 +187,23 @@ void DumpRegion(uint32_t base, uint32_t size, const std::string& path) {
 // on), and the runtime normally paces it by the host clock, so two runs reached the movie scene
 // 5 frames apart. In frame mode it is advanced here instead, by exactly one NTSC frame
 // (1001/60000 s) per game frame, at the same point of every frame (Audio_HLE_AdvanceFrame).
-// Before the first game frame the host clock still paces it (the boot has no input to sync).
+// No audio time passes before the first game frame either (FrameDrivenAudioFromStart below):
+// with the host clock pacing it until then, how much audio had run when the boot scene was
+// created at frame 3 depended on load, and a replay under load diverged there.
 void AdvanceAudio() {
     if (!g.frameMode || std::getenv("NSMBW_REPLAY_HOST_AUDIO")) return;
     const auto at = [](uint64_t n) { return n * 1001000000ull / 60000ull; };
     Audio_HLE_AdvanceFrame(static_cast<uint32_t>(at(g.frame + 1) - at(g.frame)));
 }
+
+// Before main(): in frame mode, take audio off the host clock from the very start.
+struct FrameDrivenAudioFromStart {
+    FrameDrivenAudioFromStart() {
+        const bool frameMode = std::getenv("NSMBW_REPLAY_RECORD") || std::getenv("NSMBW_REPLAY_PLAY") ||
+                               std::getenv("NSMBW_REPLAY_HASHES");
+        if (frameMode && !std::getenv("NSMBW_REPLAY_HOST_AUDIO")) Audio_HLE_SetFrameDriven();
+    }
+} g_frameDrivenAudioFromStart;
 
 void Flush() {
     if (g.record) std::fflush(g.record);
