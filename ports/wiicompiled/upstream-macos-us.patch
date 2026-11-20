@@ -1358,7 +1358,7 @@ index 5c1601c..5ea0b16 100644
  constexpr uint32_t kEggScreenFlagsOffset = 0x34u;
  constexpr uint16_t kEggScreenFlagFramebufferCanvas = 0x0008u;
 diff --git a/runtime/src/fiber_manager.cpp b/runtime/src/fiber_manager.cpp
-index 8e15c1a..a0e9cbe 100644
+index 8e15c1a..fd5608c 100644
 --- a/runtime/src/fiber_manager.cpp
 +++ b/runtime/src/fiber_manager.cpp
 @@ -71,10 +71,10 @@ std::atomic<uint32_t> g_viRetracePendingCount{0};
@@ -1380,14 +1380,15 @@ index 8e15c1a..a0e9cbe 100644
  #else
      // libco's co_create() entry point takes no argument; SwitchToThread() stages guestThreadAddr
      // into s_pendingFiberArg immediately before the co_switch that first activates this handle.
-+#if defined(__SWITCH__)
-+    // libco stacks are fixed-size (Windows fibers grow past the 64 KB commit).
-+    // Guest threads call into Dawn/Tint shader compilation, which recurses deeply
-+    // and overflowed 64 KB on the Switch.
+-    constexpr unsigned int kHostStackSize = 64 * 1024;
++    // libco stacks are fixed-size (Windows fibers grow past the 64 KB commit). Guest threads
++    // run aurora's GX command processing and can build pipelines inline (Dawn/Tint shader
++    // compilation, which recurses deeply): that overflowed 64 KB on the Switch and, on the Mac,
++    // ran past the end of a malloc'd 64 KB stack into neighbouring heap blocks under load
++    // (crashes at scene changes in aurora's pipeline lookup and in Dawn's SetPipeline on the
++    // frame worker). Pages are only committed when touched. On the Mac libco also puts a guard
++    // page below each stack (third_party/libco/aarch64.c), so an overflow faults where it happens.
 +    constexpr unsigned int kHostStackSize = 4 * 1024 * 1024;
-+#else
-     constexpr unsigned int kHostStackSize = 64 * 1024;
-+#endif
      gf.fiber = co_create(kHostStackSize, &FiberProcTrampoline);
  
      if (!gf.fiber) {
@@ -4641,7 +4642,7 @@ index 3a295f0..60c5df9 100644
          FileOutput.WriteTextIfChanged(assemblyPath, assembly.ToString());
      }
 diff --git a/runtime/third_party/libco/aarch64.c b/runtime/third_party/libco/aarch64.c
-index 5c46a48..35d0090 100644
+index 5c46a48..f0feb37 100644
 --- a/runtime/third_party/libco/aarch64.c
 +++ b/runtime/third_party/libco/aarch64.c
 @@ -18,6 +18,28 @@ static thread_local unsigned long co_active_buffer[64];
@@ -4681,6 +4682,52 @@ index 5c46a48..35d0090 100644
  
  static void co_init(void) {
    #ifdef LIBCO_MPROTECT
+@@ -88,6 +111,37 @@ cothread_t co_derive(void* memory, unsigned int size, void (*entrypoint)(void))
+   return handle;
+ }
+ 
++#if defined(__APPLE__)
++/* Mac: each stack gets its own mapping with an inaccessible page below it. A malloc'd stack has
++   no guard, so a fiber that ran past its end silently overwrote whichever heap block sat below it
++   (seen as crashes elsewhere: aurora's pipeline map, Dawn objects). Now it faults where it
++   overflows. The handle (saved registers) stays at the bottom of the usable area, as before;
++   the mapping's base and length are kept just above it, for co_delete. */
++#include <sys/mman.h>
++#include <unistd.h>
++enum { co_guarded_meta = 24 }; /* handle[0..21] are the saved registers */
++cothread_t co_create(unsigned int size, void (*entrypoint)(void)) {
++  const unsigned long page = (unsigned long)sysconf(_SC_PAGESIZE);
++  const unsigned long usable = ((unsigned long)size + page - 1) & ~(page - 1);
++  const unsigned long length = usable + page;
++  unsigned char* base = (unsigned char*)mmap(0, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++  if(base == (unsigned char*)MAP_FAILED) return (cothread_t)0;
++  if(mprotect(base, page, PROT_NONE) != 0) {
++    munmap(base, length);
++    return (cothread_t)0;
++  }
++  unsigned long* handle = (unsigned long*)co_derive(base + page, (unsigned int)usable, entrypoint);
++  handle[co_guarded_meta] = (unsigned long)base;
++  handle[co_guarded_meta + 1] = length;
++  return handle;
++}
++
++void co_delete(cothread_t handle) {
++  if(!handle) return;
++  const unsigned long* h = (const unsigned long*)handle;
++  munmap((void*)h[co_guarded_meta], h[co_guarded_meta + 1]);
++}
++#else
+ cothread_t co_create(unsigned int size, void (*entrypoint)(void)) {
+   void* memory = LIBCO_MALLOC(size);
+   if(!memory) return (cothread_t)0;
+@@ -97,6 +151,7 @@ cothread_t co_create(unsigned int size, void (*entrypoint)(void)) {
+ void co_delete(cothread_t handle) {
+   LIBCO_FREE(handle);
+ }
++#endif
+ 
+ void co_switch(cothread_t handle) {
+   cothread_t co_previous_handle = co_active_handle;
 diff --git a/runtime/src/hle/mi.cpp b/runtime/src/hle/mi.cpp
 index 723f63e..2938125 100644
 --- a/runtime/src/hle/mi.cpp
