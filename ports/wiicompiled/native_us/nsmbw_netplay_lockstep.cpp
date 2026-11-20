@@ -95,6 +95,7 @@ struct Peer {
     sockaddr_in addr{};
     uint32_t acked = kNone;      // highest of our frames the peer holds (contiguous)
     bool heard = false;          // any valid packet from this peer yet
+    std::chrono::steady_clock::time_point lastPacket{};
 };
 
 struct Net {
@@ -285,6 +286,7 @@ void Receive() {
             peer->heard = true;
             Log("first packet from slot %u at frame %u", slot, n.curFrame);
         }
+        peer->lastPacket = std::chrono::steady_clock::now();
         const uint32_t ack = Get32(buf + 12), first = Get32(buf + 16);
         if (ack != kNone && (peer->acked == kNone || ack > peer->acked)) peer->acked = ack;
         const uint32_t hashFrame = Get32(buf + 20);
@@ -393,12 +395,15 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
             lastNote = now;
             Log("frame %u: waiting for input (%.0f s)", frame, std::chrono::duration<double>(now - start).count());
         }
-        // Before every peer has been heard from at all (copies started by hand on two machines,
-        // a firewall prompt still open), wait as long as it takes; after that, 20 s of silence
-        // ends the session.
-        bool heardAll = true;
-        for (const Peer& p : n.peers) heardAll = heardAll && p.heard;
-        if (heardAll && now - start >= std::chrono::seconds(20)) {
+        // A peer we are still waiting on ends the session after 20 s with no packet from it. Before
+        // its first packet (copies started by hand on two machines, a firewall prompt still open)
+        // there is no limit. Timed from its last packet, not from the start of this wait: the first
+        // version ended a session the moment the first packet arrived after a 32 s wait.
+        bool silent = false;
+        for (const Peer& p : n.peers) {
+            if (!Has(p.slot, frame) && p.heard && now - p.lastPacket >= std::chrono::seconds(20)) silent = true;
+        }
+        if (silent) {
             Log("frame %u: no input for 20 s, ending the session", frame);
             NsmbwPrepareImmediateExit();
             std::fflush(stderr);
