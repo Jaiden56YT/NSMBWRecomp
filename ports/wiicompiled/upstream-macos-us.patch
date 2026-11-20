@@ -6552,7 +6552,7 @@ index 3f78c82..59b98a4 100644
  
  bool LoadFont(const fs::path& path, Font& font) {
 diff --git a/runtime/include/isa/ppc_isa_float.h b/runtime/include/isa/ppc_isa_float.h
-index fcd5795..882ba72 100644
+index fcd5795..492da6c 100644
 --- a/runtime/include/isa/ppc_isa_float.h
 +++ b/runtime/include/isa/ppc_isa_float.h
 @@ -143,8 +143,20 @@ inline bool MkwHostNiActiveInline() noexcept
@@ -6584,6 +6584,73 @@ index fcd5795..882ba72 100644
  }
  
  inline float PpcFlushSingleForNiInline(float value)
+@@ -430,15 +443,29 @@ inline double PpcFmsubInline(double a, double c, double b)
+     return std::fma(a, c, -b);
+ }
+ 
++// Keeps the compiler from folding -(fma(a, c, b)) into one negated FMA (ARM FNMADD = -a*c - b):
++// that form gives +0 where PPC fnmadd gives -0 (a*c = +0, b = -0: -(+0 + -0) = -0, but
++// -0 + +0 = +0). clang did this on ARM64 even with -fno-fast-math; x86 kept the negation separate,
++// so the two builds disagreed on the sign of zero results (fp_isa_check, 2026-11-20).
++inline double PpcKeepRoundedInline(double value)
++{
++#if defined(__aarch64__)
++    __asm__("" : "+w"(value));
++#elif defined(__GNUC__)
++    __asm__("" : "+x"(value));
++#endif
++    return value;
++}
++
+ inline double PpcFnmaddInline(double a, double c, double b)
+ {
+-    const double result = std::fma(a, c, b);
++    const double result = PpcKeepRoundedInline(std::fma(a, c, b));
+     return std::isnan(result) ? result : -result;
+ }
+ 
+ inline double PpcFnmsubInline(double a, double c, double b)
+ {
+-    const double result = std::fma(a, c, -b);
++    const double result = PpcKeepRoundedInline(std::fma(a, c, -b));
+     return std::isnan(result) ? result : -result;
+ }
+ 
+@@ -485,9 +512,24 @@ inline double PPC_PsMulNoNiInline(double lhs, double rhs)
+ // PpcNegateNonNanLanesInline. NI flushing is handled by MXCSR (see
+ // MkwApplyHostNiMode), so the NI and NoNi entry points are identical here.
+ 
++// a * b - c with ONE rounding per lane, like Broadway's ps_msub and x86's vfmsubps. Not
++// _mm_fmsub_ps on ARM: SIMDe implements it there as sub(mul(a, b), c), two roundings, while its
++// _mm_fmadd_ps is a real fused vfmaq. So off x86 this is fmadd with c negated (non-NaN lanes only,
++// so a NaN subtrahend keeps its sign). Found as a Mac (ARM) vs Windows (x86) difference in a
++// display list the game builds at boot: exact 0 on the Mac where x86 left the fused residue
++// (docs/online-play.md, 2026-11-20).
++inline __m128 PpcFusedMsubPsInline(__m128 a, __m128 b, __m128 c)
++{
++#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
++    return _mm_fmsub_ps(a, b, c);
++#else
++    return _mm_fmadd_ps(a, b, PpcNegateNonNanLanesInline(c));
++#endif
++}
++
+ inline double PPC_PsMsubInline(double multiplicand, double multiplier, double subtractor)
+ {
+-    return PpcM128ToPsInline(_mm_fmsub_ps(
++    return PpcM128ToPsInline(PpcFusedMsubPsInline(
+         PpcPsToM128Inline(multiplicand), PpcPsToM128Inline(multiplier), PpcPsToM128Inline(subtractor)));
+ }
+ 
+@@ -521,7 +563,7 @@ inline double PPC_PsMadds1Inline(double multiplicand, double multiplier, double
+ 
+ inline double PPC_PsNmsubInline(double multiplicand, double multiplier, double subtractor)
+ {
+-    return PpcM128ToPsInline(PpcNegateNonNanLanesInline(_mm_fmsub_ps(
++    return PpcM128ToPsInline(PpcNegateNonNanLanesInline(PpcFusedMsubPsInline(
+         PpcPsToM128Inline(multiplicand), PpcPsToM128Inline(multiplier), PpcPsToM128Inline(subtractor))));
+ }
+ 
 diff --git a/runtime/src/thread_cache_new.h b/runtime/src/thread_cache_new.h
 new file mode 100644
 index 0000000..cacdc76

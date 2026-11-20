@@ -94,6 +94,7 @@ struct Peer {
     uint32_t slot = 0;
     sockaddr_in addr{};
     uint32_t acked = kNone;      // highest of our frames the peer holds (contiguous)
+    bool heard = false;          // any valid packet from this peer yet
 };
 
 struct Net {
@@ -280,6 +281,10 @@ void Receive() {
             if (p.slot == slot) peer = &p;
         }
         if (!peer) continue;
+        if (!peer->heard) {
+            peer->heard = true;
+            Log("first packet from slot %u at frame %u", slot, n.curFrame);
+        }
         const uint32_t ack = Get32(buf + 12), first = Get32(buf + 16);
         if (ack != kNone && (peer->acked == kNone || ack > peer->acked)) peer->acked = ack;
         const uint32_t hashFrame = Get32(buf + 20);
@@ -388,7 +393,12 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
             lastNote = now;
             Log("frame %u: waiting for input (%.0f s)", frame, std::chrono::duration<double>(now - start).count());
         }
-        if (now - start >= std::chrono::seconds(20)) {
+        // Before every peer has been heard from at all (copies started by hand on two machines,
+        // a firewall prompt still open), wait as long as it takes; after that, 20 s of silence
+        // ends the session.
+        bool heardAll = true;
+        for (const Peer& p : n.peers) heardAll = heardAll && p.heard;
+        if (heardAll && now - start >= std::chrono::seconds(20)) {
             Log("frame %u: no input for 20 s, ending the session", frame);
             NsmbwPrepareImmediateExit();
             std::fflush(stderr);
