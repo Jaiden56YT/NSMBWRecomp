@@ -6,7 +6,8 @@ co-op (up to four players), with the remote players' inputs arriving over the ne
 and Coin Battle come along for free, because the design synchronises input, not game modes.
 
 Status: design, plus step 0 (the determinism check, sections 8a and 8b) built and run on the Mac,
-and the frame-driven audio output buffered and paced (8c).
+the frame-driven audio output buffered and paced (8c), and the guest clock counted in game
+frames (8d).
 Section 8 is the build order. Step 0's answer: input + seed + frame counting reproduce the game
 state; the audio engine's timing reached scene transitions until audio was driven by game frames
 (8b). With that, replays match the recording frame for frame through boot, title, movie, map and
@@ -389,7 +390,8 @@ Follow-up (2026-11-19):
 
 Still open before step 1:
 - ~~the audio output~~ (done, section 8c);
-- frame-derived time for the clock reads above (risk 2).
+- ~~frame-derived time for the clock reads above (risk 2)~~ (done for the time base, section 8d;
+  the VI retrace count is still host-paced).
 
 ## 8c. Audio output for frame-driven audio (2026-11-20, Mac)
 
@@ -435,6 +437,56 @@ Testing (muted, `SDL_AUDIO_DRIVER=dummy`, a 3000-frame recording replayed for 18
 - Not tested: listening to it. A real device was not used (test runs stay muted), so whether the
   gaps after a stall or the speed changes are audible is not checked; a stall is a gap in sound by
   design (time-stretching through it is possible later).
+
+## 8d. The guest clock counted in game frames (2026-11-20, Mac)
+
+Risk 2: the game reads the time base (`mftb`, which is behind `OSGetTime` / `OSGetTick`, OS
+alarms and `OSGetSystemTime`), and in the runtime that was the host's steady clock, so every
+stamp the game took differed between two runs of the same input.
+
+Audit first (`NSMBW_LOG_TIME_READS=1`, counts by guest thread and caller, 3000 frames): about 80
+reads per frame on the game thread (sound, EGG's display and frame timing), plus a sound thread,
+an OS-side thread that reads heavily, and one read per VI retrace in interrupt context (EGG's
+retrace callback). The callers have no names in this repo's function map.
+
+The change (`runtime/src/ppc_helpers.cpp`, `os_time.cpp`, in the patch; on in frame mode,
+`NSMBW_REPLAY_HOST_CLOCK=1` turns it off):
+- Time = max(this guest thread's last value, start of the current frame) + about 1 us per read.
+  Frame start = frame x 1001/60000 s, set at the frame boundary (`TimeBase_SetFrame`).
+- Per guest thread (the current OSThread at 0x800000E4), so host timing of other threads cannot
+  shift what the game thread reads. Time still moves with every read, so a "wait until the time
+  has passed" loop finishes. Within a thread it never goes backwards; between threads it can
+  differ by the reads made in the frame (about 80 us on the game thread).
+- Interrupt context (no current thread) reads the frame thread's clock without moving it. EGG
+  stamps the retrace there and the game thread later subtracts that stamp (0x802BB6C8, deciding
+  whether to wait one more retrace), so the two must be on the same clock.
+- The runtime's own reads (alarm checks, `OSGetSystemTime`'s HLE) look at the clock without
+  moving it.
+- The upper word (`mftbu`) is not counted as a read, so the SDK's upper/lower/upper sequence
+  moves the clock once and sees a consistent pair.
+
+Results (muted, a 3000-frame recording with the frame clock, replays one at a time, the Mac
+heavily loaded by another session's build):
+- 3 of 3 replays ran to the end; scenes match the recording on every frame.
+- Before: every clock page differed (0x8034xxxx-0x8043xxxx, 0x8074xxxx-0x8077xxxx and 0x9030xxxx
+  in MEM2). Now all `OSGetTime` stamps match. What differs all the time is the **VI retrace
+  count** (0x8042A86C) and EGG's three copies of it (0x807602A0, 0x80760338, 0x8076033C).
+- Two pages (0x8034xxxx, 0x8038xxxx) differ on scattered single frames (about 200 of 3000). Memory
+  dumps taken right after those hashes, at the same frame boundary, matched, so it is most likely
+  a host thread (the audio mix worker) writing while the hash is taken, not a difference in game
+  state. Not proven.
+- Scene timing did not depend on the clock: a host-clock replay of the frame-clock recording
+  went through the same scenes on the same frames.
+
+Still open:
+- The VI retrace count follows host pacing (a slow frame takes two retraces). It cannot simply
+  count game frames: the game waits for it to change before starting a frame. No replay has
+  diverged from it, but it is the remaining clock value the game can read; watch it in step 1.
+- The absolute date (0x800030D8, the RTC base added to the time base) comes from each host; a
+  session should send the host's to everyone at the start (section 3).
+- Two crashes in these runs, both in the graphics pipeline cache (aurora / Dawn) at scene
+  changes, under heavy load: a bad reference count in `find_existing_pipeline`, and an abort in
+  `SetRenderPipeline` on the frame worker. Separate from the clock; not investigated here.
 
 ## 9. Open questions for the user
 

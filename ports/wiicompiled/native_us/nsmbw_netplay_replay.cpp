@@ -14,6 +14,9 @@
 //   NSMBW_REPLAY_EXIT_AT=<n>    exit the process at game frame n (after flushing the files).
 //   NSMBW_REPLAY_SEED=<hex>     the random seed every run uses (default 0x4E534D42; see ApplySeed).
 //   NSMBW_REPLAY_HOST_AUDIO=1   keep audio paced by the host clock (see AdvanceAudio).
+//   NSMBW_REPLAY_HOST_CLOCK=1   keep the guest time base on the host clock (frame clock off).
+//   NSMBW_REPLAY_STALL=<every>:<ms>  hold the game <ms> every <every> frames (audio output test).
+//   NSMBW_LOG_TIME_READS=1      every 300 frames, time-base reads by guest thread and caller.
 //   NSMBW_LOG_KPAD_CALLERS=1    log the first KPAD reads with their guest LR (frame-boundary check).
 // Any of the first three switches the KPAD override (nsmbw_kpad_overrides.cpp) into frame mode:
 // input is sampled once per game frame instead of once per VI tick, because lockstep has to count
@@ -214,12 +217,15 @@ void TestStall() {
     }
 }
 
-// Before main(): in frame mode, take audio off the host clock from the very start.
+// Before main(): in frame mode, take audio and the guest clock off the host clock from the very
+// start. NSMBW_REPLAY_HOST_CLOCK=1 keeps the host clock (for A/B runs).
 struct FrameDrivenAudioFromStart {
     FrameDrivenAudioFromStart() {
         const bool frameMode = std::getenv("NSMBW_REPLAY_RECORD") || std::getenv("NSMBW_REPLAY_PLAY") ||
                                std::getenv("NSMBW_REPLAY_HASHES");
         if (frameMode && !std::getenv("NSMBW_REPLAY_HOST_AUDIO")) Audio_HLE_SetFrameDriven();
+        // Same for the guest time base (TimeBase_SetFrame in NsmbwReplayBeginFrame).
+        if (frameMode && !std::getenv("NSMBW_REPLAY_HOST_CLOCK")) TimeBase_EnableFrameClock();
     }
 } g_frameDrivenAudioFromStart;
 
@@ -234,9 +240,12 @@ extern "C" bool NsmbwReplayFrameMode() {
     return g.frameMode;
 }
 
+extern "C" void NsmbwDumpTimeReads(uint32_t);  // runtime, NSMBW_LOG_TIME_READS
+
 // Called at the start of every game frame, before its input is sampled.
 extern "C" void NsmbwReplayBeginFrame() {
     Init();
+    TimeBase_SetFrame(g.frame);
     ApplySeed();
     TestStall();
     AdvanceAudio();
@@ -257,6 +266,8 @@ extern "C" void NsmbwReplayBeginFrame() {
         DumpRegion(kMem2Base, g.mem2Size, stem + ".mem2");
         std::fprintf(stderr, "[nsmbw][replay] dumped guest memory at frame %u (tick %u)\n", g.frame, tick);
     }
+    static const bool logTimeReads = std::getenv("NSMBW_LOG_TIME_READS") != nullptr;
+    if (logTimeReads && g.frame % 300 == 0) NsmbwDumpTimeReads(g.frame);
     if (g.frame % 600 == 0) {
         std::fprintf(stderr, "[nsmbw][replay] frame %u tick %u scene %u\n", g.frame, tick, g_nsmbwCurrentSceneProfile);
         Flush();

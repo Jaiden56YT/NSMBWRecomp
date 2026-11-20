@@ -8225,10 +8225,10 @@ index 17930ea..f61afca 100644
 +extern "C" void NsmbwModsMenuRequestOpen();
 +extern "C" bool NsmbwModsMenuTakeClosed();
 diff --git a/runtime/include/hle_stubs.h b/runtime/include/hle_stubs.h
-index 92ea526..109d5f6 100644
+index 92ea526..295f62f 100644
 --- a/runtime/include/hle_stubs.h
 +++ b/runtime/include/hle_stubs.h
-@@ -26,6 +26,12 @@ void Audio_HLE_Poll(CpuContext* ctx);
+@@ -26,6 +26,21 @@ void Audio_HLE_Poll(CpuContext* ctx);
  // OS_HLE_ProcessAlarmsDeferred does, so it is safe to call from the middle of an
  // arbitrary translated function.
  void Audio_HLE_PollDeferred();
@@ -8238,6 +8238,15 @@ index 92ea526..109d5f6 100644
 +// Turns the host-clock polls off from the start, before the first Audio_HLE_AdvanceFrame (so no
 +// audio time passes before the first game frame either).
 +void Audio_HLE_SetFrameDriven();
++// Frame clock (NSMBW online play): the guest time base (mftb, OSGetTime, alarms) counts game
++// frames instead of host time, so every machine in a lockstep session reads the same values.
++// Each guest thread sees the current frame's start time plus about 1 us per read of its own.
++void TimeBase_EnableFrameClock();
++void TimeBase_SetFrame(uint32_t frame);
++bool TimeBase_FrameClockEnabled();
++// The time base as the current guest thread would read it, without counting as a read (for
++// runtime code such as alarm checks, which must not move a guest thread's clock).
++uint64_t TimeBase_Peek();
  bool OS_HLE_InterruptsEnabled() noexcept;
  extern "C" void OS_HLE_ProcessAlarmsDeferred(int maxToProcess);
  extern "C" void OS_HLE_BeginDeferredGuestCallbacks();
@@ -8337,3 +8346,191 @@ index ae05827..9ea5e1e 100644
 +    uint64_t m_droppedTotal = 0;
 +    double m_rateTrim = 0.0;         // learned speed offset (integral part)
  };
+diff --git a/runtime/src/ppc_helpers.cpp b/runtime/src/ppc_helpers.cpp
+index 41477d9..9e35864 100644
+--- a/runtime/src/ppc_helpers.cpp
++++ b/runtime/src/ppc_helpers.cpp
+@@ -5,8 +5,13 @@
+ #include "memory.h"
+ #include "runtime_log.h"
+ #include "timebase_contract.h"
++#include "hle_stubs.h"
+ 
++#include <algorithm>
+ #include <array>
++#include <atomic>
++#include <mutex>
++#include <unordered_map>
+ #include <bitset>
+ #include <chrono>
+ #include <cmath>
+@@ -15,6 +20,7 @@
+ #include <cstring>
+ #include <stdexcept>
+ #include <limits>
++#include <map>
+ 
+ 
+ extern "C" void PPC_TrapWord(uint32_t trapOptions, uint32_t lhs, uint32_t rhs)
+@@ -45,6 +51,85 @@ uint32_t g_reservationAddr = 0;
+ bool g_hasReservation = false;
+ const auto g_timeBaseStart = std::chrono::steady_clock::now();
+ 
++uint64_t GetTimeBase();
++
++// Frame clock. With the host clock, the stamps the game takes (OSGetTime into its profiling and
++// timing words, sound timers) differed between two runs of the same input, which lockstep
++// cannot allow: every machine has to read the same time at the same point of the same frame.
++// In frame mode the time base is a pure function of the game frame and of what the reading
++// guest thread has done since:
++//   value = max(this thread's last value, start of the current frame) + ~1 us per read.
++// - Frame start = frame * 1001/60000 s (NTSC), set at the frame boundary (TimeBase_SetFrame).
++// - Per guest thread (the current OSThread pointer at 0x800000E4), so one thread's reads never
++//   shift what another thread sees; a thread whose own execution is deterministic reads
++//   deterministic values, whatever host timing did to the other threads.
++// - It moves with every read, so a "wait until the time has passed" loop still finishes.
++// - Threads can disagree by the reads they made in the frame (~80 us for the game thread over a
++//   16.7 ms frame); within a thread it never goes backwards.
++namespace {
++std::atomic<bool> g_frameClockOn{false};
++std::atomic<uint32_t> g_frameClockFrame{0};
++std::atomic<uint32_t> g_frameClockOwner{0};  // the guest thread that crosses frame boundaries
++std::mutex g_frameClockMutex;
++std::unordered_map<uint32_t, uint64_t> g_frameClockByThread;
++constexpr uint64_t kFrameClockStepTicks = 61;  // ~1 us at 60.75 MHz
++
++uint64_t FrameClockStart(uint32_t frame)
++{
++    return static_cast<uint64_t>(frame) * TimeBaseContract::kTicksPerSecond * 1001u / 60000u;
++}
++
++uint64_t FrameClockRead(bool advance)
++{
++    uint32_t thread = 0;
++    Memory::TryRead32(0x800000E4u, thread);
++    const uint64_t start = FrameClockStart(g_frameClockFrame.load(std::memory_order_relaxed));
++    std::lock_guard<std::mutex> lock(g_frameClockMutex);
++    if (thread == 0) {
++        // Interrupt context (no current OSThread), e.g. the VI retrace callback. EGG's display
++        // stamps the retrace there and the game thread later subtracts that stamp from its own
++        // time (0x802BB6C8) to decide whether to wait one more retrace. With a clock of its own,
++        // the stamp did not line up with the game thread's and the game waited extra retraces
++        // (1.15 per frame on the map). So it reads the frame thread's clock, without moving it.
++        const uint32_t owner = g_frameClockOwner.load(std::memory_order_relaxed);
++        if (owner != 0) {
++            return std::max(g_frameClockByThread[owner], start);
++        }
++    }
++    uint64_t& last = g_frameClockByThread[thread];
++    uint64_t value = std::max(last, start);
++    if (advance) {
++        value += kFrameClockStepTicks;
++        last = value;
++    }
++    return value;
++}
++} // namespace
++
++} // namespace (ends the file's anonymous namespace for the public entry points below)
++
++void TimeBase_EnableFrameClock() { g_frameClockOn.store(true, std::memory_order_relaxed); }
++void TimeBase_SetFrame(uint32_t frame)
++{
++    uint32_t thread = 0;
++    Memory::TryRead32(0x800000E4u, thread);
++    if (thread != 0) {
++        g_frameClockOwner.store(thread, std::memory_order_relaxed);
++    }
++    g_frameClockFrame.store(frame, std::memory_order_relaxed);
++}
++bool TimeBase_FrameClockEnabled() { return g_frameClockOn.load(std::memory_order_relaxed); }
++
++uint64_t TimeBase_Peek()
++{
++    if (g_frameClockOn.load(std::memory_order_relaxed)) {
++        return FrameClockRead(false);
++    }
++    return GetTimeBase();
++}
++
++namespace {
++
+ uint64_t GetTimeBase() {
+     const auto elapsed = std::chrono::steady_clock::now() - g_timeBaseStart;
+     const auto nanoseconds =
+@@ -399,13 +484,49 @@ extern "C" uint32_t PPC_Eciwx(uint32_t addr)
+     throw std::runtime_error("eciwx attempted external control/MMIO read");
+ }
+ 
++// NSMBW_LOG_TIME_READS=1: count time-base reads by guest thread (0x800000E4) and caller (LR: the
++// function that called OSGetTime/OSGetTick, which are leaves). The NSMBW replay prints and resets
++// the counts every 300 frames (NsmbwDumpTimeReads). Used for the frame clock audit
++// (docs/online-play.md 8d in the NSMBW repo).
++static std::mutex g_tbDiagMutex;
++static std::map<uint64_t, uint64_t> g_tbDiag;
++static void NoteTimeBaseRead(bool upper)
++{
++    static const bool on = std::getenv("NSMBW_LOG_TIME_READS") != nullptr;
++    if (!on) return;
++    CpuContext* c = TryGetCpuContext();
++    uint32_t thread = 0;
++    Memory::TryRead32(0x800000E4u, thread);
++    const uint64_t key = (static_cast<uint64_t>(thread) << 32) | ((c ? c->lr : 0u) | (upper ? 1u : 0u));
++    std::lock_guard<std::mutex> lock(g_tbDiagMutex);
++    ++g_tbDiag[key];
++}
++extern "C" void NsmbwDumpTimeReads(uint32_t frame)
++{
++    std::lock_guard<std::mutex> lock(g_tbDiagMutex);
++    for (const auto& [k, n] : g_tbDiag)
++        std::fprintf(stderr, "[tbread] frame %u thread %08X lr %08X%s count %llu\n", frame,
++                     static_cast<uint32_t>(k >> 32), static_cast<uint32_t>(k) & ~1u, (k & 1u) ? " (upper)" : "",
++                     static_cast<unsigned long long>(n));
++    g_tbDiag.clear();
++}
++
+ extern "C" uint32_t PPC_Mftb()
+ {
++    NoteTimeBaseRead(false);
++    if (g_frameClockOn.load(std::memory_order_relaxed)) {
++        return static_cast<uint32_t>(FrameClockRead(true));
++    }
+     return static_cast<uint32_t>(GetTimeBase());
+ }
+ 
+ extern "C" uint32_t PPC_Mftbu()
+ {
++    // Upper word: not counted as a read, so the SDK's upper/lower/upper sequence moves the
++    // frame clock once, by the lower read, and sees a consistent pair.
++    if (g_frameClockOn.load(std::memory_order_relaxed)) {
++        return static_cast<uint32_t>(FrameClockRead(false) >> 32);
++    }
+     return static_cast<uint32_t>(GetTimeBase() >> 32);
+ }
+ 
+diff --git a/runtime/src/hle/os/os_time.cpp b/runtime/src/hle/os/os_time.cpp
+index a89e4a4..1e3b84c 100644
+--- a/runtime/src/hle/os/os_time.cpp
++++ b/runtime/src/hle/os/os_time.cpp
+@@ -29,11 +29,16 @@ void ReadTimeBaseRegisters(uint32_t& outHi, uint32_t& outLo)
+ namespace OsHleInternal {
+ uint64_t ReadSystemTime()
+ {
+-    uint32_t hi1 = 0;
+-    uint32_t lo = 0;
+-    ReadTimeBaseRegisters(hi1, lo);
+-
+-    const uint64_t timeBase = (static_cast<uint64_t>(hi1) << 32) | lo;
++    uint64_t timeBase = 0;
++    if (TimeBase_FrameClockEnabled()) {
++        // Runtime-side read (alarm checks, OSGetSystemTime's HLE): look, don't move the clock.
++        timeBase = TimeBase_Peek();
++    } else {
++        uint32_t hi1 = 0;
++        uint32_t lo = 0;
++        ReadTimeBaseRegisters(hi1, lo);
++        timeBase = (static_cast<uint64_t>(hi1) << 32) | lo;
++    }
+     const uint32_t baseHi = ::Memory::Read32(0x800030D8u);
+     const uint32_t baseLo = ::Memory::Read32(0x800030DCu);
+     const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
