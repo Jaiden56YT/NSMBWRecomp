@@ -486,7 +486,36 @@ Still open:
   session should send the host's to everyone at the start (section 3).
 - Two crashes in these runs, both in the graphics pipeline cache (aurora / Dawn) at scene
   changes, under heavy load: a bad reference count in `find_existing_pipeline`, and an abort in
-  `SetRenderPipeline` on the frame worker. Separate from the clock; not investigated here.
+  `SetRenderPipeline` on the frame worker. Separate from the clock. Cause: a guest-thread stack
+  overflow, not a pipeline-cache race (section 8e).
+
+## 8e. Crashes at scene changes: the game thread's 64 KB stack (2026-11-20, Mac)
+
+Guest threads run on libco coroutines ("fibers"), each with its own host stack. On the Mac that
+stack was 64 KB from `malloc`, with nothing below it to catch an overflow (the Switch already used
+4 MB, after Dawn/Tint shader compiles overflowed 64 KB there). The game thread ran past the end
+of that stack and overwrote the heap block below it. Which call went that deep is not identified.
+A likely one is timing-driven work that runs on top of whatever the game thread is doing:
+`VI_HLE_ProcessRetracesDeferred`, called from GX vertex submission, puts a copy of the guest
+register file on the stack and runs guest retrace callbacks above it, and it lands at deep points
+more often when the host runs late. Inline pipeline builds (Dawn/Tint) on the game thread are
+another.
+
+Evidence, from the first crash report (`find_existing_pipeline`): its registers give the pipeline
+map's slot array (0x7cc05e8810, 2048 slots x 24 bytes, ending at 0x7cc05f4810), the bad slot
+(0x7cc05f34a8) and the game thread's stack (sp 0x7cc0603310, stack values up to 0x7cc0603e58). So
+the 64 KB stack sat directly above the slot array, and the slot was overwritten about 5 KB below the
+stack's lower end, with 0x3f8000003f800000: two 1.0f, a paired-single register as the guest keeps it.
+The second crash (an aborted `SetPipeline` on the frame worker, which has an ordinary thread stack)
+fits a Dawn pipeline object overwritten the same way; its report has no addresses to check that.
+Painting the stacks in a normal muted 3000-frame replay: the game thread reached 41-46 KB of 64,
+the other guest threads 4-9 KB. The overflow itself is rare: 20 stock runs at once with the machine
+at load 100+ did not crash.
+
+Fix (runtime, in the patch): every non-Windows fiber gets a 4 MB stack (`fiber_manager.cpp`; pages
+are only committed when touched), and on the Mac libco maps each stack with an inaccessible page
+below it (`third_party/libco/aarch64.c`), so an overflow faults where it happens instead of
+corrupting something else.
 
 ## 9. Open questions for the user
 
