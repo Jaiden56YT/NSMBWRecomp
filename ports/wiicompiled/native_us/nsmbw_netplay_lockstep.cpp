@@ -25,7 +25,7 @@
 //     not host-paced) is exchanged and compared; a mismatch is logged as "OUT OF SYNC".
 //
 // Packet (little-endian, at most 512 bytes): u32 magic "NSNP", u8 version, u8 slot, u8 count,
-// u8 flags, u32 token, u32 ack (the highest frame of the receiver's input this copy holds, all
+// u8 flags (bit 0: the sender is leaving the session), u32 token, u32 ack (the highest frame of the receiver's input this copy holds, all
 // earlier ones too; 0xFFFFFFFF none), u32 first frame, u32 hash frame, u32 hash (hash frame
 // 0xFFFFFFFF = none), then count x { u32 hold, u32 tilt bits, i8 movie-skip request, 3 pad }.
 // Everything received is bounds-checked; nothing in a packet is ever executed.
@@ -70,6 +70,11 @@ inline void NetClose(SocketHandle s) { close(s); }
 extern "C" uint32_t NsmbwReplayCurrentFrame();
 extern "C" uint32_t g_nsmbwCurrentSceneProfile;
 extern "C" void NsmbwPrepareImmediateExit();
+// runtime/src/product/nsmbw_online_room.cpp
+extern "C" bool NsmbwOnlineTakeLeaveRequest();
+extern "C" [[noreturn]] void NsmbwOnlineEndSession(const char* reason);
+extern "C" void NsmbwOnlineSetWaitingTitle(const char* textOrNull);
+extern "C" bool NsmbwOnlinePumpEventsQuit(); // pumps window events; true if the window was closed
 
 namespace {
 constexpr uint32_t kMagic = 0x504E534Eu; // "NSNP"
@@ -112,6 +117,7 @@ struct Net {
     uint32_t lastCompared[kMaxSlots];
     uint64_t waits = 0, waitedMicros = 0, desyncs = 0, checks = 0;
     uint32_t curFrame = 0;
+    bool leaving = false;      // set once this copy leaves: every packet from then on says so
 };
 Net n;
 
@@ -135,6 +141,8 @@ bool ParseAddr(const std::string& hostPort, sockaddr_in& out) {
     if (host == "localhost") host = "127.0.0.1";
     return inet_pton(AF_INET, host.c_str(), &out.sin_addr) == 1;
 }
+
+void SendLeave();
 
 void Init() {
     if (n.init) return;
@@ -195,6 +203,7 @@ void Init() {
         n.lastCompared[s] = kNone;
     }
     n.active = true;
+    std::atexit(SendLeave); // a normal quit (the window closed) tells the others at once
     Log("slot %u of %u, port %s, input delay %u frames, %zu peer(s)", n.slot, n.players, port, n.delay, n.peers.size());
 }
 
@@ -240,7 +249,7 @@ void SendTo(Peer& p, uint32_t newest) {
     b.push_back(kVersion);
     b.push_back(static_cast<uint8_t>(n.slot));
     b.push_back(static_cast<uint8_t>(newest - first + 1));
-    b.push_back(0);
+    b.push_back(n.leaving ? 1 : 0); // flags: bit 0 = this copy is leaving the session
     Put32(b, n.token);
     Put32(b, n.contiguous[p.slot]);
     Put32(b, first);
@@ -282,6 +291,12 @@ void Receive() {
             if (p.slot == slot) peer = &p;
         }
         if (!peer) continue;
+        if (buf[7] & 1u) {
+            char why[64];
+            std::snprintf(why, sizeof(why), "Player %u left the session", slot + 1);
+            Log("%s", why);
+            NsmbwOnlineEndSession(why);
+        }
         if (!peer->heard) {
             peer->heard = true;
             Log("first packet from slot %u at frame %u", slot, n.curFrame);
@@ -335,6 +350,13 @@ uint32_t StateHash(uint32_t frame) {
     return static_cast<uint32_t>(h ^ (h >> 32));
 }
 
+// Tells every peer this copy is leaving (a few times: no acknowledgement is waited for).
+void SendLeave() {
+    if (!n.active || n.sock == kNoSocket) return;
+    n.leaving = true;
+    for (int i = 0; i < 5; ++i) SendAll(n.curFrame + n.delay);
+}
+
 void CompareHashes() {
     for (const Peer& p : n.peers) {
         const uint32_t f = n.peerHashFrame[p.slot];
@@ -362,6 +384,15 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
     Init();
     const uint32_t frame = NsmbwReplayCurrentFrame();
     n.curFrame = frame;
+    // NSMBW_NETPLAY_TEST_LEAVE=<frame>: test runs leave the session at that frame, as the button does.
+    static const uint32_t testLeaveAt = [] {
+        const char* v = AURORA_ENV("NSMBW_NETPLAY_TEST_LEAVE");
+        return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 10)) : 0xFFFFFFFFu;
+    }();
+    if (NsmbwOnlineTakeLeaveRequest() || frame == testLeaveAt) { // the Online screen's Leave the session
+        SendLeave();
+        NsmbwOnlineEndSession("You left the session");
+    }
     Store(n.slot, frame + n.delay, localHold, localTilt, static_cast<int8_t>(localSkip));
     const uint32_t newest = frame + n.delay;
 
@@ -377,7 +408,7 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
     using Clock = std::chrono::steady_clock;
     const auto start = Clock::now();
     auto lastSend = start, lastNote = start;
-    bool waited = false;
+    bool waited = false, titleShown = false;
     while (true) {
         bool ready = true;
         for (const Peer& p : n.peers) ready = ready && Has(p.slot, frame);
@@ -385,6 +416,15 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
         waited = true;
         pollfd pfd{n.sock, POLLIN, 0};
         NetPoll(&pfd, 1, 2);
+        // Keep the window alive while the game is held here (the OS marks a window that stops
+        // taking events as not responding), and let it be closed.
+        if (NsmbwOnlinePumpEventsQuit()) {
+            SendLeave();
+            NsmbwOnlineSetWaitingTitle(nullptr);
+            NsmbwPrepareImmediateExit();
+            std::fflush(stderr);
+            _exit(0);
+        }
         Receive();
         const auto now = Clock::now();
         if (now - lastSend >= std::chrono::milliseconds(8)) {
@@ -394,6 +434,14 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
         if (now - lastNote >= std::chrono::seconds(2)) {
             lastNote = now;
             Log("frame %u: waiting for input (%.0f s)", frame, std::chrono::duration<double>(now - start).count());
+        }
+        if (!titleShown && now - start >= std::chrono::seconds(1)) {
+            uint32_t missing = 0;
+            for (const Peer& p : n.peers) if (!Has(p.slot, frame)) { missing = p.slot; break; }
+            char text[64];
+            std::snprintf(text, sizeof(text), "Waiting for player %u...", missing + 1);
+            NsmbwOnlineSetWaitingTitle(text);
+            titleShown = true;
         }
         // A peer we are still waiting on ends the session after 20 s with no packet from it. Before
         // its first packet (copies started by hand on two machines, a firewall prompt still open)
@@ -405,9 +453,12 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
         }
         if (silent) {
             Log("frame %u: no input for 20 s, ending the session", frame);
-            NsmbwPrepareImmediateExit();
-            std::fflush(stderr);
-            _exit(3);
+            NsmbwOnlineSetWaitingTitle(nullptr);
+            uint32_t missing = 0;
+            for (const Peer& p : n.peers) if (!Has(p.slot, frame)) { missing = p.slot; break; }
+            char why[64];
+            std::snprintf(why, sizeof(why), "Player %u stopped responding", missing + 1);
+            NsmbwOnlineEndSession(why);
         }
     }
     if (waited) {
@@ -417,6 +468,7 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
     }
     // Send once more after the wait so peers get our acks promptly.
     if (waited) SendAll(newest);
+    if (titleShown) NsmbwOnlineSetWaitingTitle(nullptr);
     CompareHashes();
 
     *channels = n.players;

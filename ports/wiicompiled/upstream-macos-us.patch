@@ -3580,7 +3580,7 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..b96a35c 100644
+index 8c96414..3f3e274 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
 @@ -9,7 +9,9 @@
@@ -3633,7 +3633,7 @@ index 8c96414..b96a35c 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,14 +190,14 @@ bool g_soundPaused = false;
+@@ -186,18 +190,21 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3651,7 +3651,14 @@ index 8c96414..b96a35c 100644
  constexpr uint32_t kProcStopBits = 0x2u | 0x4u | 0x8u;
  uint32_t g_procBitsAdded = 0; // only the bits this menu set, so the game's own are never cleared
  
-@@ -234,7 +238,7 @@ void SetGameStopped(bool stopped) {
+ void SetGameStopped(bool stopped) {
++    // In an online session the game is never stopped from here: the stop is a write to game memory
++    // on this machine only, which the others would not make (a desync). The session runs on.
++    if (nsmbw_room::InSession()) return;
+     uint32_t word = 0;
+     if (Memory::TryRead32(kGameStopAddr, word)) {
+         uint32_t next = word;
+@@ -234,7 +241,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3660,7 +3667,7 @@ index 8c96414..b96a35c 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
-@@ -254,7 +258,7 @@ void LogMenu(const char* what, const char* why) {
+@@ -254,7 +261,7 @@ void LogMenu(const char* what, const char* why) {
  
  // ---- Screens and state --------------------------------------------------------------------------
  
@@ -3669,7 +3676,7 @@ index 8c96414..b96a35c 100644
  Screen g_screen = Screen::Options;
  
  // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
-@@ -271,6 +275,28 @@ struct BindState {
+@@ -271,6 +278,28 @@ struct BindState {
      bool capturing = false;
  } g_bind;
  
@@ -3698,7 +3705,7 @@ index 8c96414..b96a35c 100644
  // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
  // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
  int BindSlots() { return 4; }
-@@ -278,6 +304,9 @@ int BindSlots() { return 4; }
+@@ -278,6 +307,9 @@ int BindSlots() { return 4; }
  // Set when a menu opened from the pause window has finished closing; the pause input handler
  // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
  std::atomic<bool> g_returnToPause{false};
@@ -3708,7 +3715,7 @@ index 8c96414..b96a35c 100644
  
  // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
  void Close(const char* why) {
-@@ -299,6 +328,12 @@ void FinishClose() {
+@@ -299,6 +331,12 @@ void FinishClose() {
      SetGameStopped(false);
      if (g.fromPause) g_returnToPause = true;
      g.fromPause = false;
@@ -3721,7 +3728,7 @@ index 8c96414..b96a35c 100644
  }
  
  void Open(const char* why, bool fromPause) {
-@@ -319,6 +354,23 @@ void ShowScreen(Screen screen) {
+@@ -319,6 +357,23 @@ void ShowScreen(Screen screen) {
      g.openedAt = draw::Now();
  }
  
@@ -3745,7 +3752,7 @@ index 8c96414..b96a35c 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +519,146 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +522,148 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3785,9 +3792,10 @@ index 8c96414..b96a35c 100644
 +}
 +
 +// The Online screen's rows for the room's state: the actions in order (labels drawn in DrawOnline).
-+enum class OnlineAction { Host, Join, Connect, Start, Close, Leave };
++enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession };
 +std::vector<OnlineAction> OnlineActions(const nsmbw_room::View& v) {
 +    using nsmbw_room::Role;
++    if (nsmbw_room::InSession()) return {OnlineAction::LeaveSession};
 +    if (v.role == Role::Hosting) return {OnlineAction::Start, OnlineAction::Close};
 +    if (v.role == Role::Joining || v.role == Role::Joined) return {OnlineAction::Leave};
 +    if (g_online.entering) return {OnlineAction::Connect};
@@ -3827,6 +3835,7 @@ index 8c96414..b96a35c 100644
 +            break;
 +        case OnlineAction::Start: ok = v.canStart && nsmbw_room::Start(error); if (!v.canStart) error = "Nobody has joined yet"; break;
 +        case OnlineAction::Close: case OnlineAction::Leave: nsmbw_room::Leave(); break;
++        case OnlineAction::LeaveSession: nsmbw_room::RequestLeaveSession(); break;
 +        }
 +        g_online.error = ok ? std::string() : error;
 +        g_online.row = 0;
@@ -3892,7 +3901,20 @@ index 8c96414..b96a35c 100644
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -588,7 +776,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -566,6 +759,12 @@ void SetOpen(bool open) noexcept {
+     }
+     Play(kSndPause);
+     Open("F10", false);
++    // In a session F10 opens the Online screen (Leave the session); settings wait until after it.
++    if (nsmbw_room::InSession()) {
++        g_online.entering = false;
++        g_online.row = 0;
++        g_screen = Screen::Online;
++    }
+ }
+ 
+ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +787,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
@@ -3902,7 +3924,7 @@ index 8c96414..b96a35c 100644
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -599,6 +788,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -599,6 +799,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              }
              continue;
          }
@@ -3910,7 +3932,7 @@ index 8c96414..b96a35c 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +997,160 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1008,185 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -3976,7 +3998,7 @@ index 8c96414..b96a35c 100644
 +    c.Mario("Online", 0, 132, 40);
 +    const draw::TextStyle header{.white = Rgb(200, 215, 230), .outline = true};
 +    std::string line;
-+    if (nsmbw_room::InSession()) line = "In an online session";
++    if (nsmbw_room::InSession()) line = "In an online session (the game keeps running)";
 +    else if (v.role == Role::None) line = g_online.entering ? "Join a room: the host's address" : "Play together over the network";
 +    else line = v.status;
 +    c.Text(line, 0, 94, 17, header);
@@ -4010,7 +4032,8 @@ index 8c96414..b96a35c 100644
 +        y = 10;
 +    }
 +
-+    static constexpr const char* kLabels[] = {"Host a room", "Join a room", "Join", "Start the game", "Close the room", "Leave the room"};
++    static constexpr const char* kLabels[] = {"Host a room", "Join a room", "Join", "Start the game", "Close the room",
++                                              "Leave the room", "Leave the session"};
 +    float rowY = std::min(y - 6, -40.0f);
 +    for (size_t i = 0; i < actions.size(); ++i) {
 +        const bool focused = int(i) == g_online.row;
@@ -4027,6 +4050,30 @@ index 8c96414..b96a35c 100644
 +        c.Text(g_online.error, -262, kPromptY, 16, {.white = Rgb(255, 120, 100), .align = Align::Left, .outline = true});
 +    }
 +    DrawPrompts(c, kPromptY, {MenuPrompt("Select", "confirm"), MenuPrompt("Back", "back")});
++}
++
++// A line at the top left while the menu is closed: an open room, a running session, or (for 10 s
++// after the restart) why a session ended.
++void DrawOnlineBanner() {
++    static float firstFrame = -1;
++    const float now = draw::Now();
++    if (firstFrame < 0) firstFrame = now;
++    std::string text;
++    draw::Color colour = Rgb(255, 255, 160);
++    if (nsmbw_room::Active()) {
++        const nsmbw_room::View v = nsmbw_room::Snapshot();
++        text = v.role == nsmbw_room::Role::Hosting ? "Online room: " + std::to_string(v.members.size()) + " players"
++             : v.role == nsmbw_room::Role::Joined  ? "In an online room, waiting for the host"
++                                                   : "Joining an online room...";
++    } else if (const std::string ended = nsmbw_room::EndedMessage(); !ended.empty() && now - firstFrame < 600) {
++        text = ended;
++        colour = Rgb(255, 170, 120);
++    } else {
++        return;
++    }
++    if (!art::Load()) return;
++    const draw::Canvas c(/*shrinkOthers=*/false, 1.0f);
++    c.Text(text, -296, 214, 15, {.white = colour, .align = Align::Left, .outline = true});
 +}
 +
 +// Set on the game thread by the file select's Online button once its press animation has played.
@@ -4071,7 +4118,7 @@ index 8c96414..b96a35c 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,9 +1216,25 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1252,30 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4097,7 +4144,12 @@ index 8c96414..b96a35c 100644
      if (!g.open) OpenOnFirstLaunch();
      if (!g.open) {
          ClearHeldIfReleased();
-@@ -906,10 +1266,12 @@ void Draw() noexcept {
+         nsmbw_movie_skip::Draw();
++        DrawOnlineBanner();
+         return;
+     }
+     if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
+@@ -906,10 +1303,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4111,13 +4163,16 @@ index 8c96414..b96a35c 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1296,7 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1333,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
 +extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
 +extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
 +extern "C" void NsmbwOnlineMenuRequestOpen() { nsmbw_options_menu::g_openOnline = true; }
++// The lockstep layer sends no local input while the menu is open in a session (its keys are the
++// menu's, not the player's).
++extern "C" bool NsmbwOptionsMenuIsOpen() { return nsmbw_options_menu::IsOpen(); }
 +extern "C" bool NsmbwOnlineMenuTakeClosed() { return nsmbw_options_menu::g_onlineClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
 index a63636b..7cbcbf7 100644
@@ -8979,10 +9034,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..7c09f3b
+index 0000000..4e48d79
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,681 @@
+@@ -0,0 +1,748 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9010,6 +9065,10 @@ index 0000000..7c09f3b
 +#include "nsmbw_online_room.h"
 +
 +#include "runtime_config.h"
++
++#include <SDL3/SDL_video.h>
++#include <SDL3/SDL_events.h>
++#include <atomic>
 +
 +#ifdef _WIN32
 +#include <winsock2.h>
@@ -9400,6 +9459,26 @@ index 0000000..7c09f3b
 +#endif
 +}
 +
++// Replaces this process with a new copy of the game (the environment carries what it should do).
++[[noreturn]] void RestartSelf() {
++    if (r.sock != kNoSocket) CloseSocket(r.sock);
++    r.sock = kNoSocket;
++    NsmbwPrepareImmediateExit();
++    std::fflush(stderr);
++    const std::string exe = ExecutablePath();
++#ifdef _WIN32
++    // _execv starts the new process and ends this one.
++    const char* argv[] = {exe.c_str(), nullptr};
++    _execv(exe.c_str(), argv);
++#else
++    char* argv[] = {const_cast<char*>(exe.c_str()), nullptr};
++    execv(exe.c_str(), argv);
++#endif
++    std::fprintf(stderr, "[nsmbw][room] could not restart the game\n");
++    std::fflush(stderr);
++    std::_Exit(4);
++}
++
 +[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, int players, int mySlot,
 +                           const std::vector<sockaddr_in>& slots) {
 +    std::string peers;
@@ -9434,22 +9513,15 @@ index 0000000..7c09f3b
 +    SetEnv("NSMBW_NETPLAY_TOKEN", token);
 +    std::fprintf(stderr, "[nsmbw][room] starting the session: slot %d of %d, delay %d, peers %s\n", mySlot, players, delay,
 +                 peers.c_str());
-+    if (r.sock != kNoSocket) CloseSocket(r.sock);
-+    r.sock = kNoSocket;
-+    NsmbwPrepareImmediateExit();
-+    std::fflush(stderr);
-+    const std::string exe = ExecutablePath();
++    RestartSelf();
++}
++
++void UnsetEnv(const char* name) {
 +#ifdef _WIN32
-+    // _execv starts the new process and ends this one.
-+    const char* argv[] = {exe.c_str(), nullptr};
-+    _execv(exe.c_str(), argv);
++    _putenv_s(name, "");
 +#else
-+    char* argv[] = {const_cast<char*>(exe.c_str()), nullptr};
-+    execv(exe.c_str(), argv);
++    unsetenv(name);
 +#endif
-+    std::fprintf(stderr, "[nsmbw][room] could not restart the game into the session\n");
-+    std::fflush(stderr);
-+    std::_Exit(4);
 +}
 +
 +} // namespace
@@ -9663,13 +9735,63 @@ index 0000000..7c09f3b
 +
 +bool Active() { return r.role != Role::None; }
 +
++std::string EndedMessage() {
++    const char* m = std::getenv("NSMBW_ONLINE_ENDED");
++    return m ? std::string(m) : std::string();
++}
++
++std::atomic<bool> g_leaveRequested{false};
++void RequestLeaveSession() { g_leaveRequested = true; }
++bool TakeLeaveRequest() { return g_leaveRequested.exchange(false); }
++
++[[noreturn]] void EndSession(const char* reason) {
++    // Back to the normal game: the same copy restarted without the session's settings, on the
++    // player's own save; the reason is shown once it is up (EndedMessage).
++    for (const char* name : {"NSMBW_NETPLAY_PORT", "NSMBW_NETPLAY_BIND", "NSMBW_NETPLAY_SLOT", "NSMBW_NETPLAY_PLAYERS",
++                             "NSMBW_NETPLAY_PEERS", "NSMBW_NETPLAY_DELAY", "NSMBW_NETPLAY_TOKEN", "NSMBW_NAND_ROOT"}) {
++        UnsetEnv(name);
++    }
++    SetEnv("NSMBW_ONLINE_ENDED", reason ? reason : "The online session ended");
++    std::fprintf(stderr, "[nsmbw][room] session ended: %s; restarting the normal game\n", reason ? reason : "");
++    RestartSelf();
++}
++
++void SetWaitingTitle(const char* text) {
++    static std::string saved;
++    static bool showing = false;
++    int count = 0;
++    SDL_Window** windows = SDL_GetWindows(&count);
++    SDL_Window* w = (windows && count > 0) ? windows[0] : nullptr;
++    SDL_free(windows);
++    if (w == nullptr) return;
++    if (text != nullptr) {
++        if (!showing) {
++            const char* t = SDL_GetWindowTitle(w);
++            saved = t ? t : "";
++            showing = true;
++        }
++        SDL_SetWindowTitle(w, (saved.empty() ? std::string(text) : saved + " - " + text).c_str());
++    } else if (showing) {
++        SDL_SetWindowTitle(w, saved.c_str());
++        showing = false;
++    }
++}
++
 +} // namespace nsmbw_room
++
++extern "C" bool NsmbwOnlineTakeLeaveRequest() { return nsmbw_room::TakeLeaveRequest(); }
++extern "C" void NsmbwOnlineEndSession(const char* reason) { nsmbw_room::EndSession(reason); }
++extern "C" void NsmbwOnlineSetWaitingTitle(const char* textOrNull) { nsmbw_room::SetWaitingTitle(textOrNull); }
++extern "C" bool NsmbwOnlinePumpEventsQuit() {
++    SDL_PumpEvents();
++    return SDL_HasEvent(SDL_EVENT_QUIT) || SDL_HasEvent(SDL_EVENT_WINDOW_CLOSE_REQUESTED);
++}
 diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
 new file mode 100644
-index 0000000..26f196c
+index 0000000..294e990
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,62 @@
 +#pragma once
 +// Online play rooms (NSMBW repo docs/online-play.md, sections 5 and 7): the part before a session.
 +// One machine hosts a room on a UDP port, the others join it by address; the room screen
@@ -9714,8 +9836,24 @@ index 0000000..26f196c
 +bool Active();
 +// This copy is running an online session (started by a room's Start, or by hand with NSMBW_NETPLAY_*).
 +bool InSession();
++// Set in the normal game after a session ended (the reason), empty otherwise.
++std::string EndedMessage();
++// The session's Leave button: the lockstep layer takes the request at its next frame boundary.
++void RequestLeaveSession();
++bool TakeLeaveRequest();
++// Restarts this copy as the normal game (own save, no session), with `reason` for EndedMessage.
++[[noreturn]] void EndSession(const char* reason);
++// Window title while the session waits on another player (null restores it).
++void SetWaitingTitle(const char* text);
 +
 +} // namespace nsmbw_room
++
++// For the lockstep layer (ports/wiicompiled/native_us/nsmbw_netplay_lockstep.cpp).
++extern "C" bool NsmbwOnlineTakeLeaveRequest();
++extern "C" [[noreturn]] void NsmbwOnlineEndSession(const char* reason);
++extern "C" void NsmbwOnlineSetWaitingTitle(const char* textOrNull);
++// Pumps the window's events while the session waits; true if the window was closed.
++extern "C" bool NsmbwOnlinePumpEventsQuit();
 diff --git a/runtime/include/nand_path.h b/runtime/include/nand_path.h
 index df24a1a..64d8b28 100644
 --- a/runtime/include/nand_path.h

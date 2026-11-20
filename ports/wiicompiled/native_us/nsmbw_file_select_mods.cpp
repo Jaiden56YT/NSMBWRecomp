@@ -41,6 +41,7 @@
 // If the layout patch failed (NsmbwFileSelectHasMods false), choice 5 never happens and every
 // function here does exactly what the original does.
 #include <cstdint>
+#include <cstdlib>
 #include "hle_stubs.h"
 #include "ppc_runtime.h"
 #include "abi_bridge.h"
@@ -343,6 +344,13 @@ extern "C" void NsmbwFileSelect_ButtonHitExecute(CpuContext* ctx) {
     }
     if (choice != kMods && choice != kOnline) {
         ChangeState(ctx, self, kStateGameStart);
+        return;
+    }
+    // In an online session the menus are local to one machine; opening one here would hold this
+    // machine's file select while the others' went on (a desync). The button just comes back.
+    if (const char* port = std::getenv("NSMBW_NETPLAY_PORT"); port != nullptr && port[0] != '\0') {
+        MemoryInline::FlatWrite32(self + kPrevChoice, 0xFFFFFFFFu);
+        ChangeState(ctx, self, kStateButtonSelect);
         return;
     }
     // Mods / Online: the menu opens over the frozen file select (it stops the game's processes while
