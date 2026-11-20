@@ -3038,7 +3038,7 @@ index 723569c..b3676e0 100644
      return NAND_RESULT_OK;
  }
 diff --git a/runtime/src/hle/storage/nand_isfs.cpp b/runtime/src/hle/storage/nand_isfs.cpp
-index dd3cc1a..e831c28 100644
+index dd3cc1a..eaf2020 100644
 --- a/runtime/src/hle/storage/nand_isfs.cpp
 +++ b/runtime/src/hle/storage/nand_isfs.cpp
 @@ -409,7 +409,7 @@ extern "C" void NAND_IOS_OpenBody_HLE_801938FC(CpuContext* ctx) {
@@ -3050,7 +3050,24 @@ index dd3cc1a..e831c28 100644
  
  extern "C" int32_t NAND_IOS_Close_HLE(uint32_t fd) {
      if (NandTraceEnabled()) RT_LOGF(RT_TAG_NAND, "trace IOS_Close(fd=%d)\n", fd);
-@@ -910,13 +910,13 @@ int32_t ISFS_OpenLib_Initialize(CpuContext* ctx) {
+@@ -646,6 +646,16 @@ extern "C" int32_t NAND_IOS_Ioctl_HLE(
+                 if (NandRename(srcHost, dstHost)) {
+                     return ISFS_OK;
+                 }
++                // IOS answers a missing source or destination folder with ENOENT, not EIO; save code
++                // that backs up an old file first (nsmbw-project: rename save -> save-old) treats
++                // ENOENT as "nothing to back up" and goes on.
++                {
++                    std::error_code ec;
++                    if (!std::filesystem::exists(srcHost, ec) ||
++                        !std::filesystem::is_directory(dstHost.parent_path(), ec)) {
++                        return ISFS_ENOENT;
++                    }
++                }
+                 return ISFS_EIO;
+             }
+             
+@@ -910,13 +920,13 @@ int32_t ISFS_OpenLib_Initialize(CpuContext* ctx) {
  
              ctx->gpr[3] = heapBase;
              ctx->gpr[4] = heapSize;
@@ -3068,7 +3085,7 @@ index dd3cc1a..e831c28 100644
  
              ctx->gpr[3] = savedR3;
              ctx->gpr[4] = savedR4;
-@@ -935,7 +935,7 @@ extern "C" void ISFS_OpenLib_HLE_80169BCC(CpuContext* ctx) {
+@@ -935,7 +945,7 @@ extern "C" void ISFS_OpenLib_HLE_80169BCC(CpuContext* ctx) {
      ctx->gpr[3] = static_cast<uint32_t>(ISFS_OpenLib_Initialize(ctx));
  }
  
@@ -5257,10 +5274,27 @@ index 723f63e..2938125 100644
  constexpr uint32_t kMiIntsrIndex = 15u; // MI_INTSR (0xCC00401E) - write-1-to-clear
  
 diff --git a/runtime/src/hle/storage/nand_fs.cpp b/runtime/src/hle/storage/nand_fs.cpp
-index 5b35e16..088d7a0 100644
+index 5b35e16..da5754c 100644
 --- a/runtime/src/hle/storage/nand_fs.cpp
 +++ b/runtime/src/hle/storage/nand_fs.cpp
-@@ -117,6 +117,20 @@ bool NandRemove(const std::filesystem::path& path) {
+@@ -91,6 +91,16 @@ std::string CurrentNandDataDir() {
+ const std::filesystem::path& GetNandBasePath() {
+     std::call_once(g_dolphinWiiBaseOnce, []() {
+         g_dolphinWiiBase = RuntimeNandPath::DiscoverNandRootPath();
++        // An installed title always has /title/<hi>/<lo>/data on a console. ISFS_OpenLib_Initialize
++        // and NANDInit_HLE create it, but both are bound at Mario Kart Wii addresses and never run
++        // for NSMBW, so a fresh NAND had no title folder at all. NSMBW's own save code creates
++        // data/ itself, but nsmbw-project renames its save to /title/00010004/534d4e45/
++        // mkwcat-nsmbw.json (outside data/), which failed with no parent folder and left the world
++        // map waiting on the save (no input).
++        char titleDir[48];
++        std::snprintf(titleDir, sizeof(titleDir), "title/%08x/%08x/data", kNandTitleIdHi, CurrentMkwTitleIdLo());
++        std::error_code ec;
++        std::filesystem::create_directories(g_dolphinWiiBase / titleDir, ec);
+     });
+ 
+     return g_dolphinWiiBase;
+@@ -117,6 +127,20 @@ bool NandRemove(const std::filesystem::path& path) {
  bool NandRename(const std::filesystem::path& from, const std::filesystem::path& to) {
      std::error_code ec;
      std::filesystem::rename(from, to, ec);

@@ -566,6 +566,29 @@ GameCube controllers and the mod's own features are not tested yet. Two bugs sto
    another object (null virtual call in sStateMethod_c::changeStateMethod). Fix: game_layout follows
    the fixSize rule.
 
+Levels (2026-11-20, later): **1-1 plays** on a file that already exists (title, file select, map,
+course-in, 1-1; Mario died and re-entered three times in one run, no crash; screenshots in 1-1 with the
+HUD and timer running). Found on the way:
+
+3. NAND (runtime, in the patch): nsmbw-project replaces wiimj2d.sav with its own JSON save, written to
+   /tmp and renamed to /title/00010004/534d4e45/mkwcat-nsmbw.json (outside data/, so not covered by
+   the pack's save redirect). A fresh recomp NAND had no /title folder at all: ISFS_OpenLib_Initialize
+   and NANDInit_HLE, which create it, are bound at Mario Kart Wii addresses and never run for NSMBW.
+   The rename failed with EIO (-114). Fix: GetNandBasePath creates /title/<hi>/<lo>/data with the
+   NAND root, and a rename with a missing source or destination folder returns ENOENT like IOS
+   (nsmbw-project first renames the old save to -old.json and expects ENOENT when there is none).
+   Saves now succeed and load on the next start.
+4. Still open: on a **new file** the first world-map visit after the opening movie takes no input
+   (Mario stays on the start node, - does nothing, 3 minutes). The controller the map reads
+   (mPad::g_currentCore, 0x8076129C) does get the presses (NSMBW_WATCH_RANGE on it shows them), so the
+   map's own first-visit sequence never hands control over. nsmbw-project's checkCsGuideKey reads input
+   only when daWmPlayer_c::UNDEF_809087A0() is true and dCsSeqMng_c has no script running; one of
+   those is the likely gate (bodies not in its source). Workaround: quit after the save and start
+   again - a loaded file goes straight to a working map.
+
+New diagnostic: NSMBW_WATCH_RANGE=<hex addr>,<words> logs every word of a block that changes per VI
+tick (nsmbw_tick_read_pump.cpp).
+
 Ruled out on the way: leaf inlining (none of the 775 replaced functions is inlined in the mod
 build's translation), the reference / player-count patches, the state-change diagnostic override.
 

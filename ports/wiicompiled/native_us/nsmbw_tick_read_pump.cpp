@@ -23,6 +23,7 @@
 #include "memory.h"
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 // Keyboard input used to be polled here and injected as "just pressed" edges into
 // EGG::CoreController::downTrigger. Since 2026-09-20 real samples go through KPADRead instead
@@ -313,6 +314,38 @@ void NsmbwWatchWrite() {
     last = cur;
 }
 
+// NSMBW_WATCH_RANGE=<hex guest address>,<word count>: poll a block of words every VI tick and log
+// each word that changed (offset, old, new), no call list. For finding which field of an object
+// follows an input or a state: added to see whether the controller the world map reads
+// (mPad::g_currentCore) takes the presses that dGameKey sees with nsmbw-project built in.
+void NsmbwWatchRange() {
+    static uint32_t addr = 0, count = 0;
+    static std::vector<uint32_t> last;
+    static bool parsed = false;
+    if (!parsed) {
+        parsed = true;
+        if (const char* v = AURORA_ENV("NSMBW_WATCH_RANGE")) {
+            char* end = nullptr;
+            addr = static_cast<uint32_t>(std::strtoul(v, &end, 16));
+            count = (end && *end == ',') ? static_cast<uint32_t>(std::strtoul(end + 1, nullptr, 0)) : 16u;
+            if (count > 4096) count = 4096;
+            last.assign(count, 0);
+        }
+    }
+    if (addr == 0 || count == 0) return;
+    static bool have = false;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t cur = 0;
+        if (!Memory::TryRead32(addr + 4u * i, cur)) continue;
+        if (have && cur != last[i]) {
+            std::fprintf(stderr, "[nsmbw][range] +0x%03X (0x%08X): 0x%08X -> 0x%08X at tick %u scene %u\n", 4u * i,
+                         addr + 4u * i, last[i], cur, g_nsmbwCurrentViTick, g_nsmbwCurrentSceneProfile);
+        }
+        last[i] = cur;
+    }
+    have = true;
+}
+
 // NSMBW_DEBUG_P1_CHARACTER=<0..3> (0 Mario, 1 Luigi, 2 Yellow Toad, 3 Blue Toad): experiment for
 // "let player 1 pick any character". Writes daPyMng_c::mPlayerType[0] (0x80354E60, a u32 enum per
 // player; syms.txt) while the world map is up, and nowhere else, so whatever the level shows was
@@ -339,6 +372,7 @@ extern "C" void nsmbw_tick_read_pump_801be010(CpuContext* ctx)
     NsmbwDiagWatch();
     NsmbwDebugP1Character();
     NsmbwWatchWrite();
+    NsmbwWatchRange();
     NsmbwDumpScnObjs();
     ctx->gpr[3] = ::Memory::Read32(0x8042A86Cu);
     g_nsmbwCurrentViTick = ctx->gpr[3];
