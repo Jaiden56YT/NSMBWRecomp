@@ -3707,7 +3707,7 @@ index 8c96414..ce9053e 100644
 +extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
 +extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..e61b1c4 100644
+index a63636b..413003e 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -37,8 +37,10 @@
@@ -3896,8 +3896,19 @@ index a63636b..e61b1c4 100644
      if (AURORA_ENV("NSMBW_RESET_SAVE") != nullptr && std::filesystem::exists(saveDir, ec)) {
          const auto removed = std::filesystem::remove_all(saveDir, ec);
          std::printf("[nsmbw] Reset: removed NSMBW NAND save (%llu entries) at %s\n",
-@@ -783,7 +802,249 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
+@@ -781,9 +800,260 @@ void ResetPersistentStateForCleanRun(const std::filesystem::path& cacheDir) {
  
+ } // namespace
+ 
++// For native code that ends the process with _exit (the replay's NSMBW_REPLAY_EXIT_AT, which
++// skips atexit on purpose): the two steps of a clean exit that atexit would have done, as on a
++// window close (ExitForAuroraWindowClose). Without them the next launch found the crash marker and
++// wiped the pipeline cache, and the recipes this run had queued were lost.
++extern "C" void NsmbwPrepareImmediateExit() {
++    aurora_flush_pipeline_cache();
++    ClearCrashMarker();
++}
++
  void NsmbwEnsureDiscFolder();
  
 +#if defined(__SWITCH__)
@@ -4146,7 +4157,7 @@ index a63636b..e61b1c4 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -863,7 +1124,7 @@ int main() {
+@@ -863,7 +1133,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -4155,7 +4166,7 @@ index a63636b..e61b1c4 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1234,21 @@ int main() {
+@@ -973,7 +1243,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -4177,7 +4188,7 @@ index a63636b..e61b1c4 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1343,11 @@ int main() {
+@@ -1068,11 +1352,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
