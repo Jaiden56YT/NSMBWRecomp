@@ -1,6 +1,6 @@
 # NSMBW mods on the recomp
 
-Status: 2026-11-18. Survey of how NSMBW mods are built and shipped, what the recomp does with
+Status: 2026-11-19. Survey of how NSMBW mods are built and shipped, what the recomp does with
 each kind, the design for code mods, and what is left.
 
 ## Summary
@@ -106,6 +106,15 @@ of Dolphin's) and overlay roots from Config.toml for Mario Kart Wii's Retro Rewi
   ```
   With no `[options]` and no `riivolution/config/SMNE.xml`, an XML whose options are all off gets
   every option's first choice, so a dropped-in pack does something; the log says so.
+- **partial file patches** (`<file offset fileoffset length resize>`, since 2026-11-19): the DVD
+  layer copies the file currently mapped at that disc path (the vanilla file, or an earlier
+  patch's result), writes `length` bytes of the external file from `fileoffset` at `offset`, and
+  maps the result. Dolphin's rules: length 0 takes the rest of the external file, a gap past the
+  end is zero-filled, `resize="false"` keeps the original size, `create` allows a new file. The
+  results go to `$TMPDIR/nsmbw-riivo-partial-<random>/` (one folder per process, so several game
+  copies don't collide), removed at exit; folders over a day old are swept at startup, since a
+  killed process leaves its folder behind. Before this they were whole-file replacements, which
+  broke any pack that patched a few bytes of a large archive.
 - **memory patches**: `riivolution_memory.cpp` applies `<memory>` patches (see 3).
 - **logging**: `[riivolution]` lines list each mod, its active patches, mappings and memory
   patches; the DVD layer logs `mod file read: <disc path> <- <host file>` the first time a mod
@@ -113,7 +122,6 @@ of Dolphin's) and overlay roots from Config.toml for Mario Kart Wii's Retro Rewi
 
 Known gaps in the file layer:
 
-- `<file offset/length>` partial patches are applied as whole-file replacements (warned).
 - The four RELs are pre-loaded at fixed addresses (`nsmbw_preseeded_rel_link.cpp` skips their
   disc load), so a mod that replaces `rels/*.rel.LZ` has no effect. That is a code mod anyway.
 - `<savegame>` redirection is upstream code and untested with NSMBW.
@@ -481,6 +489,18 @@ commands go through the same `Dispatch`), more than five packs (scrolling), 4:3 
 Test switch: `NSMBW_MODS_MENU_TEST=<d|u|s|b...>` sends down / up / select / back to the mods
 screen, one every 40 frames after it opens.
 
+## 6c. Partial file patches (2026-11-19, Mac)
+
+`tools/tests/make_partial_testmod.py <extracted disc> <mods folder>` writes a pack with four
+`<file>` patches (see its header). Run muted with scratch user data and the self-test presses:
+the log has one `partial patch` line each (`0x200 bytes at 0x100 ... size 11038 -> 11038` twice
+for 01-01.arc, `size 0 -> 29` for the created file, `0x0 bytes at 0x7ffffff0` for the fixed-size
+one), the game read `/Stage/01-01.arc` from the temporary folder and played 1-1. The spliced files,
+copied while the game ran, compared byte for byte with what Python computed: zeros after step 1,
+the original after step 2, 16 zero bytes + the text for the new file, 01-02.arc unchanged. A
+folder dated two days back was removed at the next start and the running game's folder kept.
+Not tried: a released pack that uses partial patches (none of the five test packs do), the Switch.
+
 ## 7. Next steps
 
 1. NewerSMBW: play further worlds (bosses, Koopatlas features, the credits) to find what else
@@ -492,4 +512,4 @@ screen, one every 40 frames after it opens.
    patched functions are re-translated.
 4. Mods menu: per-mod Riivolution options (choices) on their own screen; hot reload of file-only
    packs without a restart.
-5. Partial `<file offset length>` patches; `<savegame>` test.
+5. `<savegame>` test (partial file patches done, 6c).

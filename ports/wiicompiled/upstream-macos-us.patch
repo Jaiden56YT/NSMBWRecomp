@@ -2600,7 +2600,7 @@ index 62c4411..365fa9c 100644
      if (!Memory::Contains(kProductCodeAddress, sizeof(kProductCode))) {
          return 0;
 diff --git a/runtime/src/hle/storage/dvd.cpp b/runtime/src/hle/storage/dvd.cpp
-index 5ea4232..8aed1c3 100644
+index 5ea4232..e62264e 100644
 --- a/runtime/src/hle/storage/dvd.cpp
 +++ b/runtime/src/hle/storage/dvd.cpp
 @@ -10,6 +10,7 @@
@@ -2611,7 +2611,15 @@ index 5ea4232..8aed1c3 100644
  #include "dvd_generated_files.h"
  #include "ppc_runtime.h"
  #include "recomp_mod_loader.h"
-@@ -25,6 +26,7 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+@@ -17,6 +18,7 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
+ #include "runtime_log.h"
+ #include "runtime_product.h"
+ 
++#include <chrono>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <cstdio>
+@@ -25,11 +27,14 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
  #include <vector>
  #include <string>
  #include <map>
@@ -2619,7 +2627,14 @@ index 5ea4232..8aed1c3 100644
  #include <unordered_set>
  #include <filesystem>
  #include <iostream>
-@@ -73,6 +75,9 @@ struct DVDFileEntry {
+ #include <fstream>
++#include <iterator>
+ #include <mutex>
++#include <random>
+ #include <sstream>
+ #include <utility>
+ 
+@@ -73,6 +78,9 @@ struct DVDFileEntry {
      uint32_t size;
      uint32_t discOffsetWords = 0;
      bool isDirectory = false;
@@ -2629,7 +2644,7 @@ index 5ea4232..8aed1c3 100644
  };
  
  struct FstFileEntry {
-@@ -94,6 +99,8 @@ struct PublishedExtent {
+@@ -94,6 +102,8 @@ struct PublishedExtent {
  };
  static std::vector<PublishedExtent> g_publishedExtents;
  static bool g_dvdInitialized = false;
@@ -2638,7 +2653,7 @@ index 5ea4232..8aed1c3 100644
  static std::vector<FstFileEntry> g_fstFiles;
  static bool g_fstLoaded = false;
  static std::unordered_set<std::string> g_loggedReadErrors;
-@@ -397,6 +404,26 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
+@@ -397,6 +407,26 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
          readLength = entry.size - fileOffset;
      }
  
@@ -2665,7 +2680,7 @@ index 5ea4232..8aed1c3 100644
      out.entry = &entry;
      out.fileOffset = fileOffset;
      out.readLength = readLength;
-@@ -415,6 +442,7 @@ static void RegisterFileEntry(std::string dvdPath, const fs::path& hostPath, uin
+@@ -415,6 +445,7 @@ static void RegisterFileEntry(std::string dvdPath, const fs::path& hostPath, uin
      fileEntry.hostPath = hostPath;
      fileEntry.dvdPath = dvdPath;
      fileEntry.size = size;
@@ -2673,7 +2688,7 @@ index 5ea4232..8aed1c3 100644
  
      const int32_t entryNum = static_cast<int32_t>(g_fileEntries.size());
      g_fileEntries.push_back(std::move(fileEntry));
-@@ -497,10 +525,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
+@@ -497,10 +528,33 @@ static void ScanDirectory(const fs::path& root, const std::string& virtualPrefix
              return;
          }
  
@@ -2708,7 +2723,122 @@ index 5ea4232..8aed1c3 100644
  
          std::string prefix = virtualPrefix.empty() ? "/" : virtualPrefix;
          if (prefix.back() != '/' && prefix.back() != '\\') {
-@@ -703,11 +754,20 @@ static void BuildAndPublishRuntimeFst() {
+@@ -562,6 +616,100 @@ static void ApplyFolderByNameMapping(const RuntimeRiivolution::Mapping& mapping)
+               << " disc file(s) by filename" << std::endl;
+ }
+ 
++// Riivolution partial file patch (<file offset fileoffset length>): splice bytes of the external
++// file into the disc file currently registered at the path (the vanilla file or an earlier
++// overlay's), write the result to a per-process temporary folder and register that. Dolphin
++// semantics: length 0 takes the rest of the external file; without resize the result keeps the
++// original size (bytes past it are dropped); a gap past the end is zero-filled.
++static fs::path PartialPatchDir() {
++    static fs::path dir;
++    if (!dir.empty()) {
++        return dir;
++    }
++    std::error_code ec;
++    const fs::path base = fs::temp_directory_path(ec);
++    if (ec) {
++        return {};
++    }
++    // atexit does not run when the process is killed or crashes, so sweep folders a day old
++    // (not newer ones: other instances may be running, e.g. online-play tests).
++    const auto now = fs::file_time_type::clock::now();
++    for (const auto& entry : fs::directory_iterator(base, ec)) {
++        std::error_code entryEc;
++        if (entry.path().filename().string().rfind("nsmbw-riivo-partial-", 0) == 0 &&
++            now - fs::last_write_time(entry.path(), entryEc) > std::chrono::hours(24) && !entryEc) {
++            fs::remove_all(entry.path(), entryEc);
++        }
++    }
++    ec.clear();
++    std::random_device rd;
++    fs::path candidate = base / ("nsmbw-riivo-partial-" + std::to_string(rd()) + std::to_string(rd()));
++    fs::create_directories(candidate, ec);
++    if (ec) {
++        return {};
++    }
++    dir = candidate;
++    std::atexit([] {
++        std::error_code cleanupEc;
++        fs::remove_all(dir, cleanupEc);
++    });
++    return dir;
++}
++
++static bool ApplyPartialFileMapping(const RuntimeRiivolution::Mapping& mapping) {
++    std::vector<uint8_t> data;
++    const auto existing = g_pathToEntry.find(NormalizePath(DvdFstContract::CanonicalizePath(mapping.discPath)));
++    if (existing != g_pathToEntry.end()) {
++        std::ifstream in(g_fileEntries[existing->second].hostPath, std::ios::binary);
++        data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++        if (!in.good() && !in.eof()) {
++            return false;
++        }
++    } else if (!mapping.create) {
++        return true; // nothing to patch, nothing to add
++    }
++
++    std::ifstream ext(mapping.hostPath, std::ios::binary);
++    std::vector<uint8_t> external((std::istreambuf_iterator<char>(ext)), std::istreambuf_iterator<char>());
++    if (mapping.fileoffset > external.size()) {
++        RT_LOG(RT_TAG_DVD) << mapping.discPath << ": partial patch fileoffset 0x" << std::hex
++                           << mapping.fileoffset << std::dec << " is past the end of "
++                           << HostPathText(mapping.hostPath) << std::endl;
++        return true;
++    }
++    size_t length = mapping.length != 0 ? mapping.length : external.size() - mapping.fileoffset;
++    length = std::min(length, external.size() - mapping.fileoffset);
++
++    const size_t originalSize = data.size();
++    const size_t offset = mapping.offset;
++    if (!mapping.resize && existing != g_pathToEntry.end()) {
++        // Fixed size: only the part that lands inside the original file is written.
++        length = offset >= originalSize ? 0 : std::min(length, originalSize - offset);
++    } else if (offset + length > data.size()) {
++        data.resize(offset + length, 0);
++    }
++    std::copy_n(external.begin() + mapping.fileoffset, length, data.begin() + std::min(offset, data.size()));
++
++    const fs::path dir = PartialPatchDir();
++    if (dir.empty()) {
++        return false;
++    }
++    static uint32_t counter = 0;
++    const fs::path out = dir / (std::to_string(counter++) + "_" + HostPathText(fs::path(mapping.discPath).filename()));
++    {
++        std::ofstream file(out, std::ios::binary | std::ios::trunc);
++        file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
++        if (!file) {
++            return false;
++        }
++    }
++    RegisterFileEntry(mapping.discPath, out, static_cast<uint32_t>(data.size()));
++    RT_LOG(RT_TAG_DVD) << mapping.discPath << ": partial patch, 0x" << std::hex << length << " bytes at 0x"
++                       << mapping.offset << " from " << std::dec << HostPathText(mapping.hostPath)
++                       << " (size " << originalSize << " -> " << data.size() << ")" << std::endl;
++    return true;
++}
++
+ static void ScanOverlayRoot(const RuntimeRiivolution::Overlay& overlay) {
+     if (!overlay.patches) {
+         // Fallback for mod roots that mirror the disc filesystem directly (not a
+@@ -576,6 +724,13 @@ static void ScanOverlayRoot(const RuntimeRiivolution::Overlay& overlay) {
+     for (const auto& mapping : overlay.patches->mappings) {
+         switch (mapping.kind) {
+         case RuntimeRiivolution::Mapping::Kind::File: {
++            if (mapping.partial) {
++                if (!ApplyPartialFileMapping(mapping)) {
++                    RT_LOG(RT_TAG_DVD) << "WARNING: " << mapping.discPath
++                                       << ": partial patch failed, left unpatched" << std::endl;
++                }
++                break;
++            }
+             if (!mapping.create && !DvdEntryExists(mapping.discPath)) {
+                 break;
+             }
+@@ -703,11 +858,20 @@ static void BuildAndPublishRuntimeFst() {
          FailRuntimeFst(error.what());
      }
  
@@ -2729,7 +2859,7 @@ index 5ea4232..8aed1c3 100644
      }
      g_fileEntries = std::move(indexedEntries);
      g_pathToEntry = std::move(image.pathToEntry);
-@@ -788,7 +848,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
+@@ -788,7 +952,7 @@ extern "C" const char* DVDResolveHostPathForTest(const char* dvdPath)
  
  static void InitDvdWaitingQueues()
  {
@@ -2738,7 +2868,7 @@ index 5ea4232..8aed1c3 100644
      for (uint32_t i = 0; i < 4; ++i) {
          const uint32_t queue = kQueueBase + (i * 8);
          Memory::Write32(queue + 0, queue);
-@@ -802,12 +862,12 @@ static void CompleteDvdCancelState()
+@@ -802,12 +966,12 @@ static void CompleteDvdCancelState()
  
      // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
      // The actual drive work is HLE'd, so complete pending cancel/reset waits.
@@ -2757,7 +2887,7 @@ index 5ea4232..8aed1c3 100644
  }
  
  // 0x8015EA1C -> DVDInit
-@@ -824,14 +884,14 @@ extern "C" void DVDInit_8015EA1C()
+@@ -824,14 +988,14 @@ extern "C" void DVDInit_8015EA1C()
  
      // 1. Initialize Global Flags (Emulate OS state)
      // These addresses are standard OS globals for DVD context
@@ -2777,7 +2907,7 @@ index 5ea4232..8aed1c3 100644
      constexpr uint32_t kMagicValue = 0xFEEBDAED;
      for (int i = 0; i < 4; i++) {
          uint32_t ctx = kContextBase + i * 0x20;
-@@ -867,9 +927,11 @@ extern "C" void DVDInit_8015EA1C()
+@@ -867,9 +1031,11 @@ extern "C" void DVDInit_8015EA1C()
      // reverse discovery order: the explicitly configured root outranks the mod
      // manifest.
      const size_t vanillaEntryCount = g_fileEntries.size();
@@ -2789,7 +2919,7 @@ index 5ea4232..8aed1c3 100644
      RT_LOG(RT_TAG_DVD) << "disc index: " << vanillaEntryCount << " disc file(s), "
                << (g_fileEntries.size() - vanillaEntryCount) << " overlay registration(s) from "
                << overlays.size() << " root(s)" << std::endl;
-@@ -883,7 +945,7 @@ extern "C" void DVDInit_8015EA1C()
+@@ -883,7 +1049,7 @@ extern "C" void DVDInit_8015EA1C()
      BuildAndPublishRuntimeFst();
  
      // Initialize the translated DVD filesystem so it can use the published FST.
@@ -2798,7 +2928,7 @@ index 5ea4232..8aed1c3 100644
      if (TranslatedFunctionRegistry::FindByAddressPtr(kDvdFsInitAddress)) {
          InvokeIndirectCpu(kDvdFsInitAddress, &GetPersistentCpuContext());
      }
-@@ -1196,7 +1258,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
+@@ -1196,7 +1362,9 @@ extern "C" int32_t DVDLowRead_80166330(uint32_t buffer, uint32_t length, uint32_
      CopyToGuestAsDma(buffer, tempBuf.data(), tempBuf.size());
      return finish(true);
  }
@@ -6895,7 +7025,7 @@ index 0000000..acaa978
 +}  // namespace GuestFlat
 +#endif  // __SWITCH__
 diff --git a/runtime/src/hle/storage/riivolution.cpp b/runtime/src/hle/storage/riivolution.cpp
-index 7fddf83..92074a0 100644
+index 7fddf83..b171bd4 100644
 --- a/runtime/src/hle/storage/riivolution.cpp
 +++ b/runtime/src/hle/storage/riivolution.cpp
 @@ -22,14 +22,28 @@
@@ -6978,9 +7108,8 @@ index 7fddf83..92074a0 100644
 +                  << " (using defaults)" << std::endl;
 +    }
 +    return settings;
- }
- 
--std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
++}
++
 +// mods/<name>/ packs: each folder is a virtual SD card root (riivolution/*.xml
 +// plus the folders its XML points at), or, without XML, a disc-shaped overlay.
 +// Higher mod.toml priority wins, then folder name order.
@@ -7031,8 +7160,9 @@ index 7fddf83..92074a0 100644
 +            state.modSettings[candidate.name] = std::move(candidate.settings);
 +        }
 +    }
-+}
-+
+ }
+ 
+-std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots() {
 +std::vector<RuntimeRiivolution::Overlay> RiivoDiscoverRoots(RiivoState& state) {
      std::vector<RuntimeRiivolution::Overlay> overlays;
  
@@ -7046,7 +7176,24 @@ index 7fddf83..92074a0 100644
      return overlays;
  }
  
-@@ -250,8 +363,121 @@ void RiivoCollectMappings(const RiivolutionContract::Patch& patch, const std::st
+@@ -228,8 +341,14 @@ void RiivoCollectMappings(const RiivolutionContract::Patch& patch, const std::st
+             ++set.skippedExternals;
+             continue;
+         }
+-        set.mappings.push_back(
+-            {RuntimeRiivolution::Mapping::Kind::File, file.disc, hostFile, true, file.create});
++        RuntimeRiivolution::Mapping mapping{RuntimeRiivolution::Mapping::Kind::File, file.disc, hostFile, true,
++                                            file.create};
++        mapping.partial = file.offset != 0 || file.fileoffset != 0 || file.length != 0;
++        mapping.offset = file.offset;
++        mapping.fileoffset = file.fileoffset;
++        mapping.length = file.length;
++        mapping.resize = file.resize;
++        set.mappings.push_back(std::move(mapping));
+     }
+ 
+     for (const auto& folder : patch.folderPatches) {
+@@ -250,8 +369,121 @@ void RiivoCollectMappings(const RiivolutionContract::Patch& patch, const std::st
      }
  }
  
@@ -7169,7 +7316,7 @@ index 7fddf83..92074a0 100644
      const auto xmlSet = RiivoFindXmls(overlayRoot);
      if (!xmlSet) {
          return std::nullopt;
-@@ -295,13 +521,34 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+@@ -295,13 +527,27 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
              RiivolutionContract::ApplyConfigDefaults(*disc, *config);
          }
          RiivolutionContract::ApplySelections(*disc, manifestSelections);
@@ -7194,17 +7341,10 @@ index 7fddf83..92074a0 100644
          for (const auto& patch : activePatches) {
              RiivoCollectMappings(patch, sdRootGeneric, xmlDirGeneric, set);
 +            RiivoCollectMemoryPatches(patch, sdRootGeneric, xmlDirGeneric, xmlFile, set);
-+            for (const auto& file : patch.filePatches) {
-+                if (file.offset != 0 || file.fileoffset != 0 || file.length != 0) {
-+                    RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(xmlFile) << ": partial file patch on "
-+                              << file.disc << " (offset/fileoffset/length) is applied as a whole-file replacement"
-+                              << std::endl;
-+                }
-+            }
          }
  
          // Highest-priority overlay with a <savegame> wins.
-@@ -323,8 +570,8 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+@@ -323,8 +569,8 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
          // failure this layer has: the game boots, plays, and quietly shows
          // vanilla content. Always say what happened.
          RT_LOG(RT_TAG_RIIVOLUTION) << PathToUtf8(xmlFile) << ": " << activePatches.size()
@@ -7215,7 +7355,7 @@ index 7fddf83..92074a0 100644
          if (activePatches.empty()) {
              RT_LOG(RT_TAG_RIIVOLUTION) << "WARNING: " << PathToUtf8(xmlFile)
                        << " has no enabled options for " << gameId
-@@ -344,9 +591,9 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
+@@ -344,9 +590,9 @@ std::optional<RuntimeRiivolution::PatchSet> RiivoLoadPatchSet(const fs::path& ov
  }
  
  void RiivoInitialize() {
@@ -7227,7 +7367,7 @@ index 7fddf83..92074a0 100644
      }
  }
  
-@@ -354,6 +601,127 @@ void RiivoInitialize() {
+@@ -354,6 +600,127 @@ void RiivoInitialize() {
  
  namespace RuntimeRiivolution {
  
@@ -7356,7 +7496,7 @@ index 7fddf83..92074a0 100644
      std::call_once(g_riivoOnce, RiivoInitialize);
      return g_riivoState.overlays;
 diff --git a/runtime/src/hle/storage/riivolution.h b/runtime/src/hle/storage/riivolution.h
-index ff7c71c..bb43707 100644
+index ff7c71c..456e924 100644
 --- a/runtime/src/hle/storage/riivolution.h
 +++ b/runtime/src/hle/storage/riivolution.h
 @@ -6,6 +6,7 @@
@@ -7367,10 +7507,20 @@ index ff7c71c..bb43707 100644
  #include <filesystem>
  #include <optional>
  #include <string>
-@@ -29,15 +30,31 @@ struct Mapping {
+@@ -27,6 +28,27 @@ struct Mapping {
+     // Riivolution 'create': when false, only files already present on the disc
+     // may be replaced; nothing new is added.
      bool create = false;
- };
- 
++    // Riivolution <file offset fileoffset length>: write `length` bytes of the external file,
++    // starting at `fileoffset`, into the disc file at `offset` (length 0: the rest of the external
++    // file). `resize` lets the disc file grow past its original size. Kind::File only.
++    bool partial = false;
++    uint32_t offset = 0;
++    uint32_t fileoffset = 0;
++    uint32_t length = 0;
++    bool resize = true;
++};
++
 +// A <memory> patch from an active Riivolution patch, with its value resolved to bytes
 +// (value="..." hex, or the contents of valuefile="...").
 +struct MemoryPatch {
@@ -7382,10 +7532,10 @@ index ff7c71c..bb43707 100644
 +    bool ocarina = false;          // value is an Ocarina/Gecko code list (not supported)
 +    std::string source;            // "<xml file>: patch <id>" for logs
 +    std::string valuefileName;     // set when the value came from valuefile="..."
-+};
-+
+ };
+ 
  struct PatchSet {
-     // In Dolphin's application order (per active patch: files, then folders);
+@@ -34,10 +56,13 @@ struct PatchSet {
      // a later mapping for the same disc path wins.
      std::vector<Mapping> mappings;
      uint32_t skippedExternals = 0; // externals that do not exist on the host
@@ -7399,7 +7549,7 @@ index ff7c71c..bb43707 100644
      // nullopt: the root carries no Riivolution XML and is a plain disc-shaped
      // overlay directory.
      std::optional<PatchSet> patches;
-@@ -57,4 +74,69 @@ const std::vector<Overlay>& Overlays();
+@@ -57,4 +82,69 @@ const std::vector<Overlay>& Overlays();
  // /title/<id>/data directory is redirected there).
  const std::optional<SaveRedirect>& GetSaveRedirect();
  
