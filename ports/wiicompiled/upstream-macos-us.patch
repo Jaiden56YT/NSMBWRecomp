@@ -779,7 +779,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..3790e5e 100644
+index ec62546..e672734 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,11 +8,14 @@
@@ -829,15 +829,16 @@ index ec62546..3790e5e 100644
      if(NOT EXISTS "${NSMBW_DATA_INIT_FILE}")
          message(FATAL_ERROR
              "Missing combined NSMBW data initializer: ${NSMBW_DATA_INIT_FILE}. Run "
-@@ -99,6 +110,7 @@ if(MKW_BUILD_NSMBW)
+@@ -99,6 +110,8 @@ if(MKW_BUILD_NSMBW)
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_art.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_draw.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_options_menu.cpp"
 +        "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_online_room.cpp"
++        "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_upnp.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_movie_skip.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/host_cpu_baseline.cpp")
      if(NOT WIN32)
-@@ -126,7 +138,7 @@ if(MKW_BUILD_NSMBW)
+@@ -126,7 +139,7 @@ if(MKW_BUILD_NSMBW)
      add_library(nsmbw_runtime_common OBJECT ${NSMBW_RUNTIME_COMMON_SOURCES})
      mkw_configure_object_target(nsmbw_runtime_common)
      target_include_directories(nsmbw_runtime_common BEFORE PRIVATE
@@ -846,7 +847,7 @@ index ec62546..3790e5e 100644
      target_compile_features(nsmbw_runtime_common PRIVATE cxx_std_20)
      # MKW_RUNTIME_PRODUCT_NSMBW: distinguishes this compile of the shared runtime/src tree from
      # mkw_runtime_common's. Needed where a guest-code-address native override in a shared file is
-@@ -146,7 +158,7 @@ if(MKW_BUILD_NSMBW)
+@@ -146,7 +159,7 @@ if(MKW_BUILD_NSMBW)
          target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
      endif()
  
@@ -855,7 +856,7 @@ index ec62546..3790e5e 100644
      # foreach right at the end of that file - which has already run by the time this file is
      # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
      # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
-@@ -154,7 +166,7 @@ if(MKW_BUILD_NSMBW)
+@@ -154,7 +167,7 @@ if(MKW_BUILD_NSMBW)
      # was compiled without those target features enabled.
      foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
          if(TARGET ${nsmbw_target})
@@ -864,15 +865,16 @@ index ec62546..3790e5e 100644
          endif()
      endforeach()
  
-@@ -185,6 +197,7 @@ if(MKW_BUILD_NSMBW)
+@@ -185,6 +198,8 @@ if(MKW_BUILD_NSMBW)
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_art.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_draw.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_options_menu.cpp"
 +        "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_online_room.cpp"
++        "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_upnp.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_movie_skip.cpp")
      mkw_configure_object_target(NSMBWCompiled)
      # Same product define as nsmbw_runtime_common: runtime_config.h's inline functions read it, and
-@@ -199,7 +212,7 @@ if(MKW_BUILD_NSMBW)
+@@ -199,7 +214,7 @@ if(MKW_BUILD_NSMBW)
          target_link_options(NSMBWCompiled PRIVATE -mwindows)
      endif()
      target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
@@ -881,7 +883,7 @@ index ec62546..3790e5e 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +220,16 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +222,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -899,7 +901,7 @@ index ec62546..3790e5e 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +245,24 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +247,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -3602,20 +3604,21 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..187a02e 100644
+index 8c96414..bc18379 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
-@@ -9,7 +9,9 @@
+@@ -9,7 +9,10 @@
  #include "nsmbw_menu_art.h"
  #include "nsmbw_menu_draw.h"
  #include "nsmbw_movie_skip.h"
 +#include "nsmbw_online_room.h"
++#include "nsmbw_upnp.h"
  
 +#include "hle/storage/riivolution.h"
  #include "memory.h"
  #include "runtime_config.h"
  #include "settings_overlay.h"
-@@ -17,8 +19,10 @@
+@@ -17,8 +20,10 @@
  #include <SDL3/SDL_events.h>
  #include <SDL3/SDL_gamepad.h>
  #include <SDL3/SDL_keyboard.h>
@@ -3626,7 +3629,7 @@ index 8c96414..187a02e 100644
  #include <array>
  #include <atomic>
  #include <cstdio>
-@@ -156,23 +160,23 @@ std::vector<Row> BuildRows(int tab) {
+@@ -156,23 +161,23 @@ std::vector<Row> BuildRows(int tab) {
  }
  
  // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
@@ -3655,7 +3658,7 @@ index 8c96414..187a02e 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,18 +190,21 @@ bool g_soundPaused = false;
+@@ -186,18 +191,21 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3680,7 +3683,7 @@ index 8c96414..187a02e 100644
      uint32_t word = 0;
      if (Memory::TryRead32(kGameStopAddr, word)) {
          uint32_t next = word;
-@@ -234,7 +241,7 @@ void SetGameStopped(bool stopped) {
+@@ -234,7 +242,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3689,7 +3692,7 @@ index 8c96414..187a02e 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
-@@ -254,7 +261,7 @@ void LogMenu(const char* what, const char* why) {
+@@ -254,7 +262,7 @@ void LogMenu(const char* what, const char* why) {
  
  // ---- Screens and state --------------------------------------------------------------------------
  
@@ -3698,7 +3701,7 @@ index 8c96414..187a02e 100644
  Screen g_screen = Screen::Options;
  
  // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
-@@ -271,6 +278,28 @@ struct BindState {
+@@ -271,6 +279,28 @@ struct BindState {
      bool capturing = false;
  } g_bind;
  
@@ -3727,7 +3730,7 @@ index 8c96414..187a02e 100644
  // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
  // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
  int BindSlots() { return 4; }
-@@ -278,6 +307,9 @@ int BindSlots() { return 4; }
+@@ -278,6 +308,9 @@ int BindSlots() { return 4; }
  // Set when a menu opened from the pause window has finished closing; the pause input handler
  // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
  std::atomic<bool> g_returnToPause{false};
@@ -3737,7 +3740,7 @@ index 8c96414..187a02e 100644
  
  // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
  void Close(const char* why) {
-@@ -299,6 +331,12 @@ void FinishClose() {
+@@ -299,6 +332,12 @@ void FinishClose() {
      SetGameStopped(false);
      if (g.fromPause) g_returnToPause = true;
      g.fromPause = false;
@@ -3750,7 +3753,7 @@ index 8c96414..187a02e 100644
  }
  
  void Open(const char* why, bool fromPause) {
-@@ -319,6 +357,23 @@ void ShowScreen(Screen screen) {
+@@ -319,6 +358,23 @@ void ShowScreen(Screen screen) {
      g.openedAt = draw::Now();
  }
  
@@ -3774,7 +3777,7 @@ index 8c96414..187a02e 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +522,149 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +523,164 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3814,11 +3817,13 @@ index 8c96414..187a02e 100644
 +}
 +
 +// The Online screen's rows for the room's state: the actions in order (labels drawn in DrawOnline).
-+enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession, SaveChoice };
++enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession, SaveChoice, OpenPort };
 +std::vector<OnlineAction> OnlineActions(const nsmbw_room::View& v) {
 +    using nsmbw_room::Role;
 +    if (nsmbw_room::InSession()) return {OnlineAction::LeaveSession};
-+    if (v.role == Role::Hosting) return {OnlineAction::Start, OnlineAction::SaveChoice, OnlineAction::Close};
++    if (v.role == Role::Hosting) {
++        return {OnlineAction::Start, OnlineAction::SaveChoice, OnlineAction::OpenPort, OnlineAction::Close};
++    }
 +    if (v.role == Role::Joining || v.role == Role::Joined) return {OnlineAction::Leave};
 +    if (g_online.entering) return {OnlineAction::Connect};
 +    return {OnlineAction::Host, OnlineAction::Join};
@@ -3836,9 +3841,14 @@ index 8c96414..187a02e 100644
 +    const std::vector<OnlineAction> actions = OnlineActions(v);
 +    const int n = int(actions.size());
 +    switch (cmd) {
-+    case Cmd::Up: case Cmd::Down:
++    case Cmd::Up: case Cmd::Down: case Cmd::Left: case Cmd::Right:
 +        if (n > 1) {
-+            g_online.row = ((g_online.row + (cmd == Cmd::Down ? 1 : -1)) % n + n) % n;
++            // The host's four actions are a 2 x 2 grid (left/right within a row, up/down between rows).
++            const bool grid = v.role == nsmbw_room::Role::Hosting && !nsmbw_room::InSession();
++            int step = (cmd == Cmd::Down || cmd == Cmd::Right) ? 1 : -1;
++            if (grid && (cmd == Cmd::Up || cmd == Cmd::Down)) step *= 2;
++            if (!grid && (cmd == Cmd::Left || cmd == Cmd::Right)) break;
++            g_online.row = ((g_online.row + step) % n + n) % n;
 +            Play(kSndCursor);
 +        }
 +        break;
@@ -3856,12 +3866,20 @@ index 8c96414..187a02e 100644
 +            if (ok) g_online.entering = false;
 +            break;
 +        case OnlineAction::Start: ok = v.canStart && nsmbw_room::Start(error); if (!v.canStart) error = "Nobody has joined yet"; break;
-+        case OnlineAction::Close: case OnlineAction::Leave: nsmbw_room::Leave(); break;
++        case OnlineAction::Close:
++            nsmbw_upnp::Close(); // the port this room opened on the router, if any
++            nsmbw_room::Leave();
++            break;
++        case OnlineAction::Leave: nsmbw_room::Leave(); break;
++        case OnlineAction::OpenPort:
++            // Changes a router setting, so only ever on this button (docs/online-play.md 8h).
++            nsmbw_upnp::Open(nsmbw_room::kDefaultPort);
++            break;
 +        case OnlineAction::LeaveSession: nsmbw_room::RequestLeaveSession(); break;
 +        case OnlineAction::SaveChoice: nsmbw_room::SetUseHostSave(!nsmbw_room::UseHostSave()); break;
 +        }
 +        g_online.error = ok ? std::string() : error;
-+        if (a != OnlineAction::SaveChoice) g_online.row = 0;
++        if (a != OnlineAction::SaveChoice && a != OnlineAction::OpenPort) g_online.row = 0;
 +        Play(ok ? kSndDecide : kSndInvalid);
 +        g.pressPending = ok;
 +        break;
@@ -3924,7 +3942,7 @@ index 8c96414..187a02e 100644
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -566,6 +760,12 @@ void SetOpen(bool open) noexcept {
+@@ -566,6 +776,12 @@ void SetOpen(bool open) noexcept {
      }
      Play(kSndPause);
      Open("F10", false);
@@ -3937,7 +3955,7 @@ index 8c96414..187a02e 100644
  }
  
  void HandleEvents(const AuroraEvent* events) noexcept {
-@@ -588,7 +788,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +804,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
@@ -3947,7 +3965,7 @@ index 8c96414..187a02e 100644
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -599,6 +800,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -599,6 +816,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              }
              continue;
          }
@@ -3955,7 +3973,7 @@ index 8c96414..187a02e 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1009,189 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1025,204 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4024,13 +4042,18 @@ index 8c96414..187a02e 100644
 +    if (nsmbw_room::InSession()) line = "In an online session (the game keeps running)";
 +    else if (v.role == Role::None) line = g_online.entering ? "Join a room: the host's address" : "Play together over the network";
 +    else line = v.status;
-+    c.Text(line, 0, 94, 17, header);
++    const nsmbw_upnp::Status upnp = nsmbw_upnp::Snapshot();
++    if (v.role == Role::Hosting && upnp.state != nsmbw_upnp::State::Idle) line = upnp.message;
++    c.Text(line, 0, 94, line.size() > 60 ? 14 : 17, header);
 +    c.Rect(0, 70, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
 +
 +    float y = 50;
 +    if (v.role == Role::Hosting) {
 +        std::string where = v.addresses.empty() ? std::string("this computer's address") : v.addresses[0];
-+        c.Text("Others join with: " + where, 0, y, 16, {.white = Rgb(255, 255, 160), .outline = true});
++        if (upnp.state == nsmbw_upnp::State::Open && !upnp.externalIp.empty()) {
++            where += "  or  " + upnp.externalIp + ":" + std::to_string(nsmbw_room::kDefaultPort);
++        }
++        c.Text("Others join with: " + where, 0, y, where.size() > 34 ? 14 : 16, {.white = Rgb(255, 255, 160), .outline = true});
 +        y -= 26;
 +    }
 +    if (v.role == Role::Hosting || v.role == Role::Joined) {
@@ -4047,28 +4070,38 @@ index 8c96414..187a02e 100644
 +        const bool blink = int(draw::Now() / 30) % 2 == 0;
 +        c.Label("Address", -262, 30, 22, Align::Left, false, draw::kWhite);
 +        c.Button(g_online.address + (blink ? "_" : " "), 110, 30, 260, 21, true, 17, false, true);
-+        c.Text("Type or paste (Cmd/Ctrl+V), e.g. 192.168.1.20", 0, 0, 15, {.white = Rgb(200, 215, 230), .outline = true});
++        c.Text("Type or paste (Cmd/Ctrl+V), e.g. 192.168.1.20 or 203.0.113.7:47100", 0, 0, 15,
++               {.white = Rgb(200, 215, 230), .outline = true});
 +        y = -20;
 +    } else if (v.role == Role::None) {
-+        c.Text("Host a room on this computer, or join a friend's on the same network or VPN.", 0, 40, 15,
++        c.Text("Host a room on this computer, or join a friend's: same network, VPN or internet.", 0, 40, 15,
 +               {.white = Rgb(200, 215, 230), .outline = true});
 +        y = 10;
 +    }
 +
 +    static constexpr const char* kLabels[] = {"Host a room", "Join a room", "Join", "Start the game", "Close the room",
-+                                              "Leave the room", "Leave the session", ""};
-+    float rowY = std::min(y - 6, -40.0f);
++                                              "Leave the room", "Leave the session", "", "Open port (internet)"};
++    // The host's four actions in a 2 x 2 grid (it fits under four players); one column otherwise.
++    const bool grid = v.role == Role::Hosting && !nsmbw_room::InSession();
++    float rowY = grid ? std::min(y - 4, -46.0f) : std::min(y - 6, -40.0f);
 +    for (size_t i = 0; i < actions.size(); ++i) {
 +        const bool focused = int(i) == g_online.row;
-+        const bool disabled = actions[i] == OnlineAction::Start && !v.canStart;
-+        const float cx = 0;
-+        if (focused && g.pressPending) c.Press(cx, rowY, 220);
-+        const std::string label = actions[i] == OnlineAction::SaveChoice
-+                                      ? (nsmbw_room::UseHostSave() ? "Save: mine (host's)" : "Save: a fresh one")
-+                                      : kLabels[int(actions[i])];
-+        const ImVec2 size = c.Button(label, cx, rowY, 220, 21, focused, 18, disabled, true);
-+        if (focused) c.Cursor(cx, rowY, size.x + 4, size.y + 4, 0.55f);
-+        rowY -= 30;
++        const bool working = actions[i] == OnlineAction::OpenPort && upnp.state == nsmbw_upnp::State::Working;
++        const bool disabled = (actions[i] == OnlineAction::Start && !v.canStart) || working;
++        const float cx = grid ? (i % 2 == 0 ? -128.0f : 128.0f) : 0.0f;
++        const float cy = grid ? rowY - float(i / 2) * 26.0f : rowY - float(i) * 30.0f;
++        const float width = grid ? 240.0f : 220.0f;
++        if (focused && g.pressPending) c.Press(cx, cy, width);
++        std::string label = kLabels[int(actions[i])];
++        if (actions[i] == OnlineAction::SaveChoice) {
++            label = nsmbw_room::UseHostSave() ? "Save: mine (host's)" : "Save: a fresh one";
++        } else if (actions[i] == OnlineAction::OpenPort && upnp.state == nsmbw_upnp::State::Open) {
++            label = "Port open";
++        } else if (working) {
++            label = "Opening the port...";
++        }
++        const ImVec2 size = c.Button(label, cx, cy, width, 21, focused, grid ? 16 : 18, disabled, true);
++        if (focused) c.Cursor(cx, cy, size.x + 4, size.y + 4, 0.55f);
 +    }
 +
 +    c.Rect(0, -98, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
@@ -4145,7 +4178,7 @@ index 8c96414..187a02e 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1257,30 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1288,30 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4176,7 +4209,7 @@ index 8c96414..187a02e 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1308,12 @@ void Draw() noexcept {
+@@ -906,10 +1339,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4190,7 +4223,7 @@ index 8c96414..187a02e 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1338,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1369,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
@@ -9092,10 +9125,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..88b7042
+index 0000000..f186e5e
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,900 @@
+@@ -0,0 +1,939 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9107,7 +9140,8 @@ index 0000000..88b7042
 +//   ROSTER    host -> all      u8 count, count x {u8 slot, name[24], i16 ping ms}   every 0.5 s
 +//   PING      either way       u8 slot, u64 sender's clock                          every 0.5 s
 +//   PONG      reply to a PING  u64 the PING's clock
-+//   START     host -> all      u32 session token, u8 delay, u8 players, players x {u32 IPv4, u16 port}
++//   START     host -> all      u32 session token, u8 delay (bit 7: relay through the host), u8 players,
++//                              players x {u32 IPv4, u16 port}, then the save fields
 +//   START_ACK joiner -> host   u8 slot
 +//   LEAVE     either way       u8 slot
 +// The host times each joiner's PONG to its own PINGs (the round trip, shown in the room and used
@@ -9251,6 +9285,14 @@ index 0000000..88b7042
 +
 +uint64_t NowMicros() {
 +    return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
++}
++
++// RFC 1918, loopback, link-local and carrier-grade NAT (100.64/10) addresses: the same network,
++// or one a VPN such as Hamachi/ZeroTier puts both machines on. Anything else is the internet.
++bool IsPrivateAddress(const sockaddr_in& a) {
++    const uint32_t ip = ntohl(a.sin_addr.s_addr);
++    return (ip >> 24) == 10 || (ip >> 24) == 127 || (ip >> 20) == (172u << 4 | 1u) || (ip >> 16) == (192u << 8 | 168u) ||
++           (ip >> 16) == (169u << 8 | 254u) || (ip >> 22) == (100u << 2 | 1u);
 +}
 +
 +std::string AddrText(const sockaddr_in& a) {
@@ -9397,7 +9439,7 @@ index 0000000..88b7042
 +    SendRoster();
 +}
 +
-+[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, int players, int mySlot,
++[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, bool relay, int players, int mySlot,
 +                           const std::vector<sockaddr_in>& slots);
 +
 +void HostReceive(const uint8_t* buf, size_t len, const sockaddr_in& from) {
@@ -9519,7 +9561,8 @@ index 0000000..88b7042
 +        r.status = "Receiving the host's save...";
 +    } else if (type == kStart && len >= 12 + 4 + 2) {
 +        const uint32_t sessionToken = Get32(buf + 12);
-+        const int delay = buf[16], players = buf[17];
++        const int delay = buf[16] & 0x7F, players = buf[17];
++        const bool relay = (buf[16] & 0x80) != 0;
 +        if (players < 2 || players > kMaxPlayers || len < 18 + size_t(players) * 6 || r.mySlot < 1 ||
 +            r.mySlot >= players || delay < 1 || delay > 30) {
 +            return;
@@ -9546,7 +9589,7 @@ index 0000000..88b7042
 +        std::vector<uint8_t> ack = Header(kStartAck, r.token);
 +        ack.push_back(uint8_t(r.mySlot));
 +        for (int i = 0; i < 3; ++i) SendTo(r.hostAddr, ack);
-+        Relaunch(sessionToken, delay, players, r.mySlot, slots);
++        Relaunch(sessionToken, delay, relay, players, r.mySlot, slots);
 +    } else if (type == kLeave) {
 +        Reset("The host closed the room");
 +    }
@@ -9622,7 +9665,7 @@ index 0000000..88b7042
 +    std::_Exit(4);
 +}
 +
-+[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, int players, int mySlot,
++[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, bool relay, int players, int mySlot,
 +                           const std::vector<sockaddr_in>& slots) {
 +    std::string peers;
 +    for (int i = 0; i < players; ++i) {
@@ -9656,15 +9699,27 @@ index 0000000..88b7042
 +    unsetenv("NSMBW_ONLINE_TEST");
 +    unsetenv("NSMBW_ONLINE_TEST_SHOW");
 +#endif
-+    SetEnv("NSMBW_NETPLAY_PORT", std::to_string(ntohs(slots[size_t(mySlot)].sin_port)));
++    // This copy's own port is the one the room socket is bound to here, not the one the host saw:
++    // over the internet a router may have translated it. Rebinding the same local port after the
++    // relaunch lets the router keep the same mapping (docs/online-play.md 8h).
++    uint16_t ownPort = ntohs(slots[size_t(mySlot)].sin_port);
++    if (r.sock != kNoSocket) {
++        sockaddr_in bound{};
++        socklen_t boundLen = sizeof(bound);
++        if (getsockname(r.sock, reinterpret_cast<sockaddr*>(&bound), &boundLen) == 0 && bound.sin_port != 0) {
++            ownPort = ntohs(bound.sin_port);
++        }
++    }
++    SetEnv("NSMBW_NETPLAY_PORT", std::to_string(ownPort));
++    SetEnv("NSMBW_NETPLAY_RELAY", relay ? "1" : "0");
 +    SetEnv("NSMBW_NETPLAY_BIND", "0.0.0.0");
 +    SetEnv("NSMBW_NETPLAY_SLOT", std::to_string(mySlot));
 +    SetEnv("NSMBW_NETPLAY_PLAYERS", std::to_string(players));
 +    SetEnv("NSMBW_NETPLAY_PEERS", peers);
 +    SetEnv("NSMBW_NETPLAY_DELAY", std::to_string(delay));
 +    SetEnv("NSMBW_NETPLAY_TOKEN", token);
-+    std::fprintf(stderr, "[nsmbw][room] starting the session: slot %d of %d, delay %d, peers %s\n", mySlot, players, delay,
-+                 peers.c_str());
++    std::fprintf(stderr, "[nsmbw][room] starting the session: slot %d of %d, delay %d%s, port %u, peers %s\n", mySlot, players,
++                 delay, relay ? ", relayed through the host" : "", unsigned(ownPort), peers.c_str());
 +    RestartSelf();
 +}
 +
@@ -9770,10 +9825,22 @@ index 0000000..88b7042
 +    }
 +    std::random_device rd;
 +    const uint32_t sessionToken = (uint32_t(rd()) << 16 | uint32_t(rd())) | 1u;
-+    int worst = 0;
-+    for (const Peer& p : r.peers) worst = std::max(worst, p.pingMs);
-+    // Delay from the round trip (docs section 2), at least 3: a busy machine hitches.
-+    const int delay = std::clamp(int(std::ceil(worst / 2.0 / 16.7)) + 2, 3, 8);
++    // Over the internet (any joiner outside private address ranges) 3-4 player sessions go through
++    // the host: joiners behind different routers usually cannot reach each other directly.
++    bool internet = false;
++    for (const Peer& p : r.peers) internet = internet || !IsPrivateAddress(p.addr);
++    // NSMBW_ONLINE_TEST_INTERNET=1: treat the joiners as on the internet (tests on one machine).
++    if (const char* v = std::getenv("NSMBW_ONLINE_TEST_INTERNET"); v && v[0] == '1') internet = true;
++    const bool relay = internet && r.peers.size() >= 2;
++    int worst = 0, second = 0;
++    for (const Peer& p : r.peers) {
++        if (p.pingMs > worst) { second = worst; worst = p.pingMs; }
++        else if (p.pingMs > second) second = p.pingMs;
++    }
++    // Delay from the round trip (docs section 2), at least 3: a busy machine hitches. Relayed, input
++    // between two joiners takes both of their trips to the host.
++    const int path = relay ? (worst + second) : worst;
++    const int delay = std::clamp(int(std::ceil(path / 2.0 / 16.7)) + 2, 3, relay ? 12 : 8);
 +    std::sort(r.peers.begin(), r.peers.end(), [](const Peer& a, const Peer& b) { return a.slot < b.slot; });
 +    std::vector<sockaddr_in> slots;
 +    sockaddr_in self{};
@@ -9784,7 +9851,7 @@ index 0000000..88b7042
 +    const int players = int(slots.size());
 +    std::vector<uint8_t> b = Header(kStart, r.token);
 +    Put32(b, sessionToken);
-+    b.push_back(uint8_t(delay));
++    b.push_back(uint8_t(delay | (relay ? 0x80 : 0)));
 +    b.push_back(uint8_t(players));
 +    for (const sockaddr_in& a : slots) {
 +        Put32(b, a.sin_addr.s_addr);
@@ -9819,7 +9886,8 @@ index 0000000..88b7042
 +    r.startSentAt = Clock::now();
 +    if (!r.sendingSave) for (const Peer& p : r.peers) SendTo(p.addr, b);
 +    r.status = r.sendingSave ? "Sending the save..." : "Starting...";
-+    std::fprintf(stderr, "[nsmbw][room] starting with %d players, delay %d\n", players, delay);
++    std::fprintf(stderr, "[nsmbw][room] starting with %d players, delay %d%s\n", players, delay,
++                 relay ? " (internet: relayed through this copy)" : "");
 +    // The rest happens in Poll: resend until every joiner acked (1 s at most), then relaunch.
 +    return true;
 +}
@@ -9873,14 +9941,15 @@ index 0000000..88b7042
 +                // Rebuild the slot table from the packet (it is the authority every joiner got).
 +                const uint8_t* b = r.startPacket.data();
 +                const uint32_t sessionToken = Get32(b + 12);
-+                const int delay = b[16], players = b[17];
++                const int delay = b[16] & 0x7F, players = b[17];
++                const bool relay = (b[16] & 0x80) != 0;
 +                std::vector<sockaddr_in> slots(static_cast<size_t>(players));
 +                for (int i = 0; i < players; ++i) {
 +                    slots[size_t(i)].sin_family = AF_INET;
 +                    slots[size_t(i)].sin_addr.s_addr = Get32(b + 18 + 6 * i);
 +                    slots[size_t(i)].sin_port = htons(Get16(b + 18 + 6 * i + 4));
 +                }
-+                Relaunch(sessionToken, delay, players, 0, slots);
++                Relaunch(sessionToken, delay, relay, players, 0, slots);
 +            }
 +            return;
 +        }
@@ -9905,7 +9974,10 @@ index 0000000..88b7042
 +    }
 +    // Joining / joined.
 +    if (now - r.peers[0].lastHeard >= kTimeout + (r.role == Role::Joining ? std::chrono::seconds(10) : std::chrono::seconds(0))) {
-+        Reset(r.role == Role::Joining ? "No answer from that address" : "Lost the connection to the host");
++        Reset(r.role == Role::Joining
++                  ? (IsPrivateAddress(r.hostAddr) ? "No answer from that address"
++                                                  : "No answer: the host needs Open port (or UDP 47100 forwarded)")
++                  : "Lost the connection to the host");
 +        return;
 +    }
 +    if (now - r.lastSend >= kResend) {
@@ -10165,3 +10237,418 @@ index 991bd04..4b587d3 100644
                  break;
              case IrIndirectCall value:
                  Add(ref shared, value.Destination);
+diff --git a/runtime/src/product/nsmbw_upnp.h b/runtime/src/product/nsmbw_upnp.h
+new file mode 100644
+index 0000000..4cd7561
+--- /dev/null
++++ b/runtime/src/product/nsmbw_upnp.h
+@@ -0,0 +1,34 @@
++#pragma once
++// Opening the online-play port on the host's router with UPnP (NSMBW repo docs/online-play.md 8h).
++// Only on the player's request (the Online screen's "Open port" button): it changes a router
++// setting. Everything runs on a background thread; Snapshot() is safe to call every frame.
++//
++//   1. SSDP: an M-SEARCH for an InternetGatewayDevice on 239.255.255.250:1900 (this network only).
++//   2. HTTP GET of the router's device description; the WANIPConnection (or WANPPPConnection)
++//      service's control URL.
++//   3. SOAP AddPortMapping (UDP, external = internal = the port, this machine's LAN address,
++//      description "NSMBW online play"), then GetExternalIPAddress for the address to give friends.
++//   Close() removes the mapping again (DeletePortMapping); the room calls it when it closes.
++//
++// Talks only to the router this machine's network announces; nothing goes to the internet.
++#include <cstdint>
++#include <string>
++
++namespace nsmbw_upnp {
++
++enum class State { Idle, Working, Open, Failed };
++
++struct Status {
++    State state = State::Idle;
++    std::string message;       // one line for the room screen
++    std::string externalIp;    // the router's internet address, once known
++    uint16_t port = 0;
++};
++
++// Starts opening `port` (UDP) on the router. Does nothing while a previous request is running.
++void Open(uint16_t port);
++// Removes the mapping this copy added (blocking, at most ~2 s). Safe to call when none was added.
++void Close();
++Status Snapshot();
++
++} // namespace nsmbw_upnp
+diff --git a/runtime/src/product/nsmbw_upnp.cpp b/runtime/src/product/nsmbw_upnp.cpp
+new file mode 100644
+index 0000000..e12c604
+--- /dev/null
++++ b/runtime/src/product/nsmbw_upnp.cpp
+@@ -0,0 +1,369 @@
++// UPnP port mapping for online play: see nsmbw_upnp.h.
++#include "nsmbw_upnp.h"
++
++#ifdef _WIN32
++#include <winsock2.h>
++#include <ws2tcpip.h>
++using UpnpSocket = SOCKET;
++constexpr UpnpSocket kNoUpnpSocket = INVALID_SOCKET;
++inline void UpnpClose(UpnpSocket s) { closesocket(s); }
++#else
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <sys/time.h>
++#include <unistd.h>
++using UpnpSocket = int;
++constexpr UpnpSocket kNoUpnpSocket = -1;
++inline void UpnpClose(UpnpSocket s) { close(s); }
++#endif
++
++#include <atomic>
++#include <cctype>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <mutex>
++#include <thread>
++
++namespace nsmbw_upnp {
++namespace {
++
++std::mutex g_mutex;
++Status g_status;
++std::atomic<bool> g_busy{false};
++// What Close() needs to undo the mapping.
++std::string g_controlHost, g_controlPath, g_serviceType;
++uint16_t g_controlPort = 0, g_mappedPort = 0;
++
++void SetStatus(State s, const std::string& message, const std::string& ip = "") {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    g_status.state = s;
++    g_status.message = message;
++    if (!ip.empty()) g_status.externalIp = ip;
++    std::fprintf(stderr, "[nsmbw][upnp] %s\n", message.c_str());
++}
++
++void SetTimeouts(UpnpSocket s, int ms) {
++#ifdef _WIN32
++    DWORD t = DWORD(ms);
++    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&t), sizeof(t));
++    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&t), sizeof(t));
++#else
++    timeval tv{ms / 1000, (ms % 1000) * 1000};
++    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
++    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
++#endif
++}
++
++std::string Lower(std::string s) {
++    for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
++    return s;
++}
++
++// "http://host:port/path" -> parts. Only plain http (what routers announce).
++bool ParseUrl(const std::string& url, std::string& host, uint16_t& port, std::string& path) {
++    const std::string prefix = "http://";
++    if (Lower(url.substr(0, prefix.size())) != prefix) return false;
++    const size_t start = prefix.size();
++    size_t slash = url.find('/', start);
++    if (slash == std::string::npos) slash = url.size();
++    std::string hostPort = url.substr(start, slash - start);
++    path = slash < url.size() ? url.substr(slash) : "/";
++    port = 80;
++    if (const size_t colon = hostPort.rfind(':'); colon != std::string::npos) {
++        port = uint16_t(std::strtoul(hostPort.c_str() + colon + 1, nullptr, 10));
++        hostPort.resize(colon);
++    }
++    host = hostPort;
++    return !host.empty() && port != 0;
++}
++
++// One HTTP request to the router (LAN only), the whole response back (headers + body).
++bool Http(const std::string& host, uint16_t port, const std::string& request, std::string& response) {
++    sockaddr_in to{};
++    to.sin_family = AF_INET;
++    to.sin_port = htons(port);
++    if (inet_pton(AF_INET, host.c_str(), &to.sin_addr) != 1) return false;
++    UpnpSocket s = socket(AF_INET, SOCK_STREAM, 0);
++    if (s == kNoUpnpSocket) return false;
++    SetTimeouts(s, 3000);
++    if (connect(s, reinterpret_cast<sockaddr*>(&to), sizeof(to)) != 0) {
++        UpnpClose(s);
++        return false;
++    }
++    size_t sent = 0;
++    while (sent < request.size()) {
++        const auto n = send(s, request.data() + sent, int(request.size() - sent), 0);
++        if (n <= 0) {
++            UpnpClose(s);
++            return false;
++        }
++        sent += size_t(n);
++    }
++    response.clear();
++    char buf[4096];
++    for (;;) {
++        const auto n = recv(s, buf, int(sizeof(buf)), 0);
++        if (n <= 0) break;
++        response.append(buf, size_t(n));
++        if (response.size() > 256 * 1024) break; // a device description is a few KB
++    }
++    UpnpClose(s);
++    return !response.empty();
++}
++
++int HttpStatus(const std::string& response) {
++    // "HTTP/1.1 200 OK"
++    const size_t sp = response.find(' ');
++    return sp == std::string::npos ? 0 : std::atoi(response.c_str() + sp + 1);
++}
++
++// The text of the first <tag>...</tag> at or after `from` (namespace prefixes ignored).
++std::string Tag(const std::string& xml, const std::string& tag, size_t from = 0, size_t* end = nullptr) {
++    const std::string lower = Lower(xml);
++    const std::string t = Lower(tag);
++    size_t open = from;
++    for (;;) {
++        open = lower.find(t + ">", open);
++        if (open == std::string::npos) return {};
++        const size_t lt = lower.rfind('<', open);
++        // <tag> or <prefix:tag>, not </tag>
++        if (lt != std::string::npos && lower[lt + 1] != '/' &&
++            (open == lt + 1 || lower[open - 1] == ':')) break;
++        open += t.size();
++    }
++    const size_t valueStart = open + t.size() + 1;
++    const size_t close = lower.find("</", valueStart);
++    if (close == std::string::npos) return {};
++    if (end) *end = close;
++    std::string v = xml.substr(valueStart, close - valueStart);
++    while (!v.empty() && std::isspace(static_cast<unsigned char>(v.back()))) v.pop_back();
++    while (!v.empty() && std::isspace(static_cast<unsigned char>(v.front()))) v.erase(v.begin());
++    return v;
++}
++
++// SSDP search: the first gateway that answers within 2 s, as its LOCATION URL.
++std::string Discover() {
++    UpnpSocket s = socket(AF_INET, SOCK_DGRAM, 0);
++    if (s == kNoUpnpSocket) return {};
++    SetTimeouts(s, 500);
++    sockaddr_in to{};
++    to.sin_family = AF_INET;
++    to.sin_port = htons(1900);
++    inet_pton(AF_INET, "239.255.255.250", &to.sin_addr);
++    const char* targets[] = {"urn:schemas-upnp-org:device:InternetGatewayDevice:1",
++                             "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
++                             "urn:schemas-upnp-org:service:WANIPConnection:1"};
++    std::string location;
++    const auto start = std::chrono::steady_clock::now();
++    int round = 0;
++    while (location.empty() && std::chrono::steady_clock::now() - start < std::chrono::seconds(3)) {
++        if (round < 3) {
++            for (const char* st : targets) {
++                std::string msg = std::string("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n"
++                                              "MAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ") + st + "\r\n\r\n";
++                sendto(s, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr*>(&to), sizeof(to));
++            }
++            ++round;
++        }
++        char buf[2048];
++        sockaddr_in from{};
++        socklen_t fromLen = sizeof(from);
++        const auto n = recvfrom(s, buf, int(sizeof(buf) - 1), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
++        if (n <= 0) continue;
++        buf[n] = 0;
++        const std::string reply(buf, size_t(n));
++        const std::string lower = Lower(reply);
++        const size_t at = lower.find("\nlocation:");
++        if (at == std::string::npos) continue;
++        size_t v = at + 10;
++        while (v < reply.size() && reply[v] == ' ') ++v;
++        const size_t eol = reply.find_first_of("\r\n", v);
++        location = reply.substr(v, eol == std::string::npos ? std::string::npos : eol - v);
++    }
++    UpnpClose(s);
++    return location;
++}
++
++// This machine's address on the interface that reaches `routerHost` (no packet is sent).
++std::string LocalAddressTowards(const std::string& routerHost) {
++    UpnpSocket s = socket(AF_INET, SOCK_DGRAM, 0);
++    if (s == kNoUpnpSocket) return {};
++    sockaddr_in to{};
++    to.sin_family = AF_INET;
++    to.sin_port = htons(1900);
++    std::string out;
++    if (inet_pton(AF_INET, routerHost.c_str(), &to.sin_addr) == 1 &&
++        connect(s, reinterpret_cast<sockaddr*>(&to), sizeof(to)) == 0) {
++        sockaddr_in local{};
++        socklen_t len = sizeof(local);
++        if (getsockname(s, reinterpret_cast<sockaddr*>(&local), &len) == 0) {
++            char text[INET_ADDRSTRLEN] = {};
++            inet_ntop(AF_INET, &local.sin_addr, text, sizeof(text));
++            out = text;
++        }
++    }
++    UpnpClose(s);
++    return out;
++}
++
++bool Soap(const std::string& action, const std::string& args, std::string& response) {
++    const std::string body =
++        "<?xml version=\"1.0\"?>\r\n<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
++        "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body><u:" + action + " xmlns:u=\"" +
++        g_serviceType + "\">" + args + "</u:" + action + "></s:Body></s:Envelope>\r\n";
++    const std::string request = "POST " + g_controlPath + " HTTP/1.1\r\nHost: " + g_controlHost + ":" +
++                                std::to_string(g_controlPort) +
++                                "\r\nContent-Type: text/xml; charset=\"utf-8\"\r\nSOAPAction: \"" + g_serviceType + "#" +
++                                action + "\"\r\nContent-Length: " + std::to_string(body.size()) +
++                                "\r\nConnection: close\r\n\r\n" + body;
++    return Http(g_controlHost, g_controlPort, request, response);
++}
++
++std::string MappingArgs(uint16_t port, const std::string& client, int lease) {
++    const std::string p = std::to_string(port);
++    return "<NewRemoteHost></NewRemoteHost><NewExternalPort>" + p +
++           "</NewExternalPort><NewProtocol>UDP</NewProtocol><NewInternalPort>" + p +
++           "</NewInternalPort><NewInternalClient>" + client +
++           "</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>NSMBW online play"
++           "</NewPortMappingDescription><NewLeaseDuration>" + std::to_string(lease) + "</NewLeaseDuration>";
++}
++
++void Run(uint16_t port) {
++    SetStatus(State::Working, "Looking for the router...");
++    const std::string location = Discover();
++    if (location.empty()) {
++        SetStatus(State::Failed, "No UPnP router answered (UPnP may be off): open UDP " + std::to_string(port) +
++                                     " on the router by hand");
++        return;
++    }
++    std::string host, path;
++    uint16_t httpPort = 0;
++    std::string response;
++    if (!ParseUrl(location, host, httpPort, path) ||
++        !Http(host, httpPort, "GET " + path + " HTTP/1.1\r\nHost: " + host + ":" + std::to_string(httpPort) +
++                                  "\r\nConnection: close\r\n\r\n", response) ||
++        HttpStatus(response) != 200) {
++        SetStatus(State::Failed, "The router's description could not be read");
++        return;
++    }
++    // The WAN connection service (IP first, PPP for DSL routers) and its control URL.
++    std::string control, service;
++    for (const char* wanted : {"WANIPConnection:2", "WANIPConnection:1", "WANPPPConnection:1"}) {
++        size_t at = 0;
++        for (;;) {
++            size_t end = 0;
++            const std::string type = Tag(response, "serviceType", at, &end);
++            if (type.empty()) break;
++            at = end;
++            if (type.find(wanted) == std::string::npos) continue;
++            const std::string url = Tag(response, "controlURL", at);
++            if (!url.empty()) {
++                control = url;
++                service = type;
++            }
++            break;
++        }
++        if (!control.empty()) break;
++    }
++    if (control.empty()) {
++        SetStatus(State::Failed, "The router has no port-mapping service");
++        return;
++    }
++    // controlURL is usually a path on the description's host; sometimes a full URL.
++    std::string cHost = host, cPath = control;
++    uint16_t cPort = httpPort;
++    if (Lower(control.substr(0, 7)) == "http://") {
++        if (!ParseUrl(control, cHost, cPort, cPath)) {
++            SetStatus(State::Failed, "The router's control address could not be read");
++            return;
++        }
++    } else if (cPath.empty() || cPath[0] != '/') {
++        cPath = "/" + cPath;
++    }
++    g_controlHost = cHost;
++    g_controlPort = cPort;
++    g_controlPath = cPath;
++    g_serviceType = service;
++    const std::string client = LocalAddressTowards(cHost);
++    if (client.empty()) {
++        SetStatus(State::Failed, "This computer's network address could not be found");
++        return;
++    }
++    SetStatus(State::Working, "Opening UDP " + std::to_string(port) + " on the router...");
++    // A 2-hour lease first, so a mapping left behind (the game closed mid-session) expires by itself;
++    // routers that only take permanent mappings (UPnP error 725) get a lease of 0.
++    bool mapped = Soap("AddPortMapping", MappingArgs(port, client, 7200), response) && HttpStatus(response) == 200;
++    if (!mapped) mapped = Soap("AddPortMapping", MappingArgs(port, client, 0), response) && HttpStatus(response) == 200;
++    if (!mapped) {
++        const std::string code = Tag(response, "errorCode");
++        SetStatus(State::Failed, "The router refused to open the port" + (code.empty() ? "" : " (error " + code + ")") +
++                                     ": open UDP " + std::to_string(port) + " by hand");
++        return;
++    }
++    g_mappedPort = port;
++    std::string ip;
++    if (Soap("GetExternalIPAddress", "", response) && HttpStatus(response) == 200) {
++        ip = Tag(response, "NewExternalIPAddress");
++    }
++    {
++        std::lock_guard<std::mutex> lock(g_mutex);
++        g_status.port = port;
++    }
++    if (ip.empty()) {
++        SetStatus(State::Open, "Port " + std::to_string(port) + " is open; the router did not say its address");
++    } else {
++        sockaddr_in a{};
++        bool privateIp = false;
++        if (inet_pton(AF_INET, ip.c_str(), &a.sin_addr) == 1) {
++            const uint32_t v = ntohl(a.sin_addr.s_addr);
++            privateIp = (v >> 24) == 10 || (v >> 20) == 0xAC1u || (v >> 16) == 0xC0A8u || (v >> 22) == 0x191u;
++        }
++        if (privateIp) {
++            // The router itself is behind another router (or the provider's carrier-grade NAT):
++            // the opened port is not reachable from the internet.
++            SetStatus(State::Open, "Port open, but this router is behind another one (" + ip +
++                                       "): friends outside cannot reach it", ip);
++        } else {
++            SetStatus(State::Open, "Port " + std::to_string(port) + " is open. Friends join " + ip + ":" +
++                                       std::to_string(port), ip);
++        }
++    }
++}
++
++} // namespace
++
++void Open(uint16_t port) {
++    bool expected = false;
++    if (!g_busy.compare_exchange_strong(expected, true)) return;
++#ifdef _WIN32
++    WSADATA wsa;
++    WSAStartup(MAKEWORD(2, 2), &wsa);
++#endif
++    std::thread([port] {
++        Run(port);
++        g_busy = false;
++    }).detach();
++}
++
++void Close() {
++    if (g_busy.load() || g_mappedPort == 0 || g_controlHost.empty()) return;
++    std::string response;
++    const std::string p = std::to_string(g_mappedPort);
++    Soap("DeletePortMapping",
++         "<NewRemoteHost></NewRemoteHost><NewExternalPort>" + p + "</NewExternalPort><NewProtocol>UDP</NewProtocol>",
++         response);
++    std::fprintf(stderr, "[nsmbw][upnp] removed the mapping for UDP %s (HTTP %d)\n", p.c_str(), HttpStatus(response));
++    g_mappedPort = 0;
++    std::lock_guard<std::mutex> lock(g_mutex);
++    g_status = Status{};
++}
++
++Status Snapshot() {
++    std::lock_guard<std::mutex> lock(g_mutex);
++    return g_status;
++}
++
++} // namespace nsmbw_upnp

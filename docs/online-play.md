@@ -634,6 +634,52 @@ Not done yet: room codes and play over the internet (step 3; a fixed session por
 NAT), keeping a session's progress (it stays in the session folder), up to 8 players (see
 nsmbw-project below), an in-game "out of sync" message.
 
+## 8h. Internet play (2026-11-20, Mac)
+
+No server of ours is involved: the host's game port (UDP 47100) has to be reachable from the
+internet, and everything else follows from the joiners' own packets.
+
+**How a friend connects.**
+1. The host opens a room and presses **Open port (internet)** (UPnP: the game asks the router to
+   forward UDP 47100 to this computer for 2 hours, or permanently on routers that only allow that,
+   and reads the router's internet address). The screen then shows
+   "Others join with: 192.168.1.20:47100 or <internet address>:47100". The mapping is removed when
+   the room is closed. It changes a router setting, so it only ever happens on that button. If the
+   router has UPnP off, the host forwards UDP 47100 by hand in the router's settings.
+2. Friends press Join and type the internet address. A joiner that gets no answer from a public
+   address is told the host needs Open port.
+3. Alternative with no router change: a VPN that puts everyone on one virtual network (Hamachi,
+   ZeroTier, Radmin VPN), then join with the VPN address as on a LAN.
+
+**What changed in the transport.**
+- A joiner's session port is the port its own room socket is bound to (getsockname), not the port
+  the host saw: a router may translate it on the way out, and rebinding the same local port after
+  the relaunch keeps the router's mapping. Before, the joiner bound the translated port - fine on a
+  LAN, wrong behind a router.
+- A copy takes a peer's address from the peer's own direct packets ("slot N is at ..." in the log),
+  so a router that changes the port does not break the session.
+- 3-4 players over the internet: joiners behind different routers usually cannot reach each other,
+  so each joiner sends what is meant for another joiner to the host, which forwards it unchanged
+  (flags bit 1 + destination slot in bits 4-5; NSMBW_NETPLAY_RELAY=1, set by the room when any
+  joiner's address is outside the private ranges and there are 3+ players). The input delay is then
+  computed from the two worst round trips (a joiner-to-joiner path is two legs), up to 12 frames.
+  LAN sessions keep the direct mesh.
+- Packet version 2: a copy with the old version refuses packets instead of misreading them (the PC
+  needs the new build).
+
+**Test (Mac, one machine).** A small fake router (scratch script: each joiner gets its own outside
+port, so the host sees translated ports) between the host and two joiners, internet mode forced
+(NSMBW_ONLINE_TEST_INTERNET=1): the joiners bound 50094 / 50766 locally while the host saw 59416 /
+52783; the session ran 1800+ frames on all three copies, about 120 state checks each, **0 out of
+sync**, with the host forwarding about 6500 packets between the joiners. Three copies of the game on
+one Mac made the waits long (several seconds per 600 frames); that is the machine, not the network.
+
+**Not tested yet.** A real internet session (two different networks); UPnP against a real router
+(it changes the router's settings, so not without the owner's OK); the Windows build of these
+changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
+(the screen warns when the router's own address is private: friends outside cannot reach it then,
+and a VPN is the way).
+
 ## 9. Open questions for the user
 
 - Four buttons, or Mods and Online combined behind one Extras button?

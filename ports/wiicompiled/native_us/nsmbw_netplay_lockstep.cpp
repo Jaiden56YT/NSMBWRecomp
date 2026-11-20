@@ -9,6 +9,9 @@
 //   NSMBW_NETPLAY_PEERS=<slot>@<host>:<port>,...   every other copy's slot and address
 //   NSMBW_NETPLAY_DELAY=<frames>  input delay D (default 2): input sampled at frame N is used at N+D
 //   NSMBW_NETPLAY_TOKEN=<hex>     session token; packets without it are dropped (default 0x4E50)
+//   NSMBW_NETPLAY_RELAY=1         internet sessions with 3-4 players: copies other than the host send
+//                                 what is meant for another non-host copy to the host, which forwards it
+//                                 (joiners behind different routers usually cannot reach each other)
 // Setting NSMBW_NETPLAY_PORT turns on frame mode (frame-driven audio, the frame clock, the fixed
 // random seed: nsmbw_netplay_replay.cpp), so a session starts from boot in the same state on every
 // copy - the "restart into the session" of section 3, done here by launching the copies together.
@@ -25,10 +28,15 @@
 //     not host-paced) is exchanged and compared; a mismatch is logged as "OUT OF SYNC".
 //
 // Packet (little-endian, at most 512 bytes): u32 magic "NSNP", u8 version, u8 slot, u8 count,
-// u8 flags (bit 0: the sender is leaving the session), u32 token, u32 ack (the highest frame of the receiver's input this copy holds, all
+// u8 flags (bit 0: the sender is leaving the session; bit 1: relayed, for the slot in bits 4-5,
+// which the host forwards unchanged), u32 token, u32 ack (the highest frame of the receiver's input this copy holds, all
 // earlier ones too; 0xFFFFFFFF none), u32 first frame, u32 hash frame, u32 hash (hash frame
 // 0xFFFFFFFF = none), then count x { u32 hold, u32 tilt bits, i8 movie-skip request, 3 pad }.
 // Everything received is bounds-checked; nothing in a packet is ever executed.
+//
+// Internet play (docs/online-play.md 8h): a peer's address is taken from its own packets (the
+// address its router puts on them), not only from the room: a router may change the port on the
+// way out, and the room saw the address before the relaunch into the session.
 #ifdef _WIN32
 // Winsock (ws2_32 is already linked for Windows, NsmbwProduct.cmake). No MSG_DONTWAIT: the socket
 // is put in non-blocking mode once instead.
@@ -78,7 +86,7 @@ extern "C" bool NsmbwOnlinePumpEventsQuit(); // pumps window events; true if the
 
 namespace {
 constexpr uint32_t kMagic = 0x504E534Eu; // "NSNP"
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = 2; // 2: relay flags (8h); a version-1 copy is refused, not misread
 constexpr uint32_t kMaxSlots = 4;
 constexpr uint32_t kRing = 256;          // frames of input kept per slot
 constexpr uint32_t kMaxPerPacket = 32;   // frames per packet
@@ -100,6 +108,7 @@ struct Peer {
     sockaddr_in addr{};
     uint32_t acked = kNone;      // highest of our frames the peer holds (contiguous)
     bool heard = false;          // any valid packet from this peer yet
+    bool relayed = false;        // reached through the host (NSMBW_NETPLAY_RELAY), not directly
     std::chrono::steady_clock::time_point lastPacket{};
 };
 
@@ -118,6 +127,8 @@ struct Net {
     uint64_t waits = 0, waitedMicros = 0, desyncs = 0, checks = 0;
     uint32_t curFrame = 0;
     bool leaving = false;      // set once this copy leaves: every packet from then on says so
+    bool relay = false;        // NSMBW_NETPLAY_RELAY: non-host copies reach each other through the host
+    uint64_t relayedOut = 0;   // host: packets forwarded for other copies
 };
 Net n;
 
@@ -153,6 +164,7 @@ void Init() {
     if (const char* v = AURORA_ENV("NSMBW_NETPLAY_PLAYERS")) n.players = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
     if (const char* v = AURORA_ENV("NSMBW_NETPLAY_DELAY")) n.delay = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
     if (const char* v = AURORA_ENV("NSMBW_NETPLAY_TOKEN")) n.token = static_cast<uint32_t>(std::strtoul(v, nullptr, 16));
+    if (const char* v = AURORA_ENV("NSMBW_NETPLAY_RELAY")) n.relay = v[0] == '1';
     if (n.players < 1 || n.players > kMaxSlots || n.slot >= n.players || n.delay > 30) {
         Log("bad settings (slot %u, players %u, delay %u); netplay off", n.slot, n.players, n.delay);
         return;
@@ -179,6 +191,21 @@ void Init() {
         Log("%zu peers for %u players; netplay off", n.peers.size(), n.players);
         return;
     }
+    if (n.relay && n.slot != 0) {
+        // Every other non-host copy is reached through the host (slot 0).
+        const Peer* host = nullptr;
+        for (const Peer& p : n.peers) if (p.slot == 0) host = &p;
+        if (!host) {
+            Log("relay mode without the host among the peers; netplay off");
+            return;
+        }
+        const sockaddr_in hostAddr = host->addr;
+        for (Peer& p : n.peers) {
+            if (p.slot == 0) continue;
+            p.relayed = true;
+            p.addr = hostAddr;
+        }
+    }
 #ifdef _WIN32
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -204,7 +231,8 @@ void Init() {
     }
     n.active = true;
     std::atexit(SendLeave); // a normal quit (the window closed) tells the others at once
-    Log("slot %u of %u, port %s, input delay %u frames, %zu peer(s)", n.slot, n.players, port, n.delay, n.peers.size());
+    Log("slot %u of %u, port %s, input delay %u frames, %zu peer(s)%s", n.slot, n.players, port, n.delay, n.peers.size(),
+        n.relay ? (n.slot == 0 ? ", relaying for the others" : ", through the host") : "");
 }
 
 FrameInput& At(uint32_t slot, uint32_t frame) { return n.ring[slot][frame % kRing]; }
@@ -249,7 +277,8 @@ void SendTo(Peer& p, uint32_t newest) {
     b.push_back(kVersion);
     b.push_back(static_cast<uint8_t>(n.slot));
     b.push_back(static_cast<uint8_t>(newest - first + 1));
-    b.push_back(n.leaving ? 1 : 0); // flags: bit 0 = this copy is leaving the session
+    // flags: bit 0 = this copy is leaving the session; bit 1 + bits 4-5 = relayed to slot p.slot
+    b.push_back(static_cast<uint8_t>((n.leaving ? 1u : 0u) | (p.relayed ? (2u | (p.slot << 4)) : 0u)));
     Put32(b, n.token);
     Put32(b, n.contiguous[p.slot]);
     Put32(b, first);
@@ -291,6 +320,34 @@ void Receive() {
             if (p.slot == slot) peer = &p;
         }
         if (!peer) continue;
+        const bool relayed = (buf[7] & 2u) != 0;
+        const uint32_t relayTo = (buf[7] >> 4) & 3u;
+        if (relayed && relayTo != n.slot) {
+            // Host: forward unchanged to the copy it is meant for (only the host relays; a packet
+            // that names another slot anywhere else is dropped).
+            if (n.slot != 0 || relayTo >= n.players) continue;
+            for (const Peer& to : n.peers) {
+                if (to.slot != relayTo) continue;
+                sendto(n.sock, reinterpret_cast<const char*>(buf), static_cast<int>(len), 0,
+                       reinterpret_cast<const sockaddr*>(&to.addr), sizeof(to.addr));
+                ++n.relayedOut;
+            }
+            // It came straight from its sender, so this is the sender's current address.
+            peer->addr = from;
+            continue;
+        }
+        // A direct packet carries the peer's current address (its router may have changed the
+        // port, or the room saw the address before the relaunch): send there from now on.
+        if (!relayed && !peer->relayed &&
+            (from.sin_addr.s_addr != peer->addr.sin_addr.s_addr || from.sin_port != peer->addr.sin_port)) {
+            char was[32], now[32];
+            std::snprintf(was, sizeof(was), "%u.%u.%u.%u:%u", peer->addr.sin_addr.s_addr & 255, (peer->addr.sin_addr.s_addr >> 8) & 255,
+                          (peer->addr.sin_addr.s_addr >> 16) & 255, peer->addr.sin_addr.s_addr >> 24, ntohs(peer->addr.sin_port));
+            std::snprintf(now, sizeof(now), "%u.%u.%u.%u:%u", from.sin_addr.s_addr & 255, (from.sin_addr.s_addr >> 8) & 255,
+                          (from.sin_addr.s_addr >> 16) & 255, from.sin_addr.s_addr >> 24, ntohs(from.sin_port));
+            Log("slot %u is at %s (was %s)", slot, now, was);
+            peer->addr = from;
+        }
         if (buf[7] & 1u) {
             char why[64];
             std::snprintf(why, sizeof(why), "Player %u left the session", slot + 1);
@@ -487,5 +544,6 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
         Log("frame %u: waited on %llu frames (%.1f ms in all); state checks: %llu compared, %llu out of sync", frame,
             static_cast<unsigned long long>(n.waits), static_cast<double>(n.waitedMicros) / 1000.0,
             static_cast<unsigned long long>(n.checks), static_cast<unsigned long long>(n.desyncs));
+        if (n.relay && n.slot == 0) Log("relayed %llu packets", static_cast<unsigned long long>(n.relayedOut));
     }
 }
