@@ -37,6 +37,9 @@ import tomllib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mod_mkwcat  # noqa: E402  (mkwcat's nsmbw-project: a REL module with its own loader)
+
 REPO = Path(__file__).resolve().parent.parent
 PORT = REPO / "ports" / "wiicompiled"
 UPSTREAM = REPO / "third_party" / "NSMBWiicompiled"
@@ -712,6 +715,10 @@ def build_inputs(mod_dir, out_code):
     runtime_patches, low_memory = [], {}
     xml_patches = list(memory_patches(mod_dir))
     has_loader = any(p["valuefile"] and p["offset"] == NEWER_LOADER for p in xml_patches)
+    mkwcat = any(mod_mkwcat.is_loader_patch(p) for p in xml_patches) and mod_mkwcat.find_pack(mod_dir) is not None
+    if mkwcat:
+        print(f"  = mkwcat nsmbw-project pack: its loader at {mod_mkwcat.LOADER:08X} is replaced by a native one; "
+              "the module is linked and translated here")
     std_hook = next((p for p in xml_patches if is_kamek_std_loader_hook(p, xml_patches)), None)
     std_skip = set()
     if std_hook is not None and not has_loader:
@@ -726,6 +733,13 @@ def build_inputs(mod_dir, out_code):
     for patch in xml_patches:
         value, address = patch["value"], patch["offset"]
         if id(patch) in std_skip:
+            continue
+        if mkwcat and mod_mkwcat.is_loader_patch(patch):
+            continue
+        if mkwcat and mod_mkwcat.is_option_byte(patch):
+            # Option flags the module reads as data, in main.dol's code area: written in memory by
+            # the native loader before _prolog, never baked into translated code.
+            runtime_patches.append((patch["offset"], patch["value"]))
             continue
         if patch["ocarina"]:
             stats["unsupported"] += 1
@@ -767,6 +781,14 @@ def build_inputs(mod_dir, out_code):
               + ("..." if len(value) > 16 else ""))
 
     kamek = link_newer(mod_dir, image, low_memory) if has_loader else None
+    if mkwcat:
+        game_rels = {name: (RELS[name][0], bytes((REPO / "code" / "rels" / f"{name}.rel").read_bytes())) for name in RELS}
+        kamek = mod_mkwcat.link(mod_dir, image, game_rels, MODULE_TOP)
+        for addr in kamek.game_seeds:
+            sec = image.section_for(addr - 4, 4)
+            if sec is not None and sec.module in RELS and any(
+                    site <= addr - 4 < site + size for site, size, _ in image.rel_relocs[sec.module]):
+                print(f"  ! mkwcat: thunk source {addr - 4:08X} is a relocated REL word (copied unrelocated)")
     if kamek is None:
         settings = load_mod_toml(mod_dir).get("kamek", {})
         binary = find_kamek2(mod_dir, settings)
@@ -797,7 +819,7 @@ def build_inputs(mod_dir, out_code):
             kamek_code += 1
         print(f"  kamek: {kamek_code} code patch(es) baked, {loader_data} data patch(es) "
               "applied by the native loader at run time")
-    if kamek:
+    if kamek and getattr(kamek, "kind", "") != "mkwcat":
         for address, original, value, why in KAMEK_COMPAT_PATCHES:
             if image.read(address, 4) == bytes.fromhex(original):
                 image.write(address, bytes.fromhex(value))
@@ -811,6 +833,8 @@ def write_function_map(out, kamek):
     text = (PORT / "function_map_us.txt").read_text()
     if kamek:
         text += "".join(f"{a:08X} kamek_{kamek.name}_{a:08X}\n" for a in kamek.seeds)
+        # mkwcat call-original thunks enter replaced game functions at +4.
+        text += "".join(f"{a:08X} mkwcat_original_{a:08X}\n" for a in getattr(kamek, "game_seeds", []))
     path.write_text(text)
     return path
 
@@ -844,7 +868,41 @@ def write_mod_source(gen, name, kamek, runtime_patches):
     for ctor in (kamek.ctors if kamek else []):
         lines.append(f"        RuntimeRiivolution::RegisterModCtor(0x{ctor:08X}u);")
     lines += ["    }", "} g_register;", "} // namespace", ""]
-    if kamek and kamek.loader != NEWER_LOADER:
+    if kamek and getattr(kamek, "kind", "") == "mkwcat":
+        # The native stand-in for the pack's loader (a boot-scene state: returns 1 when done).
+        # The module is already in place (RegisterModImage, after the guest constructors); write
+        # the option bytes, set up the handle on the embedded arc header, and run _prolog, which
+        # patches game data, runs preinit (DVDPatchInit on the handle), the constructors and main.
+        a = f"{kamek.loader:08X}"
+        lines += ['#include "hle_stubs.h"', '#include "ppc_runtime.h"', '#include "abi_bridge.h"',
+                  '#include "memory.h"', "#include <cstdio>",
+                  f'extern "C" void MkwcatLoader_{a}(CpuContext* ctx) {{',
+                  "    static bool done = false;",
+                  "    if (done) { ctx->gpr[3] = 1; return; }",
+                  "    done = true;",
+                  "    const uint32_t patched = RuntimeRiivolution::ApplyModLoaderPatches();",
+                  "    // The gates in the replaced game functions now go to the mod (as _prolog's branches would).",
+                  f"    Memory::Write32(0x{kamek.flag:08X}u, 1u);",
+                  "    const uint32_t savedLr = ctx->lr;",
+                  f"    ctx->gpr[3] = 0x{kamek.arc_name:08X}u;",
+                  f"    InvokeDirectCpu<0x{mod_mkwcat.DVD_CONVERT_PATH:08X}u>(ctx);",
+                  "    const uint32_t entry = ctx->gpr[3];",
+                  f"    ctx->gpr[3] = 0x{kamek.arc_header:08X}u;",
+                  f"    ctx->gpr[4] = 0x{kamek.handle:08X}u;",
+                  f"    InvokeDirectCpu<0x{mod_mkwcat.ARC_INIT_HANDLE:08X}u>(ctx);",
+                  "    const uint32_t handleOk = ctx->gpr[3];",
+                  '    std::printf("[riivolution] mkwcat loader (native): %u option byte(s), mkwcat.arc entry %d, "',
+                  '                "handle %s; running the module _prolog\\n", patched, int(entry), handleOk ? "ok" : "FAILED");',
+                  "    std::fflush(stdout);",
+                  "    ctx->gpr[3] = entry;",
+                  f"    ctx->gpr[4] = 0x{kamek.handle:08X}u;",
+                  f"    InvokeDirectCpu<0x{kamek.prolog:08X}u>(ctx);",
+                  "    ctx->lr = savedLr;",
+                  '    std::printf("[riivolution] mkwcat loader: _prolog returned\\n");',
+                  "    ctx->gpr[3] = 1;",
+                  "}",
+                  f"PPC_NATIVE_OVERRIDE_VOID({a}, MkwcatLoader_{a}, (CpuContext* ctx), (ctx));", ""]
+    elif kamek and kamek.loader != NEWER_LOADER:
         # The loader the game calls, replaced natively (Newer's 0x80001800 is in native_us).
         a = f"{kamek.loader:08X}"
         lines += ['#include "hle_stubs.h"', '#include "ppc_runtime.h"', '#include "abi_bridge.h"',
@@ -856,6 +914,41 @@ def write_mod_source(gen, name, kamek, runtime_patches):
 
 # ---------------------------------------------------------------- translation
 
+# Files whose overrides must not shadow the mod (only these may be dropped: diagnostics). Others
+# that overlap are reported and kept.
+DROPPABLE_OVERRIDE_FILES = {"nsmbw_state_change_diag.cpp"}
+
+
+def native_dir_for(out, kamek):
+    """native_us, minus override files at functions the mod replaces (mkwcat). Returns the dir
+    and the excluded file names (for -DNSMBW_NATIVE_EXCLUDE)."""
+    replaced = set(getattr(kamek, "replaced", []) or [])
+    src = PORT / "native_us"
+    if not replaced:
+        return src, []
+    excluded = []
+    for f in sorted(src.glob("*.cpp")):
+        addrs = {int(a, 16) for a in re.findall(r"PPC_NATIVE_OVERRIDE(?:_VOID)?\(\s*([0-9A-Fa-f]{8})", f.read_text(errors="replace"))}
+        hit = sorted(addrs & replaced)
+        if not hit:
+            continue
+        if f.name in DROPPABLE_OVERRIDE_FILES:
+            excluded.append(f.name)
+            print(f"  - native override {f.name} dropped: the mod replaces " + ", ".join(f"{a:08X}" for a in hit))
+        else:
+            print(f"  ! native override {f.name} kept: it overrides " + ", ".join(f"{a:08X}" for a in hit) +
+                  " which the mod also replaces (the native version runs)")
+    if not excluded:
+        return src, []
+    dst = out / "native_filtered"
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.mkdir(parents=True)
+    for f in src.iterdir():
+        if f.is_file() and f.name not in excluded:
+            shutil.copy2(f, dst / f.name)
+    return dst, excluded
+
 def write_project(src, dst, replacements):
     text = (PORT / src).read_text()
     for old, new in replacements.items():
@@ -863,13 +956,14 @@ def write_project(src, dst, replacements):
     dst.write_text(text)
 
 
-def translate(out, code_dir, threads, function_map):
+def translate(out, code_dir, threads, function_map, native_dir=None):
     env = dict(os.environ, DOTNET_ROLL_FORWARD="Major")
+    native_dir = native_dir or PORT / "native_us"
     common = {
         "workspace_root: .": f"workspace_root: {PORT}",
         '"../../code/main.dol"': f'"{code_dir / "main.dol"}"',
-        "native_registration_root: native_us": f"native_registration_root: {PORT / 'native_us'}",
-        "native_abi_directories: [native_us]": f"native_abi_directories: [{PORT / 'native_us'}]",
+        "native_registration_root: native_us": f"native_registration_root: {native_dir}",
+        "native_abi_directories: [native_us]": f"native_abi_directories: [{native_dir}]",
         "path: function_map_us.txt": f"path: {function_map}",
     }
     projects = out / "projects"
@@ -915,7 +1009,7 @@ def translate(out, code_dir, threads, function_map):
             modules.append(" ".join(parts))
     (projects / "modules.txt").write_text("\n".join(modules) + "\n")
     run(["emit-nsmbw-build-shards", "--project", str(projects / "nsmbw_us.yml"),
-         "--modules-file", str(projects / "modules.txt"), "--native-source-dir", str(PORT / "native_us"),
+         "--modules-file", str(projects / "modules.txt"), "--native-source-dir", str(native_dir),
          "--out", str(gen / "build_shards")], "shards.log")
     return gen
 
@@ -944,13 +1038,15 @@ def main():
         print("  nothing to bake: the normal build runs this mod as is")
         return
     function_map = write_function_map(out, kamek)
-    gen = translate(out, out / "code", args.threads, function_map)
+    native_dir, excluded = native_dir_for(out, kamek)
+    gen = translate(out, out / "code", args.threads, function_map, native_dir)
     write_mod_source(gen, name, kamek, runtime_patches)
     build_dir = UPSTREAM / f"build_mac_mod_{name}"
     configure = ["cmake", "-S", str(UPSTREAM / "runtime"), "-B", str(build_dir), "-G", "Ninja",
                  "-DCMAKE_BUILD_TYPE=Release", "-DMKW_BUILD_NSMBW=ON",
                  "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++",
-                 f"-DNSMBW_GENERATED_DIR={gen}", f"-DNSMBW_SHARD_MANIFEST={gen / 'build_shards' / 'shards.cmake'}"]
+                 f"-DNSMBW_GENERATED_DIR={gen}", f"-DNSMBW_SHARD_MANIFEST={gen / 'build_shards' / 'shards.cmake'}",
+                 "-DNSMBW_NATIVE_EXCLUDE=" + ";".join(excluded)]
     print("  translated: " + str(gen))
     print("  configure:  " + " ".join(configure))
     if args.configure or args.build:

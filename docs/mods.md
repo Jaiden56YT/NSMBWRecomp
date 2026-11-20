@@ -523,7 +523,38 @@ cleanly from the relocations:
 - overlaps with recomp overrides: 0x8015FC10 and 0x801AD4E0, as expected.
 The pack's `rels/d_project.SMAP` is a full symbol map (game and module functions with names).
 
-So route (a) works without the mod's Clang: next is a mod_build mode that writes the 775 branches,
+**Building it in (2026-11-20, in progress).** `tools/mod_mkwcat.py` + `mod_build.py` now build the
+pack into the recomp (`python3 -I tools/mod_build.py <mods>/mkwcat-nsmbw --name mkwcat`, then a build
+dir configured offline with the same dependency sources as build_mac and
+`-DNSMBW_NATIVE_EXCLUDE=nsmbw_state_change_diag.cpp`). What it does:
+- links the module under the MEM1 arena top (0x8178D500), with the arc header, an ARCHandle and the
+  name embedded; translates it as part of main.dol (2136 entry points: the SMAP's functions, the
+  replacement targets, thunks, relocation targets); 43,423 unique functions in all;
+- bakes the 692 reference immediates and 288 player-count immediates; copies each thunk's game
+  instruction; **gates** the 775 replaced functions: each starts with a `b` to a stub that goes to
+  the mod's function once a flag is set and otherwise runs the game's own first instruction and
+  continues at +4 (baked straight in, the mod's mPad replacement ran from the first frame, before
+  the module was initialised, and called a null pointer);
+- replaces the loader at 0x800047E0 with a native one (generated): option bytes, the gate flag,
+  DVDConvertPathToEntrynum("mkwcat.arc"), ARCInitHandle on the embedded header, then the module's
+  _prolog;
+- drops native overrides that shadow a replaced function when they are diagnostics
+  (`nsmbw_state_change_diag.cpp`, 0x8015FC10); keeps and reports the others (0x801AD4E0, s_Printf).
+- Runtime fix: an XML naming `disc="0"` (this pack) was rejected because the runtime passed no disc
+  number; an unknown disc number / revision no longer rejects (riivolution_contract.h).
+
+Status: the pack is accepted, mkwcat.arc is found (entry 176), the handle is set up, and the
+module's _prolog runs to the end (preinit, constructors, main). The boot scene's teardown then
+crashes: fBase_c::postDelete (0x80161F60) is called with 0x815E74F4, 0x1C into the boot scene
+(0x815E74D8), not an object start, and calls through the "heap" at its +0x5C (state data,
+0x802FEAF8 since tick 4) - a null virtual call. So an object list holds a node or owner pointer the
+mod's replaced list / delete code reads differently from the game's. Not yet found: which
+replacement, and why it differs from a console (where the boot scene is also created before the
+loader). Next: trace the fManager / fLiMgBa calls between the loader and the crash
+(NSMBW_TRACE-style call logging after _prolog), and compare the object lists with the mod's
+expectations; also check that the translator handles the gates' +4 entries in REL functions.
+
+Original plan for route (a), for reference: next is a mod_build mode that writes the 775 branches,
 the 692 immediates and the 288 player-count immediates into the main.dol / REL copies, adds the
 linked module as a fifth translated module (function starts from the SMAP), puts the extern thunks'
 first instructions in place, drops the two overlapping overrides, and replaces the loader at

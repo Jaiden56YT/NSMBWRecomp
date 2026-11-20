@@ -779,7 +779,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..9b1f0b0 100644
+index ec62546..3790e5e 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,11 +8,14 @@
@@ -799,7 +799,7 @@ index ec62546..9b1f0b0 100644
          CACHE FILEPATH "Translator-owned NSMBW combined shard manifest")
      if(NOT EXISTS "${NSMBW_SHARD_MANIFEST}")
          message(FATAL_ERROR
-@@ -35,7 +38,10 @@ if(MKW_BUILD_NSMBW)
+@@ -35,7 +38,15 @@ if(MKW_BUILD_NSMBW)
      # 0x00000060 unknown-boot-call stub). Ordinary C++, not translated PPC, so it gets the
      # normal object-target settings instead of the translated-code compile options.
      file(GLOB NSMBW_NATIVE_SOURCES CONFIGURE_DEPENDS
@@ -808,10 +808,15 @@ index ec62546..9b1f0b0 100644
 +        # A mod build's generated sources (tools/mod_build.py): its Kamek module image and the
 +        # patches outside main.dol/RELs. Empty for the vanilla translation.
 +        "${NSMBW_GENERATED_DIR}/mod/*.cpp")
++    # Mod builds (tools/mod_build.py) leave out native overrides of functions the mod replaces
++    # (file names, ;-separated), so the mod's version is the one that runs.
++    foreach(excluded ${NSMBW_NATIVE_EXCLUDE})
++        list(FILTER NSMBW_NATIVE_SOURCES EXCLUDE REGEX "/${excluded}$")
++    endforeach()
      if(NSMBW_NATIVE_SOURCES)
          add_library(nsmbw_native OBJECT ${NSMBW_NATIVE_SOURCES})
          mkw_configure_object_target(nsmbw_native)
-@@ -47,9 +53,9 @@ if(MKW_BUILD_NSMBW)
+@@ -47,9 +58,9 @@ if(MKW_BUILD_NSMBW)
      # about a single dol+rel pair, and every one of those separately-generated files defines the
      # same extern "C" InitializeDataSections()/IsDataSectionsInitialized() symbols, which would
      # collide at link time the moment more than one was included.
@@ -824,7 +829,7 @@ index ec62546..9b1f0b0 100644
      if(NOT EXISTS "${NSMBW_DATA_INIT_FILE}")
          message(FATAL_ERROR
              "Missing combined NSMBW data initializer: ${NSMBW_DATA_INIT_FILE}. Run "
-@@ -99,6 +105,7 @@ if(MKW_BUILD_NSMBW)
+@@ -99,6 +110,7 @@ if(MKW_BUILD_NSMBW)
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_art.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_draw.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_options_menu.cpp"
@@ -832,7 +837,7 @@ index ec62546..9b1f0b0 100644
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_movie_skip.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/host_cpu_baseline.cpp")
      if(NOT WIN32)
-@@ -126,7 +133,7 @@ if(MKW_BUILD_NSMBW)
+@@ -126,7 +138,7 @@ if(MKW_BUILD_NSMBW)
      add_library(nsmbw_runtime_common OBJECT ${NSMBW_RUNTIME_COMMON_SOURCES})
      mkw_configure_object_target(nsmbw_runtime_common)
      target_include_directories(nsmbw_runtime_common BEFORE PRIVATE
@@ -841,7 +846,7 @@ index ec62546..9b1f0b0 100644
      target_compile_features(nsmbw_runtime_common PRIVATE cxx_std_20)
      # MKW_RUNTIME_PRODUCT_NSMBW: distinguishes this compile of the shared runtime/src tree from
      # mkw_runtime_common's. Needed where a guest-code-address native override in a shared file is
-@@ -146,7 +153,7 @@ if(MKW_BUILD_NSMBW)
+@@ -146,7 +158,7 @@ if(MKW_BUILD_NSMBW)
          target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
      endif()
  
@@ -850,7 +855,7 @@ index ec62546..9b1f0b0 100644
      # foreach right at the end of that file - which has already run by the time this file is
      # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
      # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
-@@ -154,7 +161,7 @@ if(MKW_BUILD_NSMBW)
+@@ -154,7 +166,7 @@ if(MKW_BUILD_NSMBW)
      # was compiled without those target features enabled.
      foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
          if(TARGET ${nsmbw_target})
@@ -859,7 +864,7 @@ index ec62546..9b1f0b0 100644
          endif()
      endforeach()
  
-@@ -185,6 +192,7 @@ if(MKW_BUILD_NSMBW)
+@@ -185,6 +197,7 @@ if(MKW_BUILD_NSMBW)
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_art.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_draw.cpp"
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_options_menu.cpp"
@@ -867,7 +872,7 @@ index ec62546..9b1f0b0 100644
          "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_movie_skip.cpp")
      mkw_configure_object_target(NSMBWCompiled)
      # Same product define as nsmbw_runtime_common: runtime_config.h's inline functions read it, and
-@@ -199,7 +207,7 @@ if(MKW_BUILD_NSMBW)
+@@ -199,7 +212,7 @@ if(MKW_BUILD_NSMBW)
          target_link_options(NSMBWCompiled PRIVATE -mwindows)
      endif()
      target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
@@ -876,7 +881,7 @@ index ec62546..9b1f0b0 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +215,16 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +220,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -894,7 +899,7 @@ index ec62546..9b1f0b0 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +240,24 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +245,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -10036,3 +10041,22 @@ index df24a1a..64d8b28 100644
      const std::string configPath = RuntimeConfigFile::NandRoot();
      if (!configPath.empty()) {
          const auto path = ResolveConfiguredPath(configPath);
+diff --git a/runtime/include/hle/riivolution_contract.h b/runtime/include/hle/riivolution_contract.h
+index 3839cbf..c823cee 100644
+--- a/runtime/include/hle/riivolution_contract.h
++++ b/runtime/include/hle/riivolution_contract.h
+@@ -469,10 +469,12 @@ inline bool Disc::IsValidForGame(const std::string& gameId, std::optional<uint16
+     if (gameFilter.developer && gameDeveloper != *gameFilter.developer) {
+         return false;
+     }
+-    if (gameFilter.disc && discNumberInt != *gameFilter.disc) {
++    // An unknown disc number or revision (the caller passes none) does not reject an XML that
++    // names one: NSMBW is a single disc, and mkwcat's nsmbw-project pack says disc="0".
++    if (gameFilter.disc && discNumber && discNumberInt != *gameFilter.disc) {
+         return false;
+     }
+-    if (gameFilter.version && revisionInt != *gameFilter.version) {
++    if (gameFilter.version && revision && revisionInt != *gameFilter.version) {
+         return false;
+     }
+     if (gameFilter.regions) {
