@@ -674,8 +674,17 @@ port, so the host sees translated ports) between the host and two joiners, inter
 sync**, with the host forwarding about 6500 packets between the joiners. Three copies of the game on
 one Mac made the waits long (several seconds per 600 frames); that is the machine, not the network.
 
-**Not tested yet.** A real internet session (two different networks); UPnP against a real router
-(it changes the router's settings, so not without the owner's OK); the Windows build of these
+**UPnP on the developer's router (2026-11-20, with the owner's OK).** A standalone harness that
+drives nsmbw_upnp exactly as the button does found no gateway: SSDP discovery itself works (a Roku
+on the same network answered, both inside and outside the tool sandbox), but the router (the
+default gateway) answered neither SSDP nor a read-only NAT-PMP external-address request on UDP
+5351. So that router has UPnP and NAT-PMP off or unsupported, and the game showed the intended
+message ("No UPnP router answered ... open UDP 47100 on the router by hand"). Nothing on the
+router was changed. Options for hosting from that network: turn UPnP on in the router's settings,
+forward UDP 47100 to the Mac by hand, let a friend whose router has UPnP host, or use a VPN.
+
+**Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
+a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
 (the screen warns when the router's own address is private: friends outside cannot reach it then,
 and a VPN is the way).
