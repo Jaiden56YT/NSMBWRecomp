@@ -5,7 +5,8 @@ friend's), the room fills up, and everyone goes back to the menu and plays NSMBW
 co-op (up to four players), with the remote players' inputs arriving over the network. Free Mode
 and Coin Battle come along for free, because the design synchronises input, not game modes.
 
-Status: design, plus step 0 (the determinism check, sections 8a and 8b) built and run on the Mac.
+Status: design, plus step 0 (the determinism check, sections 8a and 8b) built and run on the Mac,
+and the frame-driven audio output buffered and paced (8c).
 Section 8 is the build order. Step 0's answer: input + seed + frame counting reproduce the game
 state; the audio engine's timing reached scene transitions until audio was driven by game frames
 (8b). With that, replays match the recording frame for frame through boot, title, movie, map and
@@ -168,7 +169,8 @@ Ordered by how likely they are to hurt.
    wall-clock path, two machines diverge within seconds. Fix if so: in a session, drive the AX /
    sequence update from game frames (a fixed number of audio frames per game frame, the audio
    output resampling / stretching to absorb the difference). Confirmed and fixed for frame mode by
-   step 0 (section 8b): the game-setup scene waits on the audio engine.
+   step 0 (section 8b): the game-setup scene waits on the audio engine. The output side (buffer,
+   speed correction, recovery after a stall) is in section 8c.
 2. **Other clock reads.** `OSGetTime` / `OSGetTick` / the VI tick read by gameplay code (RNG
    seeding, timers, "wait one tick" loops like the one `nsmbw_tick_read_pump.cpp` documents). Fix:
    in a session, the game thread sees a time derived from the frame counter.
@@ -386,9 +388,53 @@ Follow-up (2026-11-19):
   makes the next launch wipe the cache). Not merged here yet.
 
 Still open before step 1:
-- the audio output: in a session the host's audio device has to play blocks made at the game's
-  pace, so it needs a small buffer and stretching / dropping when the game runs slow or fast;
+- ~~the audio output~~ (done, section 8c);
 - frame-derived time for the clock reads above (risk 2).
+
+## 8c. Audio output for frame-driven audio (2026-11-20, Mac)
+
+With audio advanced per game frame (8b), the guest hands the output about 16.7 ms of sound at
+each frame boundary (5-6 AI blocks at once) and the sound device drains it on its own clock. The
+output was a plain queue capped at 120 ms, so any difference between the two ended in gaps or
+dropped blocks, and a stalled frame (lockstep waiting on a late peer) emptied the queue, after
+which it refilled to only one frame's worth.
+
+The change (`runtime/src/audio_backend.cpp`, in the patch; switched on by
+`Audio_HLE_SetFrameDriven`, so normal play is unchanged):
+- **Target level:** keep a smoothed 60 ms queued (about 0.3 s of averaging, since the level is a
+  16.7 ms sawtooth by nature). Cap raised to 160 ms; above it whole blocks are still dropped.
+- **Speed correction:** playback speed is nudged by at most 0.5% (SDL's stream frequency ratio;
+  about a twelfth of a semitone) to hold the target: a proportional part for the level and a slow
+  integral part that learns a steady rate offset (proportional alone left a device 0.3% off with
+  the queue parked 30-50 ms away from the target).
+- **Stall recovery:** when the queue is found (nearly) empty, silence is put in front of the next
+  block up to the target, so playback resumes with its cushion. "Nearly": with the speed off 1.0,
+  SDL keeps a few bytes for its resampler, and a drained stream never read exactly 0.
+- Nothing feeds back into the guest: it is host output only.
+
+Diagnostics: `NSMBW_LOG_AUDIO_QUEUE=1` logs every ~5 s of audio: sound made per wall-clock
+second, queue level, speed change, underruns, drops. Test knobs: `NSMBW_REPLAY_STALL=<every>:<ms>`
+(the replay holds the game, as lockstep would), `NSMBW_AUDIO_TEST_DEVICE_SCALE=<x>` (multiplies
+the speed; see below).
+
+Testing (muted, `SDL_AUDIO_DRIVER=dummy`, a 3000-frame recording replayed for 1800 frames):
+- The game makes exactly real time (1000 ms of sound per wall-clock second).
+- SDL's dummy device plays **about 6% slow** (it sleeps one buffer's length per buffer on top of
+  its own work), and its speed wanders by a few tenths of a percent. Uncorrected, that filled the
+  queue and dropped ~5% of blocks; no 0.5% correction can absorb it, and no real device is that
+  far off. So the tests scale the dummy by 1.064 to stand in for an accurate device.
+- Results, queue level after settling / drops / underruns / replay hashes:
+  - accurate device: 65-75 ms, 0 dropped, 1 underrun after start-up, hashes match;
+  - device 0.4% fast: 50-60 ms (38 ms while it learned the offset), 0 dropped, 1 underrun after
+    start-up, match;
+  - device 0.2% slow (in practice past the 0.5% cap, as the dummy itself drifted): speed held at
+    the cap, queue ~80 ms, 0 dropped, match;
+  - 150 ms stall every 2 s (7% of the time stalled): 60-70 ms, 0 dropped, one underrun per stall
+    (each stall is a gap, then playback resumes with its cushion), match;
+  - 500 ms stall every 10 s: 60-75 ms, 0 dropped, one underrun per stall, match.
+- Not tested: listening to it. A real device was not used (test runs stay muted), so whether the
+  gaps after a stall or the speed changes are audible is not checked; a stall is a gap in sound by
+  design (time-stretching through it is possible later).
 
 ## 9. Open questions for the user
 

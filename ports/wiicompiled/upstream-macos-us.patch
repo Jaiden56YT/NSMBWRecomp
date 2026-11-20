@@ -1561,7 +1561,7 @@ index 0000000..acaa978
 +}  // namespace GuestFlat
 +#endif  // __SWITCH__
 diff --git a/runtime/src/hle/audio/audio.cpp b/runtime/src/hle/audio/audio.cpp
-index 421ca42..f8d68c7 100644
+index 421ca42..1101639 100644
 --- a/runtime/src/hle/audio/audio.cpp
 +++ b/runtime/src/hle/audio/audio.cpp
 @@ -30,20 +30,29 @@ constexpr uint32_t kBytesPerSample = 2u;
@@ -1663,7 +1663,7 @@ index 421ca42..f8d68c7 100644
              if (g_ai.tickActive) {
                  return;
              }
-@@ -616,8 +630,52 @@ int64_t ConsumeAudioPollDeltaMicros()
+@@ -616,8 +630,54 @@ int64_t ConsumeAudioPollDeltaMicros()
  std::atomic<uint64_t> g_pollCalls{0};
  std::atomic<uint64_t> g_pollNanos{0};
  
@@ -1676,13 +1676,15 @@ index 421ca42..f8d68c7 100644
 +
 +void Audio_HLE_SetFrameDriven()
 +{
-+    g_audioFrameDriven.store(true, std::memory_order_relaxed);
++    if (!g_audioFrameDriven.exchange(true, std::memory_order_relaxed)) {
++        AudioBackend::Instance().SetFrameDriven(true);
++    }
 +}
 +
 +void Audio_HLE_AdvanceFrame(uint32_t micros)
 +{
 +    static uint64_t pendingMicros = 0;
-+    g_audioFrameDriven.store(true, std::memory_order_relaxed);
++    Audio_HLE_SetFrameDriven();
 +    pendingMicros += micros;
 +    // The frame boundary (the controller read) runs with guest interrupts off, and the audio
 +    // runs there anyway, the way an interrupt handler would: with interrupts off and the
@@ -1716,7 +1718,7 @@ index 421ca42..f8d68c7 100644
      static const bool timed = std::getenv("NSMBW_LOG_AUDIO_BACKLOG") != nullptr;
      const auto start = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
      MusicAttenuation::TickGuest();
-@@ -632,6 +690,9 @@ void Audio_HLE_Poll(CpuContext* ctx)
+@@ -632,6 +692,9 @@ void Audio_HLE_Poll(CpuContext* ctx)
  
  void Audio_HLE_PollDeferred()
  {
@@ -4877,10 +4879,17 @@ index 5b35e16..088d7a0 100644
  }
  
 diff --git a/runtime/src/audio_backend.cpp b/runtime/src/audio_backend.cpp
-index 7ceda4c..f5babc0 100644
+index 7ceda4c..e5ba066 100644
 --- a/runtime/src/audio_backend.cpp
 +++ b/runtime/src/audio_backend.cpp
-@@ -8,6 +8,7 @@
+@@ -4,10 +4,14 @@
+ 
+ #include <algorithm>
+ #include <cstdint>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
+ #include <cstdlib>
  #include <iostream>
  
  #include <SDL3/SDL_init.h>
@@ -4888,7 +4897,7 @@ index 7ceda4c..f5babc0 100644
  
  AudioBackend& AudioBackend::Instance() {
      static AudioBackend instance;
-@@ -74,6 +75,8 @@ bool AudioBackend::EnsureInitializedLocked(uint32_t sampleRate, uint32_t channel
+@@ -74,8 +78,13 @@ bool AudioBackend::EnsureInitializedLocked(uint32_t sampleRate, uint32_t channel
          return false;
      }
  
@@ -4896,25 +4905,132 @@ index 7ceda4c..f5babc0 100644
 +                         << ", " << spec.freq << " Hz, " << spec.channels << " ch" << std::endl;
      m_stream = stream;
      m_spec = spec;
++    m_ratio = 1.0f;
++    m_queueAvgBytes = -1.0;
++    m_rateTrim = 0.0;
      m_sampleRate = sampleRate;
-@@ -103,6 +106,10 @@ void AudioBackend::Shutdown() {
+     m_channels = channels;
+     m_initialized = true;
+@@ -103,13 +112,108 @@ void AudioBackend::Shutdown() {
      m_convertBuffer.clear();
  }
  
+-uint32_t AudioBackend::QueueLimitBytesLocked() const {
+-    constexpr uint32_t queueMs = 120;
 +// Read (and reset) by NSMBW_LOG_INTERP every 2 s.
 +std::atomic<uint64_t> g_audioDroppedBlocks{0};
 +std::atomic<uint64_t> g_audioPushedBlocks{0};
-+
- uint32_t AudioBackend::QueueLimitBytesLocked() const {
-     constexpr uint32_t queueMs = 120;
  
-@@ -127,13 +134,18 @@ bool AudioBackend::QueueHasCapacityLocked(int incomingBytes) {
++uint32_t AudioBackend::BytesForMsLocked(uint32_t ms) const {
+     const uint64_t bytesPerSecond = static_cast<uint64_t>(m_spec.freq) *
+                                     static_cast<uint64_t>(m_spec.channels) *
+                                     sizeof(int16_t);
+-    return static_cast<uint32_t>((bytesPerSecond * queueMs) / 1000u);
++    // Whole sample frames, so silence padding never splits a left/right pair.
++    const uint64_t frameBytes = static_cast<uint64_t>(m_spec.channels) * sizeof(int16_t);
++    return static_cast<uint32_t>((bytesPerSecond * ms) / 1000u / frameBytes * frameBytes);
++}
++
++uint32_t AudioBackend::QueueLimitBytesLocked() const {
++    // Frame-driven: room above the 60 ms target for a frame that runs late and then catches up.
++    return BytesForMsLocked(m_frameDriven ? 160u : 120u);
++}
++
++// Frame-driven pacing (read by NSMBW_LOG_AUDIO_QUEUE=1, logged here every ~5 s of audio).
++std::atomic<uint64_t> g_audioUnderruns{0};
++
++void AudioBackend::SetFrameDriven(bool on) {
++    std::lock_guard<std::mutex> lock(m_mutex);
++    m_frameDriven = on;
++    m_queueAvgBytes = -1.0;
++    if (!on && m_stream && m_ratio != 1.0f) {
++        SDL_SetAudioStreamFrequencyRatio(m_stream, 1.0f);
++        m_ratio = 1.0f;
++    }
++}
++
++// The guest hands over about 16.7 ms of sound at each game frame (5-6 AI blocks at once), while
++// the device drains at its own clock. Two things go wrong without this: the two clocks drift
++// (the game's frame rate is not exactly the Wii's 59.94 Hz, so the queue slowly fills to the cap
++// and blocks are dropped, or empties and the device plays gaps), and a stalled frame (lockstep
++// waiting on the network, a slow load) empties the queue, after which it refills to only one
++// frame's worth and every jitter after that is another gap.
++//  - Drift: hold the smoothed queue at 60 ms by changing the playback speed by at most 0.5%
++//    (about a twelfth of a semitone, not audible), which absorbs a frame rate off by 0.3 fps.
++//  - Stall: when the queue is found empty, put silence in front of the new block up to the
++//    target, so playback resumes with its cushion instead of running on empty.
++//  - Burst (frames catching up after a stall): the 160 ms cap drops whole blocks, as before.
++void AudioBackend::PaceFrameDrivenLocked(int incomingBytes) {
++    constexpr uint32_t kTargetMs = 60;
++    constexpr double kMaxSpeedChange = 0.005;
++    constexpr double kSmoothing = 0.01;  // per block (~3 ms): about 0.3 s of averaging
++    constexpr double kIntegralGain = 0.000002;  // per block: a 0.3% offset is learned in ~10 s
++    const double target = static_cast<double>(BytesForMsLocked(kTargetMs));
++
++    int queued = SDL_GetAudioStreamQueued(m_stream);
++    if (queued < 0) {
++        return;
++    }
++    // Not "== 0": with the speed off 1.0, SDL keeps a few bytes back for its resampler, so a
++    // drained stream reads a little above zero (a 500 ms stall never read 0 in testing).
++    if (queued < static_cast<int>(BytesForMsLocked(2))) {
++        const int pad = static_cast<int>(target) - std::max(incomingBytes, 0);
++        if (pad > 0) {
++            m_silence.assign(static_cast<size_t>(pad) / sizeof(int16_t), 0);
++            SDL_PutAudioStreamData(m_stream, m_silence.data(), pad);
++            queued = pad;
++        }
++        g_audioUnderruns.fetch_add(1, std::memory_order_relaxed);
++        m_queueAvgBytes = target + std::max(incomingBytes, 0) / 2.0;
++    }
++
++    const double level = static_cast<double>(queued) + std::max(incomingBytes, 0) / 2.0;
++    m_queueAvgBytes = m_queueAvgBytes < 0.0 ? level : m_queueAvgBytes + kSmoothing * (level - m_queueAvgBytes);
++    const double error = std::clamp((m_queueAvgBytes - target) / target, -1.0, 1.0);
++    // Proportional part reacts to the level; the slow integral part learns a steady offset
++    // between the game's rate and the device's (with the proportional part alone, a device
++    // 0.3% off parked the queue 50 ms away from the target).
++    m_rateTrim = std::clamp(m_rateTrim + kIntegralGain * error, -kMaxSpeedChange, kMaxSpeedChange);
++    const double change = std::clamp(kMaxSpeedChange * error + m_rateTrim, -kMaxSpeedChange, kMaxSpeedChange);
++    // Test only: NSMBW_AUDIO_TEST_DEVICE_SCALE multiplies the speed. SDL's dummy driver (muted
++    // test runs) plays ~6% slow, because it sleeps one buffer's length per buffer on top of its
++    // own work; scaling by its measured error makes it stand in for an accurate device, and
++    // scaling a little past that simulates a device that runs fast or slow.
++    static const double deviceScale = [] {
++        const char* v = std::getenv("NSMBW_AUDIO_TEST_DEVICE_SCALE");
++        return v ? std::atof(v) : 1.0;
++    }();
++    const float ratio = static_cast<float>((1.0 + change) * deviceScale);
++    if (std::abs(ratio - m_ratio) >= 0.0002f && SDL_SetAudioStreamFrequencyRatio(m_stream, ratio)) {
++        m_ratio = ratio;
++    }
++
++    static const bool log = std::getenv("NSMBW_LOG_AUDIO_QUEUE") != nullptr;
++    static uint32_t pushes = 0;
++    static uint64_t madeBytes = 0;
++    static const auto start = std::chrono::steady_clock::now();
++    madeBytes += static_cast<uint64_t>(std::max(incomingBytes, 0));
++    if (log && ++pushes % 1667u == 0) {
++        const double bytesPerMs = target / kTargetMs;
++        const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
++        // Sound made per wall-clock second: 1000 ms/s when the game runs exactly at the Wii's rate.
++        std::fprintf(stderr, "[audio] %.1f s: made %.1f ms/s, queue %.1f ms (now %.1f), speed %+.3f%%, underruns %llu, dropped %llu\n",
++                     secs, madeBytes / bytesPerMs / secs,
++                     m_queueAvgBytes / bytesPerMs, queued / bytesPerMs, (m_ratio / deviceScale - 1.0) * 100.0,
++                     static_cast<unsigned long long>(g_audioUnderruns.load()),
++                     static_cast<unsigned long long>(m_droppedTotal));
++    }
+ }
+ 
+ bool AudioBackend::QueueHasCapacityLocked(int incomingBytes) {
+@@ -127,13 +231,19 @@ bool AudioBackend::QueueHasCapacityLocked(int incomingBytes) {
          // stream creates an audible discontinuity (the severe crackle seen when
          // VI-batched DMA briefly outran playback).
          // A drop is audible; report the first one so it is not invisible.
 -        if (!m_reportedDroppedBlock) {
 +        static uint64_t s_droppedBlocks = 0;
 +        ++s_droppedBlocks;
++        ++m_droppedTotal;
 +        g_audioDroppedBlocks.fetch_add(1, std::memory_order_relaxed);
 +        if (!m_reportedDroppedBlock || (s_droppedBlocks % 500u) == 0) {
              m_reportedDroppedBlock = true;
@@ -4929,6 +5045,26 @@ index 7ceda4c..f5babc0 100644
      return true;
  }
  
+@@ -169,6 +279,9 @@ bool AudioBackend::PushWiiAiSamplesBE16(const uint8_t* data, size_t bytes) {
+     }
+ 
+     const int lenBytes = static_cast<int>(frameCount * 2 * sizeof(int16_t));
++    if (m_frameDriven) {
++        PaceFrameDrivenLocked(lenBytes);
++    }
+     if (!QueueHasCapacityLocked(lenBytes)) {
+         return true;
+     }
+@@ -191,6 +304,9 @@ bool AudioBackend::PushSamplesLE16(const int16_t* samples, size_t sampleCount) {
+     }
+ 
+     const int lenBytes = static_cast<int>(sampleCount * sizeof(int16_t));
++    if (m_frameDriven) {
++        PaceFrameDrivenLocked(lenBytes);
++    }
+     if (!QueueHasCapacityLocked(lenBytes)) {
+         return true;
+     }
 diff --git a/aurora-main/lib/webgpu/gpu_cache.cpp b/aurora-main/lib/webgpu/gpu_cache.cpp
 index 4f52738..0a1e4f2 100644
 --- a/aurora-main/lib/webgpu/gpu_cache.cpp
@@ -8163,3 +8299,41 @@ index 156ba23..3ea5814 100644
  void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
      if (size == 0) {
          return;
+diff --git a/runtime/include/audio_backend.h b/runtime/include/audio_backend.h
+index ae05827..9ea5e1e 100644
+--- a/runtime/include/audio_backend.h
++++ b/runtime/include/audio_backend.h
+@@ -23,6 +23,13 @@ public:
+     void SetMasterVolume(float volume);
+     void SetMuted(bool muted);
+ 
++    // Frame-driven audio (NSMBW online play): the guest makes sound per game frame, not per
++    // host-clock tick, so production and the device drift apart and stall together. In this
++    // mode the output keeps a target queue, nudges playback speed (at most 0.5%) toward it,
++    // and pads silence after an underrun so the cushion comes back. Host output only: nothing
++    // here feeds back into the guest.
++    void SetFrameDriven(bool on);
++
+ private:
+     AudioBackend() = default;
+     ~AudioBackend() = default;
+@@ -34,6 +41,8 @@ private:
+     uint32_t QueueLimitBytesLocked() const;
+     float EffectiveGainLocked() const;
+     void ApplyGainLocked();
++    void PaceFrameDrivenLocked(int incomingBytes);
++    uint32_t BytesForMsLocked(uint32_t ms) const;
+ 
+     mutable std::mutex m_mutex;
+     SDL_AudioStream* m_stream = nullptr;
+@@ -45,4 +54,10 @@ private:
+     bool m_muted = false;
+     bool m_reportedDroppedBlock = false;
+     std::vector<int16_t> m_convertBuffer;
++    bool m_frameDriven = false;
++    double m_queueAvgBytes = -1.0;   // smoothed queue level (frame-driven mode)
++    float m_ratio = 1.0f;            // last frequency ratio set on the stream
++    std::vector<int16_t> m_silence;
++    uint64_t m_droppedTotal = 0;
++    double m_rateTrim = 0.0;         // learned speed offset (integral part)
+ };

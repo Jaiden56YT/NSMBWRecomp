@@ -44,6 +44,9 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <utility>
+#include <chrono>
+#include <thread>
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -198,6 +201,19 @@ void AdvanceAudio() {
     Audio_HLE_AdvanceFrame(static_cast<uint32_t>(at(g.frame + 1) - at(g.frame)));
 }
 
+// Test knob for the audio output pacing (docs/online-play.md 8c): NSMBW_REPLAY_STALL=<every>:<ms>
+// holds the game for <ms> every <every> frames, the way lockstep waits for a late peer.
+void TestStall() {
+    static const auto cfg = [] {
+        std::pair<uint32_t, uint32_t> c{0, 0};
+        if (const char* v = std::getenv("NSMBW_REPLAY_STALL")) std::sscanf(v, "%u:%u", &c.first, &c.second);
+        return c;
+    }();
+    if (cfg.first != 0 && g.frame != 0 && g.frame % cfg.first == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(cfg.second));
+    }
+}
+
 // Before main(): in frame mode, take audio off the host clock from the very start.
 struct FrameDrivenAudioFromStart {
     FrameDrivenAudioFromStart() {
@@ -222,6 +238,7 @@ extern "C" bool NsmbwReplayFrameMode() {
 extern "C" void NsmbwReplayBeginFrame() {
     Init();
     ApplySeed();
+    TestStall();
     AdvanceAudio();
     uint32_t tick = 0;
     Memory::TryRead32(kViRetraceCountAddr, tick);
