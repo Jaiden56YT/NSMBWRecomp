@@ -7,7 +7,8 @@ and Coin Battle come along for free, because the design synchronises input, not 
 
 Status: design, plus step 0 (the determinism check, sections 8a and 8b) built and run on the Mac,
 the frame-driven audio output buffered and paced (8c), the guest clock counted in game
-frames (8d), and step 1: lockstep between a Mac and a Windows PC over a LAN, in sync (8f).
+frames (8d), step 1: lockstep between a Mac and a Windows PC over a LAN, in sync (8f), and step 2
+begun: the Online button and the room screen, with Start relaunching every copy into the session (8g).
 Section 8 is the build order. Step 0's answer: input + seed + frame counting reproduce the game
 state; the audio engine's timing reached scene transitions until audio was driven by game frames
 (8b). With that, replays match the recording frame for frame through boot, title, movie, map and
@@ -570,6 +571,41 @@ retrace count and EGG's copies, and two pages a host thread writes at the frame 
 per-frame full-memory hashes from both sides were not compared (they are on different machines).
 Not tested yet: two real players, a level played through with enemies, a session over the internet,
 packet loss.
+
+## 8g. Step 2, first part: the Online button and rooms (2026-11-20, Mac)
+
+Decisions taken for this first version (section 9's questions, with the recommended answers; any of
+them can change): four buttons (not an Extras button); joining by address (LAN, or a VPN like
+Tailscale; room codes and NAT traversal are step 3); one player per machine; the session plays on a
+fresh save that is not copied back.
+
+- **Button.** `nsmbw_layout_patch.cpp` adds a fourth copy of Coin Battle, `F03_online` /
+  `W_multiOnline_00`, magenta (green and blue swapped; green is Free Mode's, blue Mods'), and lays the
+  row out at 0.72 scale / 180 units (16:9; 0.6 / 150 at 4:3). The game side
+  (`nsmbw_file_select_mods.cpp`) makes Online choice 6: six more group bindings, its cursor frame,
+  right of Mods, up to the third file, and its confirm opens the room screen the way Mods opens the
+  mods screen. Only functions the Mods button already replaced changed: no retranslation.
+- **Room** (`runtime/src/product/nsmbw_online_room.cpp`): UDP on port 47100. HELLO / WELCOME (slot in
+  join order), ROSTER and PING / PONG every 0.5 s (the host measures each joiner's round trip),
+  5 s silence drops a player, slots stay 1..n when someone leaves. START carries a session token, the
+  input delay (from the worst round trip, at least 3) and every player's address; each copy then
+  relaunches itself (`execv` / `_execv`) with the lockstep settings in its environment and a fresh
+  session save (`NSMBW_NAND_ROOT`, new in `nand_path.h`). A copy in a session does not open rooms.
+- **Room screen** (`nsmbw_options_menu.cpp`, Screen::Online): Host a room / Join a room; the address
+  field (typing, Cmd/Ctrl+V paste, Backspace); hosting shows the address others join with, the
+  players and their ping, Start the game (with at least two players) and Close the room; joined shows
+  the players and Leave the room. Closing the screen keeps the room open.
+- Test switches: `NSMBW_ONLINE_TEST=host[,start@<players>]` or `join=<address>` (room actions 3 s after
+  the first frame), `NSMBW_ONLINE_TEST_SHOW=1` (opens the screen).
+
+Tested on the Mac (muted): the four-button file select and the room screen with a joined second copy
+look right (screenshots); one copy hosting and pressing Start at two players, one joining
+`127.0.0.1`: both relaunched into a session on fresh session saves, ran in lockstep to frame 900,
+30 state checks, 0 out of sync.
+
+Not done yet: the Windows build of this step (no Windows relaunch test), a Mac/PC room over the LAN,
+the "in a room" banner on the file select, room codes, sending the host's save, ending a session back
+to the normal game.
 
 ## 9. Open questions for the user
 

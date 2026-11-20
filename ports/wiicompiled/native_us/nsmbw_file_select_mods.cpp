@@ -1,4 +1,6 @@
-// The Mods button on the file select (Free Mode / Coin Battle / Mods), US Rev 2 ("E2").
+// The Mods and Online buttons on the file select (Free Mode / Coin Battle / Mods / Online), US Rev 2
+// ("E2"). Online (choice 6, group F03_online, W_multiOnline_00) opens the room screen
+// (docs/online-play.md section 7) the way Mods opens the mods screen.
 //
 // The layout side - the button's panes, its F02_mods group, its own materials and animation tracks
 // - is added to fileSelectBase.arc as it is served (runtime/src/product/nsmbw_layout_patch.cpp,
@@ -48,9 +50,11 @@
 extern "C" bool NsmbwFileSelectHasMods();        // runtime/src/product/nsmbw_layout_patch.cpp
 extern "C" void NsmbwModsMenuRequestOpen();      // runtime/src/product/nsmbw_options_menu.cpp
 extern "C" bool NsmbwModsMenuTakeClosed();       // same file: true once, when it has closed
+extern "C" void NsmbwOnlineMenuRequestOpen();    // the room screen (same file), online play
+extern "C" bool NsmbwOnlineMenuTakeClosed();
 
 namespace {
-constexpr int32_t kMods = 5;
+constexpr int32_t kMods = 5, kOnline = 6;
 constexpr uint32_t kLayout = 0x74, kStateMgr = 0x20C, kDateFiles = 0x24C, kRootPane = 0x268;
 constexpr uint32_t kChoice = 0x2A4, kPrevChoice = 0x2A8, kTopColumn = 0x2CC, kBottomButton = 0x2D0;
 constexpr uint32_t kWindowFree = 0x294, kWindowCoin = 0x298;
@@ -61,15 +65,19 @@ constexpr uint32_t kOriginalBindings = 45;
 constexpr uint32_t kInFree = 0x0D, kInCoin = 0x0E, kOnFree = 0x22, kOnCoin = 0x23, kHitFree = 0x26,
                    kHitCoin = 0x27, kOffFree = 0x28, kOffCoin = 0x29, kOutFree = 0x2A, kOutCoin = 0x2B;
 constexpr uint32_t kInMods = 45, kOnMods = 46, kHitMods = 48, kOffMods = 49, kOutMods = 50;
+// The Online button's group F03_online, bound after F02_mods: in 51, on 52, idle 53, hit 54, off 55,
+// out 56 (same anim resources).
+constexpr uint32_t kInOnline = 51, kOnOnline = 52, kHitOnline = 54, kOffOnline = 55, kOutOnline = 56;
 // The anim resources each F02_mods binding uses: inMulti 7, onMulti 23, idleMulti 24, hitMulti 25,
 // offMulti 26, outMulti 27 (createLayout's resource table).
 constexpr uint32_t kModsAnimResources[6] = {7, 23, 24, 25, 26, 27};
 
-uint32_t OnAnim(int32_t c) { return c == 3 ? kOnFree : c == 4 ? kOnCoin : kOnMods; }
-uint32_t OffAnim(int32_t c) { return c == 3 ? kOffFree : c == 4 ? kOffCoin : kOffMods; }
-uint32_t HitAnim(int32_t c) { return c == 3 ? kHitFree : c == 4 ? kHitCoin : kHitMods; }
+uint32_t OnAnim(int32_t c) { return c == 3 ? kOnFree : c == 4 ? kOnCoin : c == kMods ? kOnMods : kOnOnline; }
+uint32_t OffAnim(int32_t c) { return c == 3 ? kOffFree : c == 4 ? kOffCoin : c == kMods ? kOffMods : kOffOnline; }
+uint32_t HitAnim(int32_t c) { return c == 3 ? kHitFree : c == 4 ? kHitCoin : c == kMods ? kHitMods : kHitOnline; }
 
 uint32_t g_modsWindow = 0;   // W_multiMods_00 of the current file select
+uint32_t g_onlineWindow = 0; // W_multiOnline_00
 bool g_waitingForMenu = false;
 
 uint32_t R32(uint32_t a) { return MemoryInline::FlatRead32(a); }
@@ -124,6 +132,7 @@ void WriteString(uint32_t addr, const char* s) {
 // caller's frame, with the stack pointer lowered past them for the callee.
 void RegisterGroupsWithMods(CpuContext* ctx) {
     g_modsWindow = 0;
+    g_onlineWindow = 0;
     g_waitingForMenu = false;
     if (!NsmbwFileSelectHasMods() || ctx->gpr[6] != kOriginalBindings) {
         InvokeDirectCpu<0x800C90F0u>(ctx);
@@ -133,7 +142,9 @@ void RegisterGroupsWithMods(CpuContext* ctx) {
     const uint32_t sp = ctx->gpr[1];
     const uint32_t scratch = (sp - 0x300u) & ~0x1Fu;
     const uint32_t nameTable = scratch, indexTable = scratch + 0x100, groupName = scratch + 0x200;
+    const uint32_t onlineName = scratch + 0x220;
     WriteString(groupName, "F02_mods");
+    WriteString(onlineName, "F03_online");
     for (uint32_t i = 0; i < count; ++i) {
         MemoryInline::FlatWrite32(nameTable + 4 * i, R32(names + 4 * i));
         MemoryInline::FlatWrite32(indexTable + 4 * i, R32(indices + 4 * i));
@@ -141,6 +152,8 @@ void RegisterGroupsWithMods(CpuContext* ctx) {
     for (uint32_t i = 0; i < 6; ++i) {
         MemoryInline::FlatWrite32(nameTable + 4 * (count + i), groupName);
         MemoryInline::FlatWrite32(indexTable + 4 * (count + i), kModsAnimResources[i]);
+        MemoryInline::FlatWrite32(nameTable + 4 * (count + 6 + i), onlineName);
+        MemoryInline::FlatWrite32(indexTable + 4 * (count + 6 + i), kModsAnimResources[i]);
     }
     const uint32_t calleeSp = scratch - 0x40u;
     MemoryInline::FlatWrite32(calleeSp, sp); // back chain
@@ -148,18 +161,18 @@ void RegisterGroupsWithMods(CpuContext* ctx) {
     ctx->gpr[3] = lyt;
     ctx->gpr[4] = nameTable;
     ctx->gpr[5] = indexTable;
-    ctx->gpr[6] = count + 6;
+    ctx->gpr[6] = count + 12;
     InvokeDirectCpu<0x800C90F0u>(ctx);
     ctx->gpr[1] = sp;
 }
 
-// After createLayout's WPaneRegister: finds W_multiMods_00 the same way, for SelectCursorSetup.
-void FindModsWindow(CpuContext* ctx, uint32_t self) {
-    if (!NsmbwFileSelectHasMods()) return;
+// After createLayout's WPaneRegister: finds W_multiMods_00 and W_multiOnline_00 the same way, for
+// SelectCursorSetup.
+uint32_t FindWindow(CpuContext* ctx, uint32_t self, const char* paneName) {
     const uint32_t sp = ctx->gpr[1];
     const uint32_t scratch = (sp - 0x100u) & ~0x1Fu;
     const uint32_t name = scratch, table = scratch + 0x20, out = scratch + 0x24;
-    WriteString(name, "W_multiMods_00");
+    WriteString(name, paneName);
     MemoryInline::FlatWrite32(table, name);
     MemoryInline::FlatWrite32(out, 0);
     const uint32_t calleeSp = scratch - 0x40u;
@@ -171,7 +184,13 @@ void FindModsWindow(CpuContext* ctx, uint32_t self) {
     ctx->gpr[6] = 1;
     InvokeDirectCpu<0x800C8DD0u>(ctx);
     ctx->gpr[1] = sp;
-    g_modsWindow = R32(out);
+    return R32(out);
+}
+
+void FindModsWindow(CpuContext* ctx, uint32_t self) {
+    if (!NsmbwFileSelectHasMods()) return;
+    g_modsWindow = FindWindow(ctx, self, "W_multiMods_00");
+    g_onlineWindow = FindWindow(ctx, self, "W_multiOnline_00");
 }
 
 // SelectWait's navigation with the Mods button (EDIT in the copy below). trig is the remote's
@@ -179,16 +198,16 @@ void FindModsWindow(CpuContext* ctx, uint32_t self) {
 // Returns the new choice, or -1 after it has already changed state (up from the bottom row).
 int32_t Navigate(CpuContext* ctx, uint32_t self, int32_t choice, uint32_t trig) {
     if (choice >= 3) {
-        if (trig & 2u) { // up: to the file above the button
+        if (trig & 2u) { // up: to the file above the button (Online, the fourth, goes to the third)
             MemoryInline::FlatWrite32(self + kPrevChoice, uint32_t(choice));
-            MemoryInline::FlatWrite32(self + kChoice, uint32_t(choice - 3));
+            MemoryInline::FlatWrite32(self + kChoice, uint32_t(choice - 3 > 2 ? 2 : choice - 3));
             ChangeState(ctx, self, kStateButtonSelect);
             return -1;
         }
         if ((trig & 8u) && choice > 3) {
             --choice;
             MemoryInline::FlatWrite32(self + kBottomButton, uint32_t(choice));
-        } else if ((trig & 4u) && choice < kMods) {
+        } else if ((trig & 4u) && choice < kOnline) {
             ++choice;
             MemoryInline::FlatWrite32(self + kBottomButton, uint32_t(choice));
         }
@@ -213,7 +232,10 @@ extern "C" void NsmbwFileSelect_StartWaitInit(CpuContext* ctx) {
     const uint32_t self = ctx->gpr[3];
     AllAnimeEnd(ctx, self);
     for (const uint32_t anim : {0x1Fu, 0x20u, 0x21u, 0x02u, 0x01u, 0x0Fu, kInFree, kInCoin}) AnimeReverse(ctx, self, anim);
-    if (NsmbwFileSelectHasMods()) AnimeReverse(ctx, self, kInMods);
+    if (NsmbwFileSelectHasMods()) {
+        AnimeReverse(ctx, self, kInMods);
+        AnimeReverse(ctx, self, kInOnline);
+    }
     AnimeReverse(ctx, self, 0x00u);
     for (int32_t i = 0; i < 3; ++i) {
         MemoryInline::FlatWrite8(DateFile(self, i) + 0xE49, 0);
@@ -247,7 +269,10 @@ extern "C" void NsmbwFileSelect_OpenWaitInit(CpuContext* ctx) {
     HideDateFileMarkers(self);
     AnimeStart(ctx, self, kInFree);
     AnimeStart(ctx, self, kInCoin);
-    if (NsmbwFileSelectHasMods()) AnimeStart(ctx, self, kInMods);
+    if (NsmbwFileSelectHasMods()) {
+        AnimeStart(ctx, self, kInMods);
+        AnimeStart(ctx, self, kInOnline);
+    }
 }
 
 extern "C" void NsmbwFileSelect_MultiOnStageInit(CpuContext* ctx) {
@@ -255,7 +280,10 @@ extern "C" void NsmbwFileSelect_MultiOnStageInit(CpuContext* ctx) {
     HideDateFileMarkers(self);
     AnimeStart(ctx, self, kInFree);
     AnimeStart(ctx, self, kInCoin);
-    if (NsmbwFileSelectHasMods()) AnimeStart(ctx, self, kInMods);
+    if (NsmbwFileSelectHasMods()) {
+        AnimeStart(ctx, self, kInMods);
+        AnimeStart(ctx, self, kInOnline);
+    }
 }
 
 extern "C" void NsmbwFileSelect_ButtonSelectInit(CpuContext* ctx) {
@@ -286,7 +314,10 @@ extern "C" void NsmbwFileSelect_ButtonSelectFinalize(CpuContext* ctx) {
     const uint32_t self = ctx->gpr[3];
     const int32_t choice = S32(self + kChoice);
     if (choice < 3) return;
-    const uint32_t window = choice == 3 ? R32(self + kWindowFree) : choice == 4 ? R32(self + kWindowCoin) : g_modsWindow;
+    const uint32_t window = choice == 3   ? R32(self + kWindowFree)
+                          : choice == 4   ? R32(self + kWindowCoin)
+                          : choice == kMods ? g_modsWindow
+                                          : g_onlineWindow;
     if (window == 0) return;
     ctx->gpr[3] = window;
     ctx->gpr[4] = 1;
@@ -310,18 +341,19 @@ extern "C" void NsmbwFileSelect_ButtonHitExecute(CpuContext* ctx) {
     } else if (MemoryInline::FlatRead8(DateFile(self, choice) + 0xE4D) != 0) {
         return;
     }
-    if (choice != kMods) {
+    if (choice != kMods && choice != kOnline) {
         ChangeState(ctx, self, kStateGameStart);
         return;
     }
-    // Mods: the menu opens over the frozen file select (it stops the game's processes while open,
-    // so this state does not run again until it has closed).
+    // Mods / Online: the menu opens over the frozen file select (it stops the game's processes while
+    // open, so this state does not run again until it has closed).
     if (!g_waitingForMenu) {
         g_waitingForMenu = true;
-        NsmbwModsMenuRequestOpen();
+        if (choice == kMods) NsmbwModsMenuRequestOpen();
+        else NsmbwOnlineMenuRequestOpen();
         return;
     }
-    if (!NsmbwModsMenuTakeClosed()) return;
+    if (!(choice == kMods ? NsmbwModsMenuTakeClosed() : NsmbwOnlineMenuTakeClosed())) return;
     g_waitingForMenu = false;
     // Back to the button as the game comes back to one: no "off" for a previous button, Mods' "on"
     // animation, then the cursor frame on it (ButtonSelectAnimeEndWait's finalize).
@@ -333,7 +365,10 @@ extern "C" void NsmbwFileSelect_MultiExitInit(CpuContext* ctx) {
     const uint32_t self = ctx->gpr[3];
     AnimeStart(ctx, self, kOutFree);
     AnimeStart(ctx, self, kOutCoin);
-    if (NsmbwFileSelectHasMods()) AnimeStart(ctx, self, kOutMods);
+    if (NsmbwFileSelectHasMods()) {
+        AnimeStart(ctx, self, kOutMods);
+        AnimeStart(ctx, self, kOutOnline);
+    }
 }
 
 PPC_NATIVE_OVERRIDE_VOID(807835C0, NsmbwFileSelect_StartWaitInit, (CpuContext* ctx), (ctx));

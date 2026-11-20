@@ -779,7 +779,7 @@ index 95734ab..8c7d634 100644
  message(STATUS
      "Translator graph: ${MKW_SHARED_BASE_FUNCTION_COUNT}/${MKW_BASE_FUNCTION_COUNT} base functions shared; "
 diff --git a/runtime/cmake/NsmbwProduct.cmake b/runtime/cmake/NsmbwProduct.cmake
-index ec62546..f0e1621 100644
+index ec62546..9b1f0b0 100644
 --- a/runtime/cmake/NsmbwProduct.cmake
 +++ b/runtime/cmake/NsmbwProduct.cmake
 @@ -8,11 +8,14 @@
@@ -824,7 +824,15 @@ index ec62546..f0e1621 100644
      if(NOT EXISTS "${NSMBW_DATA_INIT_FILE}")
          message(FATAL_ERROR
              "Missing combined NSMBW data initializer: ${NSMBW_DATA_INIT_FILE}. Run "
-@@ -126,7 +132,7 @@ if(MKW_BUILD_NSMBW)
+@@ -99,6 +105,7 @@ if(MKW_BUILD_NSMBW)
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_art.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_draw.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_options_menu.cpp"
++        "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_online_room.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_movie_skip.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/host_cpu_baseline.cpp")
+     if(NOT WIN32)
+@@ -126,7 +133,7 @@ if(MKW_BUILD_NSMBW)
      add_library(nsmbw_runtime_common OBJECT ${NSMBW_RUNTIME_COMMON_SOURCES})
      mkw_configure_object_target(nsmbw_runtime_common)
      target_include_directories(nsmbw_runtime_common BEFORE PRIVATE
@@ -833,7 +841,7 @@ index ec62546..f0e1621 100644
      target_compile_features(nsmbw_runtime_common PRIVATE cxx_std_20)
      # MKW_RUNTIME_PRODUCT_NSMBW: distinguishes this compile of the shared runtime/src tree from
      # mkw_runtime_common's. Needed where a guest-code-address native override in a shared file is
-@@ -146,7 +152,7 @@ if(MKW_BUILD_NSMBW)
+@@ -146,7 +153,7 @@ if(MKW_BUILD_NSMBW)
          target_link_libraries(nsmbw_runtime_common PRIVATE mkw::libco)
      endif()
  
@@ -842,7 +850,7 @@ index ec62546..f0e1621 100644
      # foreach right at the end of that file - which has already run by the time this file is
      # included, so it never sees these targets. Without it, the always-inline x86 SIMD intrinsics
      # in runtime/include/isa/ppc_isa_float.h and ppc_isa_quantized.h (_mm_fmadd_ps, _mm_shuffle_epi8)
-@@ -154,7 +160,7 @@ if(MKW_BUILD_NSMBW)
+@@ -154,7 +161,7 @@ if(MKW_BUILD_NSMBW)
      # was compiled without those target features enabled.
      foreach(nsmbw_target IN ITEMS nsmbw_translated nsmbw_native nsmbw_data_init nsmbw_runtime_common)
          if(TARGET ${nsmbw_target})
@@ -851,7 +859,15 @@ index ec62546..f0e1621 100644
          endif()
      endforeach()
  
-@@ -199,7 +205,7 @@ if(MKW_BUILD_NSMBW)
+@@ -185,6 +192,7 @@ if(MKW_BUILD_NSMBW)
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_art.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_menu_draw.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_options_menu.cpp"
++        "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_online_room.cpp"
+         "${MKW_RUNTIME_SOURCE_DIR}/src/product/nsmbw_movie_skip.cpp")
+     mkw_configure_object_target(NSMBWCompiled)
+     # Same product define as nsmbw_runtime_common: runtime_config.h's inline functions read it, and
+@@ -199,7 +207,7 @@ if(MKW_BUILD_NSMBW)
          target_link_options(NSMBWCompiled PRIVATE -mwindows)
      endif()
      target_compile_features(NSMBWCompiled PRIVATE cxx_std_20)
@@ -860,7 +876,7 @@ index ec62546..f0e1621 100644
      # -g alone only affects compiling; the linker strips debug sections unless told to keep them.
      # Each translated guest call (MKW_STATIC_TRANSLATED_CALL/InvokeDirectCpu) is a real, nested
      # native C++ call - PPC call trees several dozen frames deep (seen repeatedly during NSMBW
-@@ -207,7 +213,16 @@ if(MKW_BUILD_NSMBW)
+@@ -207,7 +215,16 @@ if(MKW_BUILD_NSMBW)
      # a deterministic native SIGSEGV (no guest AccessViolation, so not a guest-memory-bounds issue)
      # right after clearing several boot blockers that let execution progress further/deeper than
      # before - raise the reserved stack well past what's been observed so far.
@@ -878,7 +894,7 @@ index ec62546..f0e1621 100644
      target_sources(NSMBWCompiled PRIVATE
          $<TARGET_OBJECTS:nsmbw_translated>
          $<TARGET_OBJECTS:nsmbw_native>
-@@ -223,6 +238,24 @@ if(MKW_BUILD_NSMBW)
+@@ -223,6 +240,24 @@ if(MKW_BUILD_NSMBW)
      else()
          target_link_libraries(NSMBWCompiled PRIVATE mkw::libco)
      endif()
@@ -3564,18 +3580,31 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..ce9053e 100644
+index 8c96414..b96a35c 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
-@@ -10,6 +10,7 @@
+@@ -9,7 +9,9 @@
+ #include "nsmbw_menu_art.h"
  #include "nsmbw_menu_draw.h"
  #include "nsmbw_movie_skip.h"
++#include "nsmbw_online_room.h"
  
 +#include "hle/storage/riivolution.h"
  #include "memory.h"
  #include "runtime_config.h"
  #include "settings_overlay.h"
-@@ -156,23 +157,23 @@ std::vector<Row> BuildRows(int tab) {
+@@ -17,8 +19,10 @@
+ #include <SDL3/SDL_events.h>
+ #include <SDL3/SDL_gamepad.h>
+ #include <SDL3/SDL_keyboard.h>
++#include <SDL3/SDL_clipboard.h>
+ 
+ #include <algorithm>
++#include <cctype>
+ #include <array>
+ #include <atomic>
+ #include <cstdio>
+@@ -156,23 +160,23 @@ std::vector<Row> BuildRows(int tab) {
  }
  
  // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
@@ -3604,7 +3633,7 @@ index 8c96414..ce9053e 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,14 +187,14 @@ bool g_soundPaused = false;
+@@ -186,14 +190,14 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3622,7 +3651,7 @@ index 8c96414..ce9053e 100644
  constexpr uint32_t kProcStopBits = 0x2u | 0x4u | 0x8u;
  uint32_t g_procBitsAdded = 0; // only the bits this menu set, so the game's own are never cleared
  
-@@ -234,7 +235,7 @@ void SetGameStopped(bool stopped) {
+@@ -234,7 +238,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3631,16 +3660,16 @@ index 8c96414..ce9053e 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
-@@ -254,7 +255,7 @@ void LogMenu(const char* what, const char* why) {
+@@ -254,7 +258,7 @@ void LogMenu(const char* what, const char* why) {
  
  // ---- Screens and state --------------------------------------------------------------------------
  
 -enum class Screen { Options, Bindings };
-+enum class Screen { Options, Bindings, Mods };
++enum class Screen { Options, Bindings, Mods, Online };
  Screen g_screen = Screen::Options;
  
  // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
-@@ -271,6 +272,17 @@ struct BindState {
+@@ -271,6 +275,28 @@ struct BindState {
      bool capturing = false;
  } g_bind;
  
@@ -3655,31 +3684,56 @@ index 8c96414..ce9053e 100644
 +    bool fromFileSelect = false;
 +} g_mods;
 +
++// The Online screen (docs/online-play.md section 7), opened by the file select's Online button. The
++// room itself (nsmbw_online_room.cpp) keeps running when the screen closes.
++struct OnlineState {
++    bool entering = false;   // the address page (Join a room)
++    std::string address;
++    int row = 0;
++    std::string error;       // the last failure, shown until the next action
++    bool fromFileSelect = false;
++    bool typing = false;     // SDL text input started for the address field
++} g_online;
++
  // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
  // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
  int BindSlots() { return 4; }
-@@ -278,6 +290,8 @@ int BindSlots() { return 4; }
+@@ -278,6 +304,9 @@ int BindSlots() { return 4; }
  // Set when a menu opened from the pause window has finished closing; the pause input handler
  // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
  std::atomic<bool> g_returnToPause{false};
 +// The same for the file select: set when the mods screen it opened has finished closing.
 +std::atomic<bool> g_modsClosed{false};
++std::atomic<bool> g_onlineClosed{false};
  
  // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
  void Close(const char* why) {
-@@ -299,6 +313,8 @@ void FinishClose() {
+@@ -299,6 +328,12 @@ void FinishClose() {
      SetGameStopped(false);
      if (g.fromPause) g_returnToPause = true;
      g.fromPause = false;
 +    if (g_mods.fromFileSelect) g_modsClosed = true;
 +    g_mods.fromFileSelect = false;
++    if (g_online.fromFileSelect) g_onlineClosed = true;
++    g_online.fromFileSelect = false;
++    if (g_online.typing) SDL_StopTextInput(SDL_GetKeyboardFocus());
++    g_online.typing = false;
  }
  
  void Open(const char* why, bool fromPause) {
-@@ -319,6 +335,14 @@ void ShowScreen(Screen screen) {
+@@ -319,6 +354,23 @@ void ShowScreen(Screen screen) {
      g.openedAt = draw::Now();
  }
  
++void OpenOnline() {
++    g_online.entering = false;
++    g_online.row = 0;
++    g_online.error.clear();
++    g_online.fromFileSelect = true;
++    Open("file select", false);
++    g_screen = Screen::Online;
++}
++
 +void OpenMods() {
 +    g_mods.mods = RuntimeRiivolution::InstalledMods();
 +    g_mods.row = g_mods.scroll = 0;
@@ -3691,7 +3745,7 @@ index 8c96414..ce9053e 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +491,46 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +519,146 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3730,25 +3784,133 @@ index 8c96414..ce9053e 100644
 +    return false;
 +}
 +
++// The Online screen's rows for the room's state: the actions in order (labels drawn in DrawOnline).
++enum class OnlineAction { Host, Join, Connect, Start, Close, Leave };
++std::vector<OnlineAction> OnlineActions(const nsmbw_room::View& v) {
++    using nsmbw_room::Role;
++    if (v.role == Role::Hosting) return {OnlineAction::Start, OnlineAction::Close};
++    if (v.role == Role::Joining || v.role == Role::Joined) return {OnlineAction::Leave};
++    if (g_online.entering) return {OnlineAction::Connect};
++    return {OnlineAction::Host, OnlineAction::Join};
++}
++
++void SetTyping(bool on) {
++    if (on == g_online.typing) return;
++    g_online.typing = on;
++    if (on) SDL_StartTextInput(SDL_GetKeyboardFocus());
++    else SDL_StopTextInput(SDL_GetKeyboardFocus());
++}
++
++bool OnlineCommand(Cmd cmd, const char* why) {
++    const nsmbw_room::View v = nsmbw_room::Snapshot();
++    const std::vector<OnlineAction> actions = OnlineActions(v);
++    const int n = int(actions.size());
++    switch (cmd) {
++    case Cmd::Up: case Cmd::Down:
++        if (n > 1) {
++            g_online.row = ((g_online.row + (cmd == Cmd::Down ? 1 : -1)) % n + n) % n;
++            Play(kSndCursor);
++        }
++        break;
++    case Cmd::Select: {
++        if (n == 0) break;
++        const OnlineAction a = actions[size_t(std::clamp(g_online.row, 0, n - 1))];
++        std::string error;
++        bool ok = true;
++        switch (a) {
++        case OnlineAction::Host: ok = nsmbw_room::Host(error); break;
++        case OnlineAction::Join: g_online.entering = true; break;
++        case OnlineAction::Connect:
++            if (g_online.address.empty()) { ok = false; error = "Type the host's address first"; break; }
++            ok = nsmbw_room::Join(g_online.address, error);
++            if (ok) g_online.entering = false;
++            break;
++        case OnlineAction::Start: ok = v.canStart && nsmbw_room::Start(error); if (!v.canStart) error = "Nobody has joined yet"; break;
++        case OnlineAction::Close: case OnlineAction::Leave: nsmbw_room::Leave(); break;
++        }
++        g_online.error = ok ? std::string() : error;
++        g_online.row = 0;
++        Play(ok ? kSndDecide : kSndInvalid);
++        g.pressPending = ok;
++        break;
++    }
++    case Cmd::Back:
++        if (g_online.entering) {
++            g_online.entering = false;
++            g_online.row = 1;
++            Play(kSndBack);
++            break;
++        }
++        [[fallthrough]];
++    case Cmd::Exit: Close(why); Play(kSndBack); return true; // the room stays open
++    default: break;
++    }
++    return false;
++}
++
++// The address field takes the keyboard while the Join page is up: printable characters come as text
++// events, Backspace deletes, Cmd / Ctrl+V pastes, Return joins, Esc goes back.
++bool OnlineTextEvent(const SDL_Event& e) {
++    if (g_screen != Screen::Online || !g_online.entering) return false;
++    auto accept = [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '.' || ch == ':' || ch == '-'; };
++    if (e.type == SDL_EVENT_TEXT_INPUT) {
++        for (const char* p = e.text.text; p && *p; ++p) {
++            if (accept(*p) && g_online.address.size() < 64) g_online.address.push_back(*p);
++        }
++        return true;
++    }
++    if (e.type != SDL_EVENT_KEY_DOWN) return false;
++    const SDL_Keymod mod = e.key.mod;
++    if (e.key.scancode == SDL_SCANCODE_BACKSPACE) {
++        if (!g_online.address.empty()) g_online.address.pop_back();
++        return true;
++    }
++    if (e.key.scancode == SDL_SCANCODE_V && (mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL))) {
++        if (char* clip = SDL_GetClipboardText()) {
++            for (const char* p = clip; *p; ++p) {
++                if (accept(*p) && g_online.address.size() < 64) g_online.address.push_back(*p);
++            }
++            SDL_free(clip);
++        }
++        return true;
++    }
++    // Letters and digits are typed, not menu keys (W/A/S/D, Z, X, R...).
++    if (e.key.scancode >= SDL_SCANCODE_A && e.key.scancode <= SDL_SCANCODE_0) return true;
++    if (e.key.scancode == SDL_SCANCODE_PERIOD || e.key.scancode == SDL_SCANCODE_SEMICOLON ||
++        e.key.scancode == SDL_SCANCODE_MINUS || e.key.scancode == SDL_SCANCODE_SPACE) {
++        return true;
++    }
++    return false;
++}
++
  bool Dispatch(Cmd cmd, const char* why) {
      static constexpr const char* kNames[] = {"up", "down", "left", "right", "select", "back",
                                               "tab-", "tab+", "clear", "reset", "exit"};
      LogMenu(kNames[int(cmd)], why);
 +    if (g_screen == Screen::Mods) return ModsCommand(cmd, why);
++    if (g_screen == Screen::Online) return OnlineCommand(cmd, why);
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -588,7 +648,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +776,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
 -        if ((action == "tab_prev" || action == "tab_next") && g.open && !g.closing && !g.afterPress) {
 +        if ((action == "tab_prev" || action == "tab_next") && g.open && !g.closing && !g.afterPress &&
-+            g_screen != Screen::Mods) {
++            g_screen != Screen::Mods && g_screen != Screen::Online) {
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -807,6 +868,61 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -599,6 +788,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+             }
+             continue;
+         }
++        if (OnlineTextEvent(e)) continue;
+         switch (e.type) {
+         case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
+         case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
+@@ -807,6 +997,160 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -3804,13 +3966,112 @@ index 8c96414..ce9053e 100644
 +    DrawPrompts(c, kPromptY, {MenuPrompt("Select", "confirm"), MenuPrompt("Back", "back")});
 +}
 +
++void DrawOnline(const draw::Canvas& c) {
++    using nsmbw_room::Role;
++    const nsmbw_room::View v = nsmbw_room::Snapshot();
++    const std::vector<OnlineAction> actions = OnlineActions(v);
++    g_online.row = actions.empty() ? 0 : std::clamp(g_online.row, 0, int(actions.size()) - 1);
++    SetTyping(g_online.entering && v.role == Role::None);
++
++    c.Mario("Online", 0, 132, 40);
++    const draw::TextStyle header{.white = Rgb(200, 215, 230), .outline = true};
++    std::string line;
++    if (nsmbw_room::InSession()) line = "In an online session";
++    else if (v.role == Role::None) line = g_online.entering ? "Join a room: the host's address" : "Play together over the network";
++    else line = v.status;
++    c.Text(line, 0, 94, 17, header);
++    c.Rect(0, 70, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
++
++    float y = 50;
++    if (v.role == Role::Hosting) {
++        std::string where = v.addresses.empty() ? std::string("this computer's address") : v.addresses[0];
++        c.Text("Others join with: " + where, 0, y, 16, {.white = Rgb(255, 255, 160), .outline = true});
++        y -= 26;
++    }
++    if (v.role == Role::Hosting || v.role == Role::Joined) {
++        for (const nsmbw_room::Member& m : v.members) {
++            std::string who = "Player " + std::to_string(m.slot + 1) + "  " + m.name;
++            if (m.slot == v.mySlot) who += " (you)";
++            c.Label(who, -262, y, 19, Align::Left, false, Rgb(225, 235, 225));
++            if (m.slot != 0 && m.pingMs >= 0) {
++                c.Text(std::to_string(m.pingMs) + " ms", 262, y, 15, {.white = Rgb(200, 215, 230), .align = Align::Right, .outline = true});
++            }
++            y -= 22;
++        }
++    } else if (v.role == Role::None && g_online.entering) {
++        const bool blink = int(draw::Now() / 30) % 2 == 0;
++        c.Label("Address", -262, 30, 22, Align::Left, false, draw::kWhite);
++        c.Button(g_online.address + (blink ? "_" : " "), 110, 30, 260, 21, true, 17, false, true);
++        c.Text("Type or paste (Cmd/Ctrl+V), e.g. 192.168.1.20", 0, 0, 15, {.white = Rgb(200, 215, 230), .outline = true});
++        y = -20;
++    } else if (v.role == Role::None) {
++        c.Text("Host a room on this computer, or join a friend's on the same network or VPN.", 0, 40, 15,
++               {.white = Rgb(200, 215, 230), .outline = true});
++        y = 10;
++    }
++
++    static constexpr const char* kLabels[] = {"Host a room", "Join a room", "Join", "Start the game", "Close the room", "Leave the room"};
++    float rowY = std::min(y - 6, -40.0f);
++    for (size_t i = 0; i < actions.size(); ++i) {
++        const bool focused = int(i) == g_online.row;
++        const bool disabled = actions[i] == OnlineAction::Start && !v.canStart;
++        const float cx = 0;
++        if (focused && g.pressPending) c.Press(cx, rowY, 220);
++        const ImVec2 size = c.Button(kLabels[int(actions[i])], cx, rowY, 220, 21, focused, 18, disabled, true);
++        if (focused) c.Cursor(cx, rowY, size.x + 4, size.y + 4, 0.55f);
++        rowY -= 30;
++    }
++
++    c.Rect(0, -98, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
++    if (!g_online.error.empty()) {
++        c.Text(g_online.error, -262, kPromptY, 16, {.white = Rgb(255, 120, 100), .align = Align::Left, .outline = true});
++    }
++    DrawPrompts(c, kPromptY, {MenuPrompt("Select", "confirm"), MenuPrompt("Back", "back")});
++}
++
++// Set on the game thread by the file select's Online button once its press animation has played.
++std::atomic<bool> g_openOnline{false};
++
++// NSMBW_ONLINE_TEST=host[,start@<players>] | join=<address>: test runs use the room without the
++// screen: host (and press Start once that many players are in) or join, 3 s after the first frame.
++// NSMBW_ONLINE_TEST_SHOW=1 also opens the Online screen, to look at it.
++void RunScriptedOnline() {
++    static const char* spec = std::getenv("NSMBW_ONLINE_TEST");
++    static float first = -1;
++    static int step = 0;
++    static int startAt = 0;
++    if (spec == nullptr || spec[0] == '\0' || step >= 2 || nsmbw_room::InSession()) return;
++    const float now = draw::Now();
++    if (first < 0) first = now;
++    if (step == 0 && now - first >= 180) {
++        step = 1;
++        std::string err;
++        const std::string s(spec);
++        if (s.rfind("join=", 0) == 0) {
++            nsmbw_room::Join(s.substr(5), err);
++            step = 2;
++        } else {
++            nsmbw_room::Host(err);
++            if (const size_t at = s.find("start@"); at != std::string::npos) startAt = std::atoi(s.c_str() + at + 6);
++            else step = 2;
++        }
++        if (!err.empty()) std::fprintf(stderr, "[nsmbw][room] test: %s\n", err.c_str());
++        if (std::getenv("NSMBW_ONLINE_TEST_SHOW")) OpenOnline();
++    }
++    if (step == 1 && startAt > 0 && int(nsmbw_room::Snapshot().members.size()) >= startAt) {
++        std::string err;
++        nsmbw_room::Start(err);
++        step = 2;
++    }
++}
++
 +// Set on the game thread by the file select's Mods button once its press animation has played.
 +std::atomic<bool> g_openMods{false};
 +
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,9 +988,22 @@ void RunScriptedOpenClose() {
+@@ -872,9 +1216,25 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -3826,14 +4087,17 @@ index 8c96414..ce9053e 100644
 +}
 +
  void Draw() noexcept {
++    nsmbw_room::Poll(); // every frame: the room stays open while the screen is closed
++    RunScriptedOnline();
      RunScriptedOpenClose();
 +    RunScriptedModsCommands();
      if (!g.open && g_openFromPause.exchange(false)) Open("pause menu", true);
 +    if (!g.open && !g.closing && g_openMods.exchange(false)) OpenMods();
++    if (!g.open && !g.closing && g_openOnline.exchange(false)) OpenOnline();
      if (!g.open) OpenOnFirstLaunch();
      if (!g.open) {
          ClearHeldIfReleased();
-@@ -906,10 +1035,11 @@ void Draw() noexcept {
+@@ -906,10 +1266,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -3843,15 +4107,18 @@ index 8c96414..ce9053e 100644
      c.PauseWindow(0, -2, 588, 334);
      if (g_screen == Screen::Bindings) DrawBindings(c);
 +    else if (g_screen == Screen::Mods) DrawMods(c);
++    else if (g_screen == Screen::Online) DrawOnline(c);
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1064,5 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1296,7 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
 +extern "C" void NsmbwModsMenuRequestOpen() { nsmbw_options_menu::g_openMods = true; }
 +extern "C" bool NsmbwModsMenuTakeClosed() { return nsmbw_options_menu::g_modsClosed.exchange(false); }
++extern "C" void NsmbwOnlineMenuRequestOpen() { nsmbw_options_menu::g_openOnline = true; }
++extern "C" bool NsmbwOnlineMenuTakeClosed() { return nsmbw_options_menu::g_onlineClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
 index a63636b..7cbcbf7 100644
 --- a/runtime/src/product/nsmbw_product.cpp
@@ -6246,7 +6513,7 @@ index 9cb9576..10d7d75 100644
      if (!file.is_open()) {
          failure = HostReadFailure::MissingFile;
 diff --git a/runtime/src/product/nsmbw_layout_patch.cpp b/runtime/src/product/nsmbw_layout_patch.cpp
-index 6c7e32b..5e2ea79 100644
+index 6c7e32b..8d1c418 100644
 --- a/runtime/src/product/nsmbw_layout_patch.cpp
 +++ b/runtime/src/product/nsmbw_layout_patch.cpp
 @@ -23,11 +23,13 @@
@@ -6263,7 +6530,7 @@ index 6c7e32b..5e2ea79 100644
  #include <cstdint>
  #include <cstdio>
  #include <cstring>
-@@ -462,7 +464,201 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
+@@ -462,7 +464,239 @@ Bytes PatchCourseSelectMenu(const Bytes& original) {
      return WriteArchive(arc);
  }
  
@@ -6338,7 +6605,7 @@ index 6c7e32b..5e2ea79 100644
 +
 +// Gives each picture / text pane in `panes` a copy of its material, named after the pane, with red
 +// and blue swapped in its colour registers.
-+void CloneMaterialsSwapped(Sectioned& l, const std::vector<std::string>& panes) {
++void CloneMaterialsSwapped(Sectioned& l, const std::vector<std::string>& panes, int swapFrom) {
 +    const size_t matIndex = FindSection(l, "mat1");
 +    std::vector<Bytes> entries = MaterialEntries(l.sections[matIndex]);
 +    for (const std::string& name : panes) {
@@ -6350,10 +6617,11 @@ index 6c7e32b..5e2ea79 100644
 +        Require(index < entries.size(), "material index out of range");
 +        Bytes copy = entries[index];
 +        PutName(copy, 0, 20, name);
-+        for (size_t reg = 0; reg < 3; ++reg) { // s16 r, g, b, a per register
-+            const size_t at = 20 + 8 * reg;
-+            std::swap(copy[at], copy[at + 4]);
-+            std::swap(copy[at + 1], copy[at + 5]);
++        for (size_t reg = 0; reg < 3; ++reg) { // s16 r, g, b, a per register: swap channel
++            const size_t at = 20 + 8 * reg;   // (2 - swapFrom) with blue (channel 2)
++            const size_t a = at + 2 * size_t(2 - swapFrom), b = at + 4;
++            std::swap(copy[a], copy[b]);
++            std::swap(copy[a + 1], copy[b + 1]);
 +        }
 +        Put16(pane, field, uint16_t(entries.size()));
 +        entries.push_back(std::move(copy));
@@ -6374,10 +6642,12 @@ index 6c7e32b..5e2ea79 100644
 +}
 +
 +// The four corner colours of a picture pane (+0x4C, RGBA each).
-+void SwapPaneVertexColours(Sectioned& l, const std::string& pane) {
++void SwapPaneVertexColours(Sectioned& l, const std::string& pane, int swapFrom) {
 +    Bytes& sec = Pane(l, pane);
 +    Require(Magic(sec) == "pic1", "vertex colours of a non-picture pane");
-+    for (size_t corner = 0; corner < 4; ++corner) SwapRedBlue(sec, 0x4C + 4 * corner, 0x4E + 4 * corner);
++    for (size_t corner = 0; corner < 4; ++corner) {
++        SwapRedBlue(sec, 0x4C + 4 * corner + size_t(2 - swapFrom), 0x4E + 4 * corner);
++    }
 +}
 +
 +void ScalePane(Sectioned& l, const std::string& pane, float scale) {
@@ -6390,7 +6660,7 @@ index 6c7e32b..5e2ea79 100644
 +// In the colour tracks of the entries named in `names`, red and blue trade places: RLVC targets
 +// 0..15 are the corners' r, g, b, a (16 is the pane's alpha), RLMC targets come in fours (material
 +// colour, c0..c2, konst). Swapping the target bytes keeps every key.
-+void SwapTrackRedBlue(Sectioned& a, const std::vector<std::string>& names) {
++void SwapTrackColours(Sectioned& a, const std::vector<std::string>& names, int swapFrom) {
 +    for (Bytes& sec : a.sections) {
 +        if (Magic(sec) != "pai1") continue;
 +        const size_t table = Get32(sec, 16);
@@ -6404,8 +6674,9 @@ index 6c7e32b..5e2ea79 100644
 +                for (uint8_t g = 0, groups = sec[tag + 4]; g < groups; ++g) {
 +                    uint8_t& target = sec[tag + Get32(sec, tag + 8 + g * 4u) + 1];
 +                    if (kind == "RLVC" && target >= 16) continue;
-+                    if (target % 4 == 0) target += 2;
-+                    else if (target % 4 == 2) target -= 2;
++                    const int lo = 2 - swapFrom; // red (0) or green (1) trades with blue (2)
++                    if (target % 4 == lo) target += uint8_t(2 - lo);
++                    else if (target % 4 == 2) target -= uint8_t(2 - lo);
 +                }
 +            }
 +        }
@@ -6420,41 +6691,75 @@ index 6c7e32b..5e2ea79 100644
 +    {"P_shadow_03", "P_shadow_04"},
 +};
 +
++// The Online button (online play, docs/online-play.md section 7): a fourth copy of Coin Battle,
++// coloured by swapping green and blue (yellow-orange -> magenta; green is Free Mode's, blue Mods').
++const std::map<std::string, std::string> kOnlinePaneNames = {
++    {"N_MultiCoin_00", "N_MultiOnline_00"}, {"N_multiCoin_00", "N_multiOnline_00"},
++    {"P_battleBase_00", "P_onlineBase_00"}, {"P_battleLight", "P_onlineLight_00"},
++    {"P_battleUPs", "P_onlineUPs_00"},      {"T_multiS_01", "T_multiS_03"},
++    {"T_multi_01", "T_multi_03"},           {"W_multiCoin_00", "W_multiOnline_00"},
++    {"P_shadow_03", "P_shadow_05"},
++};
++
++// Channel offsets for the colour swaps below: 2 = red <-> blue (Mods), 1 = green <-> blue (Online).
++void CloneMaterialsSwapped(Sectioned& l, const std::vector<std::string>& panes, int swapFrom);
++void SwapPaneVertexColours(Sectioned& l, const std::string& pane, int swapFrom);
++void SwapTrackColours(Sectioned& a, const std::vector<std::string>& names, int swapFrom);
++
 +Bytes PatchFileSelect(const Bytes& original) {
 +    Archive arc = ReadArchive(original);
 +    Bytes& lytFile = File(arc, "arc/blyt/fileSelectBase_18.brlyt");
 +    Sectioned lyt = ReadSectioned(lytFile);
 +
 +    CloneSubtree(lyt, "N_MultiCoin_00", kModsPaneNames);
-+    CloneMaterialsSwapped(lyt, {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00", "T_multiS_02", "T_multi_02", "P_shadow_04"});
++    CloneMaterialsSwapped(lyt, {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00", "T_multiS_02", "T_multi_02", "P_shadow_04"}, 2);
 +    SetMaterialTexture(lyt, "P_modsUPs_00", TextureIndex(lyt, "immsk_check_01.tpl"));
-+    for (const char* pane : {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"}) SwapPaneVertexColours(lyt, pane);
++    for (const char* pane : {"P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"}) SwapPaneVertexColours(lyt, pane, 2);
 +    SetText(lyt, "T_multiS_02", "Mods");
 +    SetText(lyt, "T_multi_02", "Mods");
 +
++    CloneSubtree(lyt, "N_MultiCoin_00", kOnlinePaneNames);
++    CloneMaterialsSwapped(lyt, {"P_onlineBase_00", "P_onlineLight_00", "P_onlineUPs_00", "T_multiS_03", "T_multi_03", "P_shadow_05"}, 1);
++    SetMaterialTexture(lyt, "P_onlineUPs_00", TextureIndex(lyt, "immsk_check_01.tpl"));
++    for (const char* pane : {"P_onlineBase_00", "P_onlineLight_00", "P_onlineUPs_00"}) SwapPaneVertexColours(lyt, pane, 1);
++    SetText(lyt, "T_multiS_03", "Online");
++    SetText(lyt, "T_multi_03", "Online");
++
++    // Four buttons in a row: centred, at -1.5, -0.5, 0.5, 1.5 steps.
 +    const bool wide = RuntimeConfigFile::WidescreenEnabled(true);
-+    const float scale = wide ? 0.9f : 0.78f, step = wide ? 240.0f : 198.0f;
-+    for (const char* outer : {"N_Multi_00", "N_MultiCoin_00", "N_MultiMods_00"}) ScalePane(lyt, outer, scale);
-+    MovePaneX(lyt, "N_multiButton_00", -step / scale);
-+    MovePaneX(lyt, "N_multiCoin_00", 0.0f);
-+    MovePaneX(lyt, "N_multiMods_00", step / scale);
++    const float scale = wide ? 0.72f : 0.6f, step = wide ? 180.0f : 150.0f;
++    for (const char* outer : {"N_Multi_00", "N_MultiCoin_00", "N_MultiMods_00", "N_MultiOnline_00"}) ScalePane(lyt, outer, scale);
++    MovePaneX(lyt, "N_multiButton_00", -1.5f * step / scale);
++    MovePaneX(lyt, "N_multiCoin_00", -0.5f * step / scale);
++    MovePaneX(lyt, "N_multiMods_00", 0.5f * step / scale);
++    MovePaneX(lyt, "N_multiOnline_00", 1.5f * step / scale);
 +
 +    AddGroup(lyt, "F02_mods", {"N_MultiMods_00", "N_multiMods_00", "T_multiS_02", "T_multi_02", "P_shadow_04",
 +                               "P_modsBase_00", "P_modsLight_00", "P_modsUPs_00"});
++    AddGroup(lyt, "F03_online", {"N_MultiOnline_00", "N_multiOnline_00", "T_multiS_03", "T_multi_03", "P_shadow_05",
++                                 "P_onlineBase_00", "P_onlineLight_00", "P_onlineUPs_00"});
 +    lytFile = WriteSectioned(lyt);
 +
-+    const std::map<std::string, std::string> tracks = {
++    const std::map<std::string, std::string> modsTracks = {
 +        {"N_multiCoin_00", "N_multiMods_00"}, {"P_shadow_03", "P_shadow_04"}, {"P_battleBase_00", "P_modsBase_00"},
 +        {"T_multiS_01", "T_multiS_02"},       {"T_multi_01", "T_multi_02"},   {"P_battleUPs", "P_modsUPs_00"},
 +        {"P_battleLight", "P_modsLight_00"},
 +    };
-+    std::vector<std::string> renamed;
-+    for (const auto& [from, to] : tracks) renamed.push_back(to);
++    const std::map<std::string, std::string> onlineTracks = {
++        {"N_multiCoin_00", "N_multiOnline_00"}, {"P_shadow_03", "P_shadow_05"}, {"P_battleBase_00", "P_onlineBase_00"},
++        {"T_multiS_01", "T_multiS_03"},         {"T_multi_01", "T_multi_03"},   {"P_battleUPs", "P_onlineUPs_00"},
++        {"P_battleLight", "P_onlineLight_00"},
++    };
++    std::vector<std::string> modsRenamed, onlineRenamed;
++    for (const auto& [from, to] : modsTracks) modsRenamed.push_back(to);
++    for (const auto& [from, to] : onlineTracks) onlineRenamed.push_back(to);
 +    for (const char* anim : {"inMulti", "onMulti", "idleMulti", "hitMulti", "offMulti", "outMulti"}) {
 +        Bytes& file = File(arc, std::string("arc/anim/fileSelectBase_18_") + anim + ".brlan");
 +        Sectioned a = ReadSectioned(file);
-+        ExtendAnimation(a, "F02_mods", tracks);
-+        SwapTrackRedBlue(a, renamed);
++        ExtendAnimation(a, "F02_mods", modsTracks);
++        SwapTrackColours(a, modsRenamed, 2);
++        ExtendAnimation(a, "F03_online", onlineTracks);
++        SwapTrackColours(a, onlineRenamed, 1);
 +        file = WriteSectioned(a);
 +    }
 +    return WriteArchive(arc);
@@ -6465,7 +6770,7 @@ index 6c7e32b..5e2ea79 100644
      std::ifstream f(path, std::ios::binary);
      if (!f) return std::nullopt;
      return Bytes(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-@@ -472,7 +668,7 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
+@@ -472,7 +706,7 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
      const fs::path source = RuntimeDvd::HostPathFor(dvdPath);
      const auto original = source.empty() ? std::nullopt : ReadFile(source);
      if (!original) {
@@ -6474,7 +6779,7 @@ index 6c7e32b..5e2ea79 100644
          return false;
      }
      try {
-@@ -501,11 +697,14 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
+@@ -501,11 +735,14 @@ bool Generate(const char* dvdPath, const char* outName, Bytes (*patch)(const Byt
  
  bool g_pauseMenuPatched = false;
  bool g_mapMenuPatched = false;
@@ -6489,7 +6794,7 @@ index 6c7e32b..5e2ea79 100644
      // The Wii Remote icon set keeps the game's own bubble: its hop belongs to the remote art.
      if (RuntimeConfigFile::ButtonIcons("auto") != "wii") {
          Generate("/Layout/fukidashiInfo/fukidashiInfo.arc", "fukidashiInfo.arc", &PatchFukidashi);
-@@ -520,3 +719,4 @@ void Register() noexcept { RuntimeDvd::SetGeneratedFilesHook(&GenerateFiles); }
+@@ -520,3 +757,4 @@ void Register() noexcept { RuntimeDvd::SetGeneratedFilesHook(&GenerateFiles); }
  
  extern "C" bool NsmbwPauseMenuHasOptions() { return nsmbw_layout_patch::g_pauseMenuPatched; }
  extern "C" bool NsmbwMapMenuHasOptions() { return nsmbw_layout_patch::g_mapMenuPatched; }
@@ -8672,3 +8977,764 @@ index a89e4a4..1e3b84c 100644
      const uint32_t baseHi = ::Memory::Read32(0x800030D8u);
      const uint32_t baseLo = ::Memory::Read32(0x800030DCu);
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
+diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
+new file mode 100644
+index 0000000..7c09f3b
+--- /dev/null
++++ b/runtime/src/product/nsmbw_online_room.cpp
+@@ -0,0 +1,681 @@
++// Online play rooms: see nsmbw_online_room.h.
++//
++// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
++// u16 pad, u32 room token; the host picks the token when it opens the room, and a joiner's HELLO
++// carries 0):
++//   HELLO     joiner -> host   name[24]                        resent every 0.5 s until WELCOME
++//   WELCOME   host -> joiner   u8 slot
++//   REFUSE    host -> joiner   u8 reason (1 full, 2 started, 3 version)
++//   ROSTER    host -> all      u8 count, count x {u8 slot, name[24], i16 ping ms}   every 0.5 s
++//   PING      either way       u8 slot, u64 sender's clock                          every 0.5 s
++//   PONG      reply to a PING  u64 the PING's clock
++//   START     host -> all      u32 session token, u8 delay, u8 players, players x {u32 IPv4, u16 port}
++//   START_ACK joiner -> host   u8 slot
++//   LEAVE     either way       u8 slot
++// The host times each joiner's PONG to its own PINGs (the round trip, shown in the room and used
++// for the input delay), drops a joiner silent for 5 s, and a joiner gives up on a host silent for
++// 5 s. Player slots stay 1..n with no gaps: when a joiner leaves, the ones after it move up and are
++// told so with a new WELCOME, so START never renumbers anyone.
++// Everything received is bounds-checked; nothing in a packet is executed.
++//
++// Start: the host sends START (repeated for 1 s or until every joiner acked), then every copy
++// relaunches itself with the lockstep settings in its environment (NSMBW_NETPLAY_*) and a fresh
++// session save folder (NSMBW_NAND_ROOT), so the session starts from boot in the same state on
++// every machine. Saves made in the session stay in that folder (v1: nothing is copied back).
++#include "nsmbw_online_room.h"
++
++#include "runtime_config.h"
++
++#ifdef _WIN32
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <process.h>
++#include <windows.h>
++using RoomSocket = SOCKET;
++constexpr RoomSocket kNoSocket = INVALID_SOCKET;
++inline void CloseSocket(RoomSocket s) { closesocket(s); }
++#else
++#include <arpa/inet.h>
++#include <fcntl.h>
++#include <netdb.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <unistd.h>
++#if defined(__APPLE__)
++#include <mach-o/dyld.h>
++#endif
++using RoomSocket = int;
++constexpr RoomSocket kNoSocket = -1;
++inline void CloseSocket(RoomSocket s) { close(s); }
++#endif
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <filesystem>
++#include <random>
++#include <string>
++#include <vector>
++
++extern "C" void NsmbwPrepareImmediateExit(); // nsmbw_product.cpp: flush caches, clear crash marker
++
++namespace nsmbw_room {
++namespace {
++
++using Clock = std::chrono::steady_clock;
++
++constexpr uint32_t kMagic = 0x4D52534Eu; // "NSRM"
++constexpr uint8_t kVersion = 1;
++enum : uint8_t { kHello = 1, kWelcome, kRefuse, kRoster, kPing, kPong, kStart, kStartAck, kLeave };
++constexpr size_t kNameLen = 24;
++constexpr auto kResend = std::chrono::milliseconds(500);
++constexpr auto kTimeout = std::chrono::seconds(5);
++
++struct Peer {
++    int slot = 0;
++    std::string name;
++    sockaddr_in addr{};
++    Clock::time_point lastHeard{};
++    int pingMs = -1;
++    bool acked = false;
++};
++
++struct Room {
++    Role role = Role::None;
++    RoomSocket sock = kNoSocket;
++    uint16_t port = kDefaultPort;
++    uint32_t token = 0;
++    std::string myName;
++    int mySlot = -1;
++    std::vector<Peer> peers;          // host: the joiners; joiner: the host only (slot 0)
++    std::vector<Member> roster;       // joiner: the last ROSTER
++    sockaddr_in hostAddr{};
++    Clock::time_point lastSend{};
++    Clock::time_point startedAt{};
++    std::string status;
++    // Start in progress.
++    bool starting = false;
++    Clock::time_point startSentAt{};
++    std::vector<uint8_t> startPacket;
++} r;
++
++void Put16(std::vector<uint8_t>& b, uint16_t v) { b.push_back(uint8_t(v)); b.push_back(uint8_t(v >> 8)); }
++void Put32(std::vector<uint8_t>& b, uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back(uint8_t(v >> (8 * i))); }
++void Put64(std::vector<uint8_t>& b, uint64_t v) { for (int i = 0; i < 8; ++i) b.push_back(uint8_t(v >> (8 * i))); }
++uint16_t Get16(const uint8_t* p) { return uint16_t(p[0] | p[1] << 8); }
++uint32_t Get32(const uint8_t* p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24; }
++uint64_t Get64(const uint8_t* p) { return uint64_t(Get32(p)) | uint64_t(Get32(p + 4)) << 32; }
++void PutName(std::vector<uint8_t>& b, const std::string& name) {
++    for (size_t i = 0; i < kNameLen; ++i) b.push_back(i < name.size() ? uint8_t(name[i]) : 0);
++}
++std::string GetName(const uint8_t* p) {
++    std::string s;
++    for (size_t i = 0; i < kNameLen && p[i] != 0; ++i) s.push_back(p[i] >= 0x20 && p[i] < 0x7F ? char(p[i]) : '?');
++    return s.empty() ? std::string("Player") : s;
++}
++
++std::vector<uint8_t> Header(uint8_t type, uint32_t token) {
++    std::vector<uint8_t> b;
++    Put32(b, kMagic);
++    b.push_back(kVersion);
++    b.push_back(type);
++    Put16(b, 0);
++    Put32(b, token);
++    return b;
++}
++
++void SendTo(const sockaddr_in& to, const std::vector<uint8_t>& b) {
++    if (r.sock == kNoSocket) return;
++    sendto(r.sock, reinterpret_cast<const char*>(b.data()), int(b.size()), 0, reinterpret_cast<const sockaddr*>(&to),
++           sizeof(to));
++}
++
++uint64_t NowMicros() {
++    return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
++}
++
++std::string AddrText(const sockaddr_in& a) {
++    char buf[INET_ADDRSTRLEN] = {};
++    inet_ntop(AF_INET, &a.sin_addr, buf, sizeof(buf));
++    return std::string(buf) + ":" + std::to_string(ntohs(a.sin_port));
++}
++
++bool SameAddr(const sockaddr_in& a, const sockaddr_in& b) {
++    return a.sin_addr.s_addr == b.sin_addr.s_addr && a.sin_port == b.sin_port;
++}
++
++std::string MachineName() {
++    char buf[64] = {};
++    if (gethostname(buf, sizeof(buf) - 1) != 0 || buf[0] == '\0') return "Player";
++    std::string s(buf);
++    if (const size_t dot = s.find('.'); dot != std::string::npos) s.resize(dot);
++    if (s.size() > kNameLen) s.resize(kNameLen);
++    return s;
++}
++
++bool OpenSocket(uint16_t port, bool bindAny, std::string& error) {
++#ifdef _WIN32
++    static bool wsa = false;
++    if (!wsa) {
++        WSADATA data;
++        wsa = WSAStartup(MAKEWORD(2, 2), &data) == 0;
++    }
++#endif
++    r.sock = socket(AF_INET, SOCK_DGRAM, 0);
++    if (r.sock == kNoSocket) {
++        error = "Could not open a network socket";
++        return false;
++    }
++#ifdef _WIN32
++    u_long nonBlocking = 1;
++    ioctlsocket(r.sock, FIONBIO, &nonBlocking);
++#else
++    fcntl(r.sock, F_SETFL, fcntl(r.sock, F_GETFL, 0) | O_NONBLOCK);
++    fcntl(r.sock, F_SETFD, FD_CLOEXEC); // not inherited by the relaunched session
++#endif
++    sockaddr_in local{};
++    local.sin_family = AF_INET;
++    local.sin_addr.s_addr = htonl(INADDR_ANY);
++    local.sin_port = htons(bindAny ? port : 0);
++    if (bind(r.sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
++        error = "Port " + std::to_string(port) + " is in use (another copy of the game?)";
++        CloseSocket(r.sock);
++        r.sock = kNoSocket;
++        return false;
++    }
++    return true;
++}
++
++// This machine's address on the network that reaches the outside (a connected UDP socket picks the
++// interface; nothing is sent).
++std::vector<std::string> LocalAddresses(uint16_t port) {
++    std::vector<std::string> out;
++    RoomSocket s = socket(AF_INET, SOCK_DGRAM, 0);
++    if (s == kNoSocket) return out;
++    sockaddr_in probe{};
++    probe.sin_family = AF_INET;
++    probe.sin_port = htons(53);
++    inet_pton(AF_INET, "192.0.2.1", &probe.sin_addr); // TEST-NET-1: never routed, never contacted
++    sockaddr_in local{};
++    socklen_t len = sizeof(local);
++    if (connect(s, reinterpret_cast<sockaddr*>(&probe), sizeof(probe)) == 0 &&
++        getsockname(s, reinterpret_cast<sockaddr*>(&local), &len) == 0 && local.sin_addr.s_addr != 0) {
++        local.sin_port = htons(port);
++        out.push_back(AddrText(local));
++    }
++    CloseSocket(s);
++    return out;
++}
++
++void Reset(const std::string& status) {
++    if (r.sock != kNoSocket) CloseSocket(r.sock);
++    r = Room{};
++    r.status = status;
++}
++
++void SendRoster() {
++    std::vector<uint8_t> b = Header(kRoster, r.token);
++    b.push_back(uint8_t(1 + r.peers.size()));
++    b.push_back(0);
++    PutName(b, r.myName);
++    Put16(b, 0);
++    for (const Peer& p : r.peers) {
++        b.push_back(uint8_t(p.slot));
++        PutName(b, p.name);
++        Put16(b, uint16_t(int16_t(p.pingMs)));
++    }
++    for (const Peer& p : r.peers) SendTo(p.addr, b);
++}
++
++int FreeSlot() {
++    for (int s = 1; s < kMaxPlayers; ++s) {
++        bool used = false;
++        for (const Peer& p : r.peers) used = used || p.slot == s;
++        if (!used) return s;
++    }
++    return -1;
++}
++
++// After a joiner left: slots 1..n again, in join order; the ones that moved get a new WELCOME.
++void CompactSlots() {
++    std::sort(r.peers.begin(), r.peers.end(), [](const Peer& a, const Peer& b) { return a.slot < b.slot; });
++    for (size_t i = 0; i < r.peers.size(); ++i) {
++        Peer& p = r.peers[i];
++        if (p.slot == int(i) + 1) continue;
++        p.slot = int(i) + 1;
++        std::vector<uint8_t> w = Header(kWelcome, r.token);
++        w.push_back(uint8_t(p.slot));
++        SendTo(p.addr, w);
++    }
++    SendRoster();
++}
++
++[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, int players, int mySlot,
++                           const std::vector<sockaddr_in>& slots);
++
++void HostReceive(const uint8_t* buf, size_t len, const sockaddr_in& from) {
++    const uint8_t type = buf[5];
++    const uint32_t token = Get32(buf + 8);
++    Peer* peer = nullptr;
++    for (Peer& p : r.peers) {
++        if (SameAddr(p.addr, from)) peer = &p;
++    }
++    if (type == kHello && len >= 12 + kNameLen) {
++        if (!peer) {
++            const int slot = r.starting ? -1 : FreeSlot();
++            if (slot < 0) {
++                std::vector<uint8_t> b = Header(kRefuse, 0);
++                b.push_back(r.starting ? 2 : 1);
++                SendTo(from, b);
++                return;
++            }
++            Peer p;
++            p.slot = slot;
++            p.name = GetName(buf + 12);
++            p.addr = from;
++            r.peers.push_back(p);
++            peer = &r.peers.back();
++            std::fprintf(stderr, "[nsmbw][room] %s joined from %s as player %d\n", p.name.c_str(), AddrText(from).c_str(),
++                         slot + 1);
++        }
++        peer->lastHeard = Clock::now();
++        std::vector<uint8_t> b = Header(kWelcome, r.token);
++        b.push_back(uint8_t(peer->slot));
++        SendTo(from, b);
++        SendRoster();
++        return;
++    }
++    if (!peer || token != r.token) return;
++    peer->lastHeard = Clock::now();
++    if (type == kPing && len >= 12 + 1 + 8) {
++        std::vector<uint8_t> b = Header(kPong, r.token);
++        Put64(b, Get64(buf + 13));
++        SendTo(from, b);
++    } else if (type == kPong && len >= 12 + 8) {
++        peer->pingMs = int((NowMicros() - Get64(buf + 12)) / 1000);
++    } else if (type == kStartAck) {
++        peer->acked = true;
++    } else if (type == kLeave) {
++        std::fprintf(stderr, "[nsmbw][room] %s left\n", peer->name.c_str());
++        r.peers.erase(r.peers.begin() + (peer - r.peers.data()));
++        CompactSlots();
++    }
++}
++
++void JoinerReceive(const uint8_t* buf, size_t len, const sockaddr_in& from) {
++    if (!SameAddr(from, r.hostAddr)) return;
++    const uint8_t type = buf[5];
++    const uint32_t token = Get32(buf + 8);
++    if (!r.peers.empty()) r.peers[0].lastHeard = Clock::now();
++    if (type == kRefuse && len >= 13) {
++        const uint8_t why = buf[12];
++        Reset(why == 1 ? "The room is full" : why == 2 ? "That room has already started" : "That room runs another version");
++        return;
++    }
++    if (type == kWelcome && len >= 13) {
++        if (r.role != Role::Joined) std::fprintf(stderr, "[nsmbw][room] joined as player %d\n", buf[12] + 1);
++        r.role = Role::Joined;
++        r.token = token;
++        r.mySlot = buf[12];
++        r.status = "Waiting for the host to start";
++        return;
++    }
++    if (token != r.token) return;
++    if (type == kRoster && len >= 13) {
++        const uint8_t count = buf[12];
++        if (count > kMaxPlayers || len < 13 + size_t(count) * (1 + kNameLen + 2)) return;
++        r.roster.clear();
++        for (uint8_t i = 0; i < count; ++i) {
++            const uint8_t* e = buf + 13 + size_t(i) * (1 + kNameLen + 2);
++            Member m;
++            m.slot = e[0];
++            m.name = GetName(e + 1);
++            m.pingMs = int16_t(Get16(e + 1 + kNameLen));
++            r.roster.push_back(m);
++        }
++    } else if (type == kPing && len >= 12 + 1 + 8) { // the host timing us
++        std::vector<uint8_t> b = Header(kPong, r.token);
++        Put64(b, Get64(buf + 13));
++        SendTo(from, b);
++    } else if (type == kStart && len >= 12 + 4 + 2) {
++        const uint32_t sessionToken = Get32(buf + 12);
++        const int delay = buf[16], players = buf[17];
++        if (players < 2 || players > kMaxPlayers || len < 18 + size_t(players) * 6 || r.mySlot < 1 ||
++            r.mySlot >= players || delay < 1 || delay > 30) {
++            return;
++        }
++        std::vector<sockaddr_in> slots(static_cast<size_t>(players));
++        for (int i = 0; i < players; ++i) {
++            const uint8_t* e = buf + 18 + size_t(i) * 6;
++            slots[size_t(i)].sin_family = AF_INET;
++            slots[size_t(i)].sin_addr.s_addr = Get32(e);
++            slots[size_t(i)].sin_port = htons(Get16(e + 4));
++        }
++        // The host sees itself as 0.0.0.0: use the address we reached it on.
++        slots[0] = r.hostAddr;
++        std::vector<uint8_t> ack = Header(kStartAck, r.token);
++        ack.push_back(uint8_t(r.mySlot));
++        for (int i = 0; i < 3; ++i) SendTo(r.hostAddr, ack);
++        Relaunch(sessionToken, delay, players, r.mySlot, slots);
++    } else if (type == kLeave) {
++        Reset("The host closed the room");
++    }
++}
++
++void Receive() {
++    uint8_t buf[512];
++    for (;;) {
++        sockaddr_in from{};
++        socklen_t fromLen = sizeof(from);
++        const auto len = recvfrom(r.sock, reinterpret_cast<char*>(buf), int(sizeof(buf)), 0,
++                                  reinterpret_cast<sockaddr*>(&from), &fromLen);
++        if (len < 0 || r.sock == kNoSocket) return;
++        if (len < 12 || Get32(buf) != kMagic) continue;
++        if (buf[4] != kVersion) {
++            if (r.role == Role::Hosting && buf[5] == kHello) {
++                std::vector<uint8_t> b = Header(kRefuse, 0);
++                b.push_back(3);
++                SendTo(from, b);
++            }
++            continue;
++        }
++        if (r.role == Role::Hosting) HostReceive(buf, size_t(len), from);
++        else JoinerReceive(buf, size_t(len), from);
++        if (r.role == Role::None) return; // Reset by a REFUSE / LEAVE
++    }
++}
++
++// ---- Relaunch into the session ------------------------------------------------------------------
++
++std::string ExecutablePath() {
++#if defined(__APPLE__)
++    char buf[4096];
++    uint32_t size = sizeof(buf);
++    if (_NSGetExecutablePath(buf, &size) == 0) return buf;
++#elif defined(_WIN32)
++    char buf[MAX_PATH];
++    const DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
++    if (n > 0 && n < MAX_PATH) return std::string(buf, n);
++#else
++    char buf[4096];
++    const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
++    if (n > 0) return std::string(buf, size_t(n));
++#endif
++    return {};
++}
++
++void SetEnv(const char* name, const std::string& value) {
++#ifdef _WIN32
++    _putenv_s(name, value.c_str());
++#else
++    setenv(name, value.c_str(), 1);
++#endif
++}
++
++[[noreturn]] void Relaunch(uint32_t sessionToken, int delay, int players, int mySlot,
++                           const std::vector<sockaddr_in>& slots) {
++    std::string peers;
++    for (int i = 0; i < players; ++i) {
++        if (i == mySlot) continue;
++        if (!peers.empty()) peers += ",";
++        peers += std::to_string(i) + "@" + AddrText(slots[size_t(i)]);
++    }
++    char token[16];
++    std::snprintf(token, sizeof(token), "%X", sessionToken);
++    // A fresh save for the session, the same on every machine (v1: an empty one).
++    std::error_code ec;
++    const auto nand = RuntimeConfigFile::ApplicationDataDirectory() / "netplay_session" / "NAND";
++    std::filesystem::remove_all(nand, ec);
++    std::filesystem::create_directories(nand, ec);
++    SetEnv("NSMBW_NAND_ROOT", RuntimeConfigFile::PathToUtf8(nand));
++    // The session copy must not open a room of its own (the room test switches are for the
++    // copy before the relaunch).
++#ifdef _WIN32
++    _putenv_s("NSMBW_ONLINE_TEST", "");
++    _putenv_s("NSMBW_ONLINE_TEST_SHOW", "");
++#else
++    unsetenv("NSMBW_ONLINE_TEST");
++    unsetenv("NSMBW_ONLINE_TEST_SHOW");
++#endif
++    SetEnv("NSMBW_NETPLAY_PORT", std::to_string(ntohs(slots[size_t(mySlot)].sin_port)));
++    SetEnv("NSMBW_NETPLAY_BIND", "0.0.0.0");
++    SetEnv("NSMBW_NETPLAY_SLOT", std::to_string(mySlot));
++    SetEnv("NSMBW_NETPLAY_PLAYERS", std::to_string(players));
++    SetEnv("NSMBW_NETPLAY_PEERS", peers);
++    SetEnv("NSMBW_NETPLAY_DELAY", std::to_string(delay));
++    SetEnv("NSMBW_NETPLAY_TOKEN", token);
++    std::fprintf(stderr, "[nsmbw][room] starting the session: slot %d of %d, delay %d, peers %s\n", mySlot, players, delay,
++                 peers.c_str());
++    if (r.sock != kNoSocket) CloseSocket(r.sock);
++    r.sock = kNoSocket;
++    NsmbwPrepareImmediateExit();
++    std::fflush(stderr);
++    const std::string exe = ExecutablePath();
++#ifdef _WIN32
++    // _execv starts the new process and ends this one.
++    const char* argv[] = {exe.c_str(), nullptr};
++    _execv(exe.c_str(), argv);
++#else
++    char* argv[] = {const_cast<char*>(exe.c_str()), nullptr};
++    execv(exe.c_str(), argv);
++#endif
++    std::fprintf(stderr, "[nsmbw][room] could not restart the game into the session\n");
++    std::fflush(stderr);
++    std::_Exit(4);
++}
++
++} // namespace
++
++// A copy started into a session by Start (the lockstep settings are in its environment).
++bool InSession() {
++    const char* port = std::getenv("NSMBW_NETPLAY_PORT");
++    return port != nullptr && port[0] != '\0';
++}
++
++bool Host(std::string& error) {
++    if (InSession()) {
++        error = "Already in an online session";
++        r.status = error;
++        return false;
++    }
++    Reset("");
++    if (!OpenSocket(kDefaultPort, true, error)) {
++        r.status = error;
++        return false;
++    }
++    std::random_device rd;
++    r.token = (uint32_t(rd()) << 16 | uint32_t(rd())) | 1u;
++    r.role = Role::Hosting;
++    r.port = kDefaultPort;
++    r.mySlot = 0;
++    r.myName = MachineName();
++    r.status = "Waiting for players to join";
++    std::fprintf(stderr, "[nsmbw][room] hosting on port %u\n", unsigned(r.port));
++    return true;
++}
++
++bool Join(const std::string& address, std::string& error) {
++    if (InSession()) {
++        error = "Already in an online session";
++        r.status = error;
++        return false;
++    }
++    Reset("");
++    std::string host = address, portText;
++    if (const size_t colon = address.rfind(':'); colon != std::string::npos) {
++        host = address.substr(0, colon);
++        portText = address.substr(colon + 1);
++    }
++    while (!host.empty() && host.back() == ' ') host.pop_back();
++    while (!host.empty() && host.front() == ' ') host.erase(host.begin());
++    sockaddr_in to{};
++    to.sin_family = AF_INET;
++    to.sin_port = htons(portText.empty() ? kDefaultPort : uint16_t(std::strtoul(portText.c_str(), nullptr, 10)));
++    if (host == "localhost") host = "127.0.0.1";
++    if (inet_pton(AF_INET, host.c_str(), &to.sin_addr) != 1) {
++        addrinfo hints{};
++        hints.ai_family = AF_INET;
++        hints.ai_socktype = SOCK_DGRAM;
++        addrinfo* res = nullptr;
++        if (getaddrinfo(host.c_str(), nullptr, &hints, &res) != 0 || res == nullptr) {
++            error = "Unknown address: " + host;
++            r.status = error;
++            return false;
++        }
++        to.sin_addr = reinterpret_cast<sockaddr_in*>(res->ai_addr)->sin_addr;
++        freeaddrinfo(res);
++    }
++    if (!OpenSocket(0, false, error)) {
++        r.status = error;
++        return false;
++    }
++    r.role = Role::Joining;
++    r.hostAddr = to;
++    r.myName = MachineName();
++    Peer hostPeer;
++    hostPeer.addr = to;
++    hostPeer.lastHeard = Clock::now();
++    r.peers.push_back(hostPeer);
++    r.startedAt = Clock::now();
++    r.status = "Connecting to " + AddrText(to) + "...";
++    std::fprintf(stderr, "[nsmbw][room] joining %s\n", AddrText(to).c_str());
++    return true;
++}
++
++void Leave() {
++    if (r.role == Role::None) return;
++    std::vector<uint8_t> b = Header(kLeave, r.token);
++    b.push_back(uint8_t(std::max(r.mySlot, 0)));
++    for (const Peer& p : r.peers) SendTo(p.addr, b);
++    std::fprintf(stderr, "[nsmbw][room] left the room\n");
++    Reset("");
++}
++
++bool Start(std::string& error) {
++    if (r.role != Role::Hosting || r.peers.empty()) {
++        error = "Nobody has joined yet";
++        return false;
++    }
++    std::random_device rd;
++    const uint32_t sessionToken = (uint32_t(rd()) << 16 | uint32_t(rd())) | 1u;
++    int worst = 0;
++    for (const Peer& p : r.peers) worst = std::max(worst, p.pingMs);
++    // Delay from the round trip (docs section 2), at least 3: a busy machine hitches.
++    const int delay = std::clamp(int(std::ceil(worst / 2.0 / 16.7)) + 2, 3, 8);
++    std::sort(r.peers.begin(), r.peers.end(), [](const Peer& a, const Peer& b) { return a.slot < b.slot; });
++    std::vector<sockaddr_in> slots;
++    sockaddr_in self{};
++    self.sin_family = AF_INET;
++    self.sin_port = htons(r.port);
++    slots.push_back(self); // slot 0; each joiner puts the address it reached the host on here
++    for (const Peer& p : r.peers) slots.push_back(p.addr); // slots 1..n (CompactSlots)
++    const int players = int(slots.size());
++    std::vector<uint8_t> b = Header(kStart, r.token);
++    Put32(b, sessionToken);
++    b.push_back(uint8_t(delay));
++    b.push_back(uint8_t(players));
++    for (const sockaddr_in& a : slots) {
++        Put32(b, a.sin_addr.s_addr);
++        Put16(b, ntohs(a.sin_port));
++    }
++    r.starting = true;
++    r.startPacket = b;
++    r.startSentAt = Clock::now();
++    for (const Peer& p : r.peers) SendTo(p.addr, b);
++    r.status = "Starting...";
++    std::fprintf(stderr, "[nsmbw][room] starting with %d players, delay %d\n", players, delay);
++    // The rest happens in Poll: resend until every joiner acked (1 s at most), then relaunch.
++    return true;
++}
++
++void Poll() {
++    if (r.role == Role::None || r.sock == kNoSocket) return;
++    Receive();
++    if (r.role == Role::None) return;
++    const auto now = Clock::now();
++    if (r.role == Role::Hosting) {
++        if (r.starting) {
++            bool all = true;
++            for (const Peer& p : r.peers) all = all && p.acked;
++            if (now - r.lastSend >= std::chrono::milliseconds(100)) {
++                for (const Peer& p : r.peers) if (!p.acked) SendTo(p.addr, r.startPacket);
++                r.lastSend = now;
++            }
++            if (all || now - r.startSentAt >= std::chrono::seconds(1)) {
++                // Rebuild the slot table from the packet (it is the authority every joiner got).
++                const uint8_t* b = r.startPacket.data();
++                const uint32_t sessionToken = Get32(b + 12);
++                const int delay = b[16], players = b[17];
++                std::vector<sockaddr_in> slots(static_cast<size_t>(players));
++                for (int i = 0; i < players; ++i) {
++                    slots[size_t(i)].sin_family = AF_INET;
++                    slots[size_t(i)].sin_addr.s_addr = Get32(b + 18 + 6 * i);
++                    slots[size_t(i)].sin_port = htons(Get16(b + 18 + 6 * i + 4));
++                }
++                Relaunch(sessionToken, delay, players, 0, slots);
++            }
++            return;
++        }
++        for (size_t i = r.peers.size(); i-- > 0;) {
++            if (now - r.peers[i].lastHeard >= kTimeout) {
++                std::fprintf(stderr, "[nsmbw][room] %s timed out\n", r.peers[i].name.c_str());
++                r.peers.erase(r.peers.begin() + long(i));
++                CompactSlots();
++            }
++        }
++        if (now - r.lastSend >= kResend) {
++            r.lastSend = now;
++            SendRoster();
++            std::vector<uint8_t> ping = Header(kPing, r.token);
++            ping.push_back(0);
++            Put64(ping, NowMicros());
++            for (const Peer& p : r.peers) SendTo(p.addr, ping);
++        }
++        r.status = r.peers.empty() ? "Waiting for players to join"
++                                   : std::to_string(r.peers.size() + 1) + " players in the room";
++        return;
++    }
++    // Joining / joined.
++    if (now - r.peers[0].lastHeard >= kTimeout + (r.role == Role::Joining ? std::chrono::seconds(10) : std::chrono::seconds(0))) {
++        Reset(r.role == Role::Joining ? "No answer from that address" : "Lost the connection to the host");
++        return;
++    }
++    if (now - r.lastSend >= kResend) {
++        r.lastSend = now;
++        if (r.role == Role::Joining) {
++            std::vector<uint8_t> b = Header(kHello, 0);
++            PutName(b, r.myName);
++            SendTo(r.hostAddr, b);
++        } else {
++            std::vector<uint8_t> b = Header(kPing, r.token);
++            b.push_back(uint8_t(r.mySlot));
++            Put64(b, NowMicros());
++            SendTo(r.hostAddr, b);
++        }
++    }
++}
++
++View Snapshot() {
++    View v;
++    v.role = r.role;
++    v.status = r.status;
++    v.mySlot = r.mySlot;
++    if (r.role == Role::Hosting) {
++        v.addresses = LocalAddresses(r.port);
++        v.members.push_back({0, r.myName, 0});
++        std::vector<Peer> sorted = r.peers;
++        std::sort(sorted.begin(), sorted.end(), [](const Peer& a, const Peer& b) { return a.slot < b.slot; });
++        for (const Peer& p : sorted) v.members.push_back({p.slot, p.name, p.pingMs});
++        v.canStart = !r.peers.empty() && !r.starting;
++    } else if (r.role == Role::Joined) {
++        v.members = r.roster;
++    }
++    return v;
++}
++
++bool Active() { return r.role != Role::None; }
++
++} // namespace nsmbw_room
+diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
+new file mode 100644
+index 0000000..26f196c
+--- /dev/null
++++ b/runtime/src/product/nsmbw_online_room.h
+@@ -0,0 +1,46 @@
++#pragma once
++// Online play rooms (NSMBW repo docs/online-play.md, sections 5 and 7): the part before a session.
++// One machine hosts a room on a UDP port, the others join it by address; the room screen
++// (nsmbw_options_menu.cpp) shows who is in it, and the host's Start relaunches every copy into
++// a lockstep session (ports/wiicompiled/native_us/nsmbw_netplay_lockstep.cpp) from boot, with
++// a fresh session save folder, so all of them start from the same state.
++#include <cstdint>
++#include <string>
++#include <vector>
++
++namespace nsmbw_room {
++
++enum class Role { None, Hosting, Joining, Joined };
++
++struct Member {
++    int slot = 0;        // 0 = the host (player 1, Wii Remote channel 0)
++    std::string name;
++    int pingMs = -1;     // the host's measurement; -1 = not yet
++};
++
++struct View {
++    Role role = Role::None;
++    std::string status;               // one line for the screen ("Waiting for players", errors)
++    std::vector<std::string> addresses; // hosting: this machine's LAN addresses with the port
++    std::vector<Member> members;
++    int mySlot = -1;
++    bool canStart = false;            // hosting with at least one other player
++};
++
++constexpr uint16_t kDefaultPort = 47100;
++constexpr int kMaxPlayers = 4;
++
++bool Host(std::string& error);
++bool Join(const std::string& address, std::string& error); // "host", "host:port"
++void Leave();
++// Host only: tells everyone to start, then relaunches this copy into the session.
++bool Start(std::string& error);
++// Runs the room (receive, keep-alives, timeouts, a start from the host). Call every frame, also
++// while the room screen is closed: the room stays open in the background.
++void Poll();
++View Snapshot();
++bool Active();
++// This copy is running an online session (started by a room's Start, or by hand with NSMBW_NETPLAY_*).
++bool InSession();
++
++} // namespace nsmbw_room
+diff --git a/runtime/include/nand_path.h b/runtime/include/nand_path.h
+index df24a1a..64d8b28 100644
+--- a/runtime/include/nand_path.h
++++ b/runtime/include/nand_path.h
+@@ -165,6 +165,17 @@ inline std::filesystem::path CreateManagedNandRoot() {
+ }
+ 
+ inline std::filesystem::path DiscoverNandRootPath() {
++    // NSMBW_NAND_ROOT=<folder>: a NAND of its own, created and seeded if new. An online-play session
++    // (nsmbw_online_room.cpp) runs on a fresh one so every machine starts from the same save.
++    if (const char* session = std::getenv("NSMBW_NAND_ROOT"); session != nullptr && session[0] != '\0') {
++        const std::filesystem::path root = RuntimeConfigFile::PathFromUtf8(session);
++        std::error_code ec;
++        std::filesystem::create_directories(root, ec);
++        if (ec || !std::filesystem::is_directory(root, ec)) FailNandRoot("Unable to create the session NAND root", root);
++        if (!SeedMissingBootstrapFiles(root)) FailNandRoot("Unable to initialize the session NAND", root);
++        RT_LOG(RT_TAG_NAND) << "using session NAND root: " << RuntimeConfigFile::PathToUtf8(root) << std::endl;
++        return root;
++    }
+     const std::string configPath = RuntimeConfigFile::NandRoot();
+     if (!configPath.empty()) {
+         const auto path = ResolveConfiguredPath(configPath);
