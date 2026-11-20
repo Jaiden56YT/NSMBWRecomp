@@ -29,14 +29,34 @@
 // earlier ones too; 0xFFFFFFFF none), u32 first frame, u32 hash frame, u32 hash (hash frame
 // 0xFFFFFFFF = none), then count x { u32 hold, u32 tilt bits, i8 movie-skip request, 3 pad }.
 // Everything received is bounds-checked; nothing in a packet is ever executed.
-#include "memory.h"
-#include <aurora/env.hpp>
-
+#ifdef _WIN32
+// Winsock (ws2_32 is already linked for Windows, NsmbwProduct.cmake). No MSG_DONTWAIT: the socket
+// is put in non-blocking mode once instead.
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <process.h>
+using SocketHandle = SOCKET;
+using socklen_t = int;
+constexpr SocketHandle kNoSocket = INVALID_SOCKET;
+#define NSMBW_NET_DONTWAIT 0
+inline int NetPoll(pollfd* p, unsigned long count, int ms) { return WSAPoll(p, count, ms); }
+inline void NetClose(SocketHandle s) { closesocket(s); }
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+using SocketHandle = int;
+constexpr SocketHandle kNoSocket = -1;
+#define NSMBW_NET_DONTWAIT MSG_DONTWAIT
+inline int NetPoll(pollfd* p, unsigned long count, int ms) { return poll(p, static_cast<nfds_t>(count), ms); }
+inline void NetClose(SocketHandle s) { close(s); }
+#endif
+
+// After winsock2.h, which must come before anything that includes windows.h.
+#include "memory.h"
+#include <aurora/env.hpp>
 
 #include <cstdarg>
 #include <chrono>
@@ -80,7 +100,7 @@ struct Net {
     bool init = false;
     bool active = false;
     uint32_t slot = 0, players = 2, delay = 2, token = 0x4E50;
-    int sock = -1;
+    SocketHandle sock = kNoSocket;
     std::vector<Peer> peers;
     FrameInput ring[kMaxSlots][kRing];
     uint32_t contiguous[kMaxSlots]; // highest frame held for each slot with all earlier ones too
@@ -149,16 +169,24 @@ void Init() {
         Log("%zu peers for %u players; netplay off", n.peers.size(), n.players);
         return;
     }
+#ifdef _WIN32
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
     n.sock = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in local{};
     const char* bind = AURORA_ENV("NSMBW_NETPLAY_BIND");
-    if (n.sock < 0 || !ParseAddr(std::string(bind ? bind : "127.0.0.1") + ":" + port, local) ||
+    if (n.sock == kNoSocket || !ParseAddr(std::string(bind ? bind : "127.0.0.1") + ":" + port, local) ||
         ::bind(n.sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
         Log("could not open UDP port %s; netplay off", port);
-        if (n.sock >= 0) close(n.sock);
-        n.sock = -1;
+        if (n.sock != kNoSocket) NetClose(n.sock);
+        n.sock = kNoSocket;
         return;
     }
+#ifdef _WIN32
+    u_long nonBlocking = 1;
+    ioctlsocket(n.sock, FIONBIO, &nonBlocking);
+#endif
     for (uint32_t s = 0; s < kMaxSlots; ++s) {
         n.contiguous[s] = kNone;
         n.peerHashFrame[s] = kNone;
@@ -227,7 +255,7 @@ void SendTo(Peer& p, uint32_t newest) {
         b.push_back(0);
         b.push_back(0);
     }
-    sendto(n.sock, b.data(), b.size(), 0, reinterpret_cast<const sockaddr*>(&p.addr), sizeof(p.addr));
+    sendto(n.sock, reinterpret_cast<const char*>(b.data()), static_cast<int>(b.size()), 0, reinterpret_cast<const sockaddr*>(&p.addr), sizeof(p.addr));
 }
 
 void SendAll(uint32_t newest) {
@@ -239,7 +267,8 @@ void Receive() {
     while (true) {
         sockaddr_in from{};
         socklen_t fromLen = sizeof(from);
-        const ssize_t len = recvfrom(n.sock, buf, sizeof(buf), MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&from), &fromLen);
+        const auto len = recvfrom(n.sock, reinterpret_cast<char*>(buf), static_cast<int>(sizeof(buf)), NSMBW_NET_DONTWAIT,
+                                  reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (len < 0) return;
         if (len < 28 || Get32(buf) != kMagic || buf[4] != kVersion || Get32(buf + 8) != n.token) continue;
         const uint32_t slot = buf[5], count = buf[6];
@@ -348,7 +377,7 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
         if (ready) break;
         waited = true;
         pollfd pfd{n.sock, POLLIN, 0};
-        poll(&pfd, 1, 2);
+        NetPoll(&pfd, 1, 2);
         Receive();
         const auto now = Clock::now();
         if (now - lastSend >= std::chrono::milliseconds(8)) {
