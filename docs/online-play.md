@@ -692,6 +692,14 @@ message ("No UPnP router answered ... open UDP 47100 on the router by hand"). No
 router was changed. Options for hosting from that network: turn UPnP on in the router's settings,
 forward UDP 47100 to the Mac by hand, let a friend whose router has UPnP host, or use a VPN.
 
+**Mac and Windows PC on the LAN with this build (126d32a, 2026-11-20).** The PC (updated from the
+USB stick by its own session, UPDATE-STEP3.md) built offline with no errors, including the code that
+had never compiled on Windows (nsmbw_upnp.cpp, VpnAddress, the relay). Test A, the Mac hosts and
+the PC joins: both reached frame 1800, about 40 state checks each by frame 1200, 0 out of sync; the
+PC waited on 72 of 1200 frames (about 6%; 56-58% with the step-2 build). Test B, the PC hosts and
+the Mac joins: 41 checks by frame 1200, 0 out of sync, the Mac waited on 39 of 1200 frames. Small
+log issue: NSMBW_REPLAY_EXIT_AT=1800 exits before the frame-1800 netplay summary is printed.
+
 **Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
 a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
