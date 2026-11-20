@@ -585,6 +585,17 @@ HUD and timer running). Found on the way:
    only when daWmPlayer_c::UNDEF_809087A0() is true and dCsSeqMng_c has no script running; one of
    those is the likely gate (bodies not in its source). Workaround: quit after the save and start
    again - a loaded file goes straight to a working map.
+   Narrowed down (2026-11-20): the vanilla build on a new file (same self-test, 5.5 min) goes movie ->
+   map -> 1-1 normally, so this is specific to the mod build. On the stuck map the cutscene manager
+   (dCsSeqMng_c, 0x8156AD5C) runs SMC_DEMO_GAMESTART (0x34) to its last step (0x12, tick 1874) and
+   returns to no cutscene, so the cutscene gate in checkCsGuideKey (0x809087A0 -> 0x800F6D60: current
+   cut command must be -1/0x44/0x47/0x5C/0x65/0x5B) passes. The map player (daWmPlayer_c, 0x8156A388)
+   then reacts to a right press (turns right; +0x228 = 6 for a frame) but its +0x230 goes 0x22 -> -1
+   and +0x240 2 -> 6 -> 5, and it never walks: the move is refused, likely a route / node check
+   (the mod's isRouteClosedByGate2, or the start-node data GAMESTART leaves). Not reported upstream
+   (nsmbw-project issues/commits after v0.6.5 checked). Next: per-thread call tracing of
+   daWmPlayer_c's walk functions (0x80904810, 0x80907A60, 0x80907D10) on the press, and the same
+   fields in a vanilla new-file run for comparison.
 
 New diagnostic: NSMBW_WATCH_RANGE=<hex addr>,<words> logs every word of a block that changes per VI
 tick (nsmbw_tick_read_pump.cpp).
