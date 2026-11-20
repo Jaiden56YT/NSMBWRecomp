@@ -603,9 +603,18 @@ look right (screenshots); one copy hosting and pressing Start at two players, on
 `127.0.0.1`: both relaunched into a session on fresh session saves, ran in lockstep to frame 900,
 30 state checks, 0 out of sync.
 
-Not done yet: the Windows build of this step (no Windows relaunch test), a Mac/PC room over the LAN,
-the "in a room" banner on the file select, room codes, sending the host's save, ending a session back
-to the normal game.
+**Mac hosting, Windows PC joining, home LAN** (same day; the PC built this step with no source
+change, Winsock and `_execv` included): the PC joined as player 2 from 192.168.1.79, the Mac's Start
+(delay 3) relaunched both - on Windows `_execv` replaced the process, whose log went on in the same
+file - and the session ran from boot through title, movie and file select to the world map, to frame
+1800: about 60 state checks on the Mac and 40 on the PC (each counts its own), 0 out of sync. The
+joiner's session port is the one its room socket had (49302 here), passed on explicitly. Pacing: the
+Mac never waited for the PC; the PC waited on 673 of 1200 frames (a 4-6 s stall around the world-map
+load), so the Mac - still loaded by other sessions' builds - was the slow side, as in 8f.
+
+Not done yet: the "in a room" banner on the file select, room codes and play over the internet (step
+3; a fixed session port will matter behind NAT), sending the host's save, ending a session back to
+the normal game, a clean way out of a session (today the process exits).
 
 ## 9. Open questions for the user
 
