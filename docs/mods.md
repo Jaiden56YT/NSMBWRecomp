@@ -578,27 +578,26 @@ HUD and timer running). Found on the way:
    NAND root, and a rename with a missing source or destination folder returns ENOENT like IOS
    (nsmbw-project first renames the old save to -old.json and expects ENOENT when there is none).
    Saves now succeed and load on the next start.
-4. Still open: on a **new file** the first world-map visit after the opening movie takes no input
-   (Mario stays on the start node, - does nothing, 3 minutes). The controller the map reads
-   (mPad::g_currentCore, 0x8076129C) does get the presses (NSMBW_WATCH_RANGE on it shows them), so the
-   map's own first-visit sequence never hands control over. nsmbw-project's checkCsGuideKey reads input
-   only when daWmPlayer_c::UNDEF_809087A0() is true and dCsSeqMng_c has no script running; one of
-   those is the likely gate (bodies not in its source). Workaround: quit after the save and start
-   again - a loaded file goes straight to a working map.
-   Narrowed down (2026-11-20): the vanilla build on a new file (same self-test, 5.5 min) goes movie ->
-   map -> 1-1 normally, so this is specific to the mod build. On the stuck map the cutscene manager
-   (dCsSeqMng_c, 0x8156AD5C) runs SMC_DEMO_GAMESTART (0x34) to its last step (0x12, tick 1874) and
-   returns to no cutscene, so the cutscene gate in checkCsGuideKey (0x809087A0 -> 0x800F6D60: current
-   cut command must be -1/0x44/0x47/0x5C/0x65/0x5B) passes. The map player (daWmPlayer_c, 0x8156A388)
-   then reacts to a right press (turns right; +0x228 = 6 for a frame) but its +0x230 goes 0x22 -> -1
-   and +0x240 2 -> 6 -> 5, and it never walks: the move is refused, likely a route / node check
-   (the mod's isRouteClosedByGate2, or the start-node data GAMESTART leaves). Not reported upstream
-   (nsmbw-project issues/commits after v0.6.5 checked). Next: per-thread call tracing of
-   daWmPlayer_c's walk functions (0x80904810, 0x80907A60, 0x80907D10) on the press, and the same
-   fields in a vanilla new-file run for comparison.
+4. Fixed (translator, in the patch): on a **new file** the first world-map visit after the opening
+   movie took no input. Cause: the GAMESTART cutscene walks Mario in along 0x11 -> 0x22 -> 0x21 ->
+   0x20 -> 0 (vanilla does the same; NSMBW_WATCH_RANGE on daWmPlayer +0x22C/+0x230). In the mod build
+   the walk stopped at node 0x22 because every route looked closed: nsmbw-project's
+   daWmPlayer_c::isRouteClosedByGate is `if (all_paths_available) return false; return
+   isRouteClosedByGate2(node);`, where isRouteClosedByGate2 is a call-original thunk
+   (`stwu r1,-32(r1); b 0x80907D24`, into d_basesNP). GuestAbiContractAnalyzer treated a direct call
+   it has no contract for (another module's function, here a mid-function entry) as writing
+   nothing, so the thunk's contract had gpr_return=0 and the wrapper never reloaded r3 after the
+   call: it returned its own `this` (non-zero = closed). Now an unresolved direct call may write
+   everything (like an indirect call), in the interprocedural rounds only. Effect on contracts in
+   the mod build: 0 main.dol game functions, 51 REL game functions (those that call replaced
+   functions, whose gates sit in the main module), the rest mod code. Found by elimination: forcing
+   the mod's "all paths available" rule on (NSMBW_POKE8) let the walk-in run; setting every course
+   flag in every save slot, or forcing IsRouteOpen / IsIbaraRouteOpen open, did not.
+   Verified: new file -> opening -> map -> walk-in -> 1-1, twice in 90 s, no crash (screenshot).
 
-New diagnostic: NSMBW_WATCH_RANGE=<hex addr>,<words> logs every word of a block that changes per VI
-tick (nsmbw_tick_read_pump.cpp).
+New diagnostics (nsmbw_tick_read_pump.cpp): NSMBW_WATCH_RANGE=<hex addr | *<hex pointer>+<hex offset>>,<words>
+logs every word of a block that changes per VI tick (the pointer form follows an instance pointer);
+NSMBW_POKE8=<addr>:<byte>[,...] writes bytes every tick (experiment switch).
 
 Ruled out on the way: leaf inlining (none of the 775 replaced functions is inlined in the mod
 build's translation), the reference / player-count patches, the state-change diagnostic override.

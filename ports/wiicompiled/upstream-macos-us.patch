@@ -10140,3 +10140,28 @@ index 0000000..00c7d1e
 +        Assert.Equal("0x817D22BC", branch.FalseLabel);
 +    }
 +}
+diff --git a/translator/src/Translator.Core/Analysis/GuestAbiContractAnalyzer.cs b/translator/src/Translator.Core/Analysis/GuestAbiContractAnalyzer.cs
+index 991bd04..4b587d3 100644
+--- a/translator/src/Translator.Core/Analysis/GuestAbiContractAnalyzer.cs
++++ b/translator/src/Translator.Core/Analysis/GuestAbiContractAnalyzer.cs
+@@ -392,6 +392,20 @@ public static class GuestAbiContractAnalyzer
+                     // flavour deliberately ignores non-guest call targets.
+                     possibleOnly = HiddenWrites(helperEffect);
+                 }
++                else if (calleeContracts is not null &&
++                    GuestTargetParser.TryParseAddress(value.Target, out _))
++                {
++                    // A direct guest call the interprocedural round cannot resolve (no contract
++                    // for the target in this translation: another module, or a mid-function entry
++                    // there) may write anything, like an indirect call. Treating it as writing
++                    // nothing dropped r3/r4 from this function's return mask, so callers kept a
++                    // stale r3 after calling it. Found with nsmbw-project's call-original thunks:
++                    // `stwu r1,-32(r1); b 0x80907D24` (into d_basesNP) got gpr_return=0, and
++                    // isRouteClosedByGate returned its own `this` (non-zero = "closed"), so the
++                    // new-file walk-in on the World 1 map stopped. Possible writes only: nothing
++                    // is guaranteed written. Round 0 (no contracts yet) is unchanged.
++                    possibleOnly = FullState;
++                }
+                 break;
+             case IrIndirectCall value:
+                 Add(ref shared, value.Destination);

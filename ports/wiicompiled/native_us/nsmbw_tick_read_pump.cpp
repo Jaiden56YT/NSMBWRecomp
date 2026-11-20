@@ -23,6 +23,7 @@
 #include "memory.h"
 #include <cstdio>
 #include <cstdlib>
+#include <utility>
 #include <vector>
 
 // Keyboard input used to be polled here and injected as "just pressed" edges into
@@ -314,19 +315,52 @@ void NsmbwWatchWrite() {
     last = cur;
 }
 
-// NSMBW_WATCH_RANGE=<hex guest address>,<word count>: poll a block of words every VI tick and log
+// NSMBW_POKE8=<hex guest address>:<hex byte>[,...]: write those bytes every VI tick. An experiment
+// switch for testing a hypothesis about one flag (first used to turn on nsmbw-project's
+// "all paths available" rule while chasing a new-file world-map stall); not for normal play.
+void NsmbwPoke8() {
+    // A comma-separated list of <addr>:<byte> pairs.
+    static std::vector<std::pair<uint32_t, uint8_t>> pokes;
+    static bool parsed = false;
+    if (!parsed) {
+        parsed = true;
+        if (const char* v = AURORA_ENV("NSMBW_POKE8")) {
+            const char* s = v;
+            while (*s) {
+                char* end = nullptr;
+                const uint32_t a = static_cast<uint32_t>(std::strtoul(s, &end, 16));
+                if (!end || *end != ':') break;
+                const uint32_t b = static_cast<uint32_t>(std::strtoul(end + 1, &end, 16));
+                pokes.emplace_back(a, static_cast<uint8_t>(b));
+                s = end;
+                if (*s == ',') ++s; else break;
+            }
+        }
+    }
+    for (const auto& [a, b] : pokes) Memory::Write8(a, b);
+}
+
+// NSMBW_WATCH_RANGE=<hex guest address or *<hex pointer>+<hex offset>>,<word count>: poll a block of words every VI tick and log
 // each word that changed (offset, old, new), no call list. For finding which field of an object
 // follows an input or a state: added to see whether the controller the world map reads
 // (mPad::g_currentCore) takes the presses that dGameKey sees with nsmbw-project built in.
 void NsmbwWatchRange() {
-    static uint32_t addr = 0, count = 0;
+    static uint32_t addr = 0, count = 0, derefPtr = 0, derefOff = 0;
     static std::vector<uint32_t> last;
     static bool parsed = false;
     if (!parsed) {
         parsed = true;
         if (const char* v = AURORA_ENV("NSMBW_WATCH_RANGE")) {
             char* end = nullptr;
-            addr = static_cast<uint32_t>(std::strtoul(v, &end, 16));
+            // "*<pointer>+<offset>": the block starts at offset into the object the pointer
+            // (a guest global such as a ms_instance) points to, re-read every tick.
+            if (*v == '*') {
+                derefPtr = static_cast<uint32_t>(std::strtoul(v + 1, &end, 16));
+                if (end && *end == '+') derefOff = static_cast<uint32_t>(std::strtoul(end + 1, &end, 16));
+                addr = 1;
+            } else {
+                addr = static_cast<uint32_t>(std::strtoul(v, &end, 16));
+            }
             count = (end && *end == ',') ? static_cast<uint32_t>(std::strtoul(end + 1, nullptr, 0)) : 16u;
             if (count > 4096) count = 4096;
             last.assign(count, 0);
@@ -334,6 +368,17 @@ void NsmbwWatchRange() {
     }
     if (addr == 0 || count == 0) return;
     static bool have = false;
+    if (derefPtr != 0) {
+        static uint32_t lastBase = 0;
+        uint32_t base = 0;
+        if (!Memory::TryRead32(derefPtr, base) || base == 0) return;
+        if (base != lastBase) {
+            std::fprintf(stderr, "[nsmbw][range] base 0x%08X -> 0x%08X at tick %u\n", lastBase, base, g_nsmbwCurrentViTick);
+            lastBase = base;
+            have = false;
+        }
+        addr = base + derefOff;
+    }
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t cur = 0;
         if (!Memory::TryRead32(addr + 4u * i, cur)) continue;
@@ -373,6 +418,7 @@ extern "C" void nsmbw_tick_read_pump_801be010(CpuContext* ctx)
     NsmbwDebugP1Character();
     NsmbwWatchWrite();
     NsmbwWatchRange();
+    NsmbwPoke8();
     NsmbwDumpScnObjs();
     ctx->gpr[3] = ::Memory::Read32(0x8042A86Cu);
     g_nsmbwCurrentViTick = ctx->gpr[3];
