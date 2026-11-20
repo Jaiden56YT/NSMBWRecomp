@@ -508,9 +508,27 @@ Clang fork (a long LLVM build; no macOS binary). Two recomp overrides overlap th
 0x801AD4E0). GameCube controllers need native overrides at the mod's PADInit / PADRead (the
 runtime's SI does no transfers), and online play would need 8 slots and per-slot PAD status.
 
-First step (needs the user's OK to download the release zip): a `mod_build.py --dry-run` for the
-pack that unpacks and links the REL and reports the recovered tables, to compare with the counts
-above.
+**Dry run (2026-11-20, `tools/mkwcat_dryrun.py`, on the v0.6.5 release zip, SHA-256 9f731f10...).**
+The pack's `rels/d_project.rel.szs` (435,972 bytes) carries its own import table; its entries for
+main.dol and the four game RELs point past the end of the file, where the region's
+`d_project_E2.imp.szs` (66,992 bytes of relocation lists) goes. Linked at 0x80B8E3C0 against the
+recomp's layout (REL load addresses from `nsmbw_us-*.yml`, bss after the last real section), every
+relocation resolves (6678 into main.dol, 1293 d_basesNP, 310 d_enemiesNP, 71 d_en_bossNP,
+2 d_profileNP, 6094 within the module). The tables at the start of the module's `.data` come out
+cleanly from the relocations:
+- replace_array: 775 replaced game functions (403 main.dol, 372 RELs), none null;
+- patch_references_array: 39 entries, 692 16-bit references (the source has 39);
+- extern_array: 13 call-original thunks, each `nop; b <game function + 4>` (the source has 13);
+- FOUR_PATCH_LIST: 288 entries (the source has 288);
+- overlaps with recomp overrides: 0x8015FC10 and 0x801AD4E0, as expected.
+The pack's `rels/d_project.SMAP` is a full symbol map (game and module functions with names).
+
+So route (a) works without the mod's Clang: next is a mod_build mode that writes the 775 branches,
+the 692 immediates and the 288 player-count immediates into the main.dol / REL copies, adds the
+linked module as a fifth translated module (function starts from the SMAP), puts the extern thunks'
+first instructions in place, drops the two overlapping overrides, and replaces the loader at
+0x800047E0 with a native one that runs the module's preinit / constructors / main. Then GameCube
+controllers (native PADInit / PADRead for the mod's PAD library) and 8-player online play.
 
 ## 7. Next steps
 
