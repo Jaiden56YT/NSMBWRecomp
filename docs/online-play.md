@@ -700,6 +700,13 @@ PC waited on 72 of 1200 frames (about 6%; 56-58% with the step-2 build). Test B,
 the Mac joins: 41 checks by frame 1200, 0 out of sync, the Mac waited on 39 of 1200 frames. Small
 log issue: NSMBW_REPLAY_EXIT_AT=1800 exits before the frame-1800 netplay summary is printed.
 
+**Mac and PC over Hamachi (2026-11-20).** With Hamachi installed on the PC by the user and both
+machines in one Hamachi network: the Mac hosted, the PC joined with the Mac's Hamachi address and was
+seen from its own 25.x address; the session used the direct mesh (no relay) with delay 3, about 40
+state checks by frame 1200, 0 out of sync, the Mac waited on 41 of 1200 frames. Both machines were
+still on the same home network underneath, so the Hamachi path ran locally; a friend elsewhere
+remains the real test.
+
 **Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
 a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
