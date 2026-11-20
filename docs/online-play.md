@@ -612,9 +612,27 @@ joiner's session port is the one its room socket had (49302 here), passed on exp
 Mac never waited for the PC; the PC waited on 673 of 1200 frames (a 4-6 s stall around the world-map
 load), so the Mac - still loaded by other sessions' builds - was the slow side, as in 8f.
 
-Not done yet: the "in a room" banner on the file select, room codes and play over the internet (step
-3; a fixed session port will matter behind NAT), sending the host's save, ending a session back to
-the normal game, a clean way out of a session (today the process exits).
+**Session polish (same day, Mac):**
+- *Leaving.* "Leave the session" on the Online screen (F10 opens that screen in a session) marks the
+  copy's lockstep packets as leaving and restarts it as the normal game on the player's own save.
+  Peers that see the flag, or hear nothing from a player for 20 s, restart the same way; the reason
+  ("Player 1 left the session", "Player 1 stopped responding") shows as a banner for 10 s. Closing
+  the window tells the others first. Tested: a host leaving at frame 400, and a host killed outright.
+- *Waiting.* While the session waits on someone the window title says "Waiting for player N..."
+  and the window keeps taking events (seen: "NSMBWCompiled - Waiting for player 1...").
+- *Banner* at the top left while a room is open.
+- *The host's save.* The room's "Save: mine (host's) / a fresh one" row: with the host's save, its
+  two files (wiimj2d.sav 16 KB, banner.bin 29 KB) go to every joiner in 384-byte acknowledged chunks
+  before START, whose hash every joiner checks; each copy puts them in its session save folder.
+  Tested: both session folders byte-identical to the host's save, the session in sync.
+- *Desync guards found on the way:* in a session the options menu no longer stops the game (that is
+  a local write to game memory), the player's input is sent as nothing pressed while the menu is
+  open, and the file select's Mods / Online buttons just come back (a local menu would hold one
+  machine's file select).
+
+Not done yet: room codes and play over the internet (step 3; a fixed session port will matter behind
+NAT), keeping a session's progress (it stays in the session folder), up to 8 players (see
+nsmbw-project below), an in-game "out of sync" message.
 
 ## 9. Open questions for the user
 

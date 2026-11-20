@@ -3580,7 +3580,7 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..3f3e274 100644
+index 8c96414..187a02e 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
 @@ -9,7 +9,9 @@
@@ -3752,7 +3752,7 @@ index 8c96414..3f3e274 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +522,148 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +522,149 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3792,11 +3792,11 @@ index 8c96414..3f3e274 100644
 +}
 +
 +// The Online screen's rows for the room's state: the actions in order (labels drawn in DrawOnline).
-+enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession };
++enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession, SaveChoice };
 +std::vector<OnlineAction> OnlineActions(const nsmbw_room::View& v) {
 +    using nsmbw_room::Role;
 +    if (nsmbw_room::InSession()) return {OnlineAction::LeaveSession};
-+    if (v.role == Role::Hosting) return {OnlineAction::Start, OnlineAction::Close};
++    if (v.role == Role::Hosting) return {OnlineAction::Start, OnlineAction::SaveChoice, OnlineAction::Close};
 +    if (v.role == Role::Joining || v.role == Role::Joined) return {OnlineAction::Leave};
 +    if (g_online.entering) return {OnlineAction::Connect};
 +    return {OnlineAction::Host, OnlineAction::Join};
@@ -3836,9 +3836,10 @@ index 8c96414..3f3e274 100644
 +        case OnlineAction::Start: ok = v.canStart && nsmbw_room::Start(error); if (!v.canStart) error = "Nobody has joined yet"; break;
 +        case OnlineAction::Close: case OnlineAction::Leave: nsmbw_room::Leave(); break;
 +        case OnlineAction::LeaveSession: nsmbw_room::RequestLeaveSession(); break;
++        case OnlineAction::SaveChoice: nsmbw_room::SetUseHostSave(!nsmbw_room::UseHostSave()); break;
 +        }
 +        g_online.error = ok ? std::string() : error;
-+        g_online.row = 0;
++        if (a != OnlineAction::SaveChoice) g_online.row = 0;
 +        Play(ok ? kSndDecide : kSndInvalid);
 +        g.pressPending = ok;
 +        break;
@@ -3901,7 +3902,7 @@ index 8c96414..3f3e274 100644
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -566,6 +759,12 @@ void SetOpen(bool open) noexcept {
+@@ -566,6 +760,12 @@ void SetOpen(bool open) noexcept {
      }
      Play(kSndPause);
      Open("F10", false);
@@ -3914,7 +3915,7 @@ index 8c96414..3f3e274 100644
  }
  
  void HandleEvents(const AuroraEvent* events) noexcept {
-@@ -588,7 +787,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +788,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
@@ -3924,7 +3925,7 @@ index 8c96414..3f3e274 100644
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -599,6 +799,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -599,6 +800,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              }
              continue;
          }
@@ -3932,7 +3933,7 @@ index 8c96414..3f3e274 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1008,185 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1009,189 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4033,14 +4034,17 @@ index 8c96414..3f3e274 100644
 +    }
 +
 +    static constexpr const char* kLabels[] = {"Host a room", "Join a room", "Join", "Start the game", "Close the room",
-+                                              "Leave the room", "Leave the session"};
++                                              "Leave the room", "Leave the session", ""};
 +    float rowY = std::min(y - 6, -40.0f);
 +    for (size_t i = 0; i < actions.size(); ++i) {
 +        const bool focused = int(i) == g_online.row;
 +        const bool disabled = actions[i] == OnlineAction::Start && !v.canStart;
 +        const float cx = 0;
 +        if (focused && g.pressPending) c.Press(cx, rowY, 220);
-+        const ImVec2 size = c.Button(kLabels[int(actions[i])], cx, rowY, 220, 21, focused, 18, disabled, true);
++        const std::string label = actions[i] == OnlineAction::SaveChoice
++                                      ? (nsmbw_room::UseHostSave() ? "Save: mine (host's)" : "Save: a fresh one")
++                                      : kLabels[int(actions[i])];
++        const ImVec2 size = c.Button(label, cx, rowY, 220, 21, focused, 18, disabled, true);
 +        if (focused) c.Cursor(cx, rowY, size.x + 4, size.y + 4, 0.55f);
 +        rowY -= 30;
 +    }
@@ -4079,7 +4083,7 @@ index 8c96414..3f3e274 100644
 +// Set on the game thread by the file select's Online button once its press animation has played.
 +std::atomic<bool> g_openOnline{false};
 +
-+// NSMBW_ONLINE_TEST=host[,start@<players>] | join=<address>: test runs use the room without the
++// NSMBW_ONLINE_TEST=host[,save][,start@<players>] | join=<address>: test runs use the room without the
 +// screen: host (and press Start once that many players are in) or join, 3 s after the first frame.
 +// NSMBW_ONLINE_TEST_SHOW=1 also opens the Online screen, to look at it.
 +void RunScriptedOnline() {
@@ -4099,6 +4103,7 @@ index 8c96414..3f3e274 100644
 +            step = 2;
 +        } else {
 +            nsmbw_room::Host(err);
++            if (s.find(",save") != std::string::npos) nsmbw_room::SetUseHostSave(true);
 +            if (const size_t at = s.find("start@"); at != std::string::npos) startAt = std::atoi(s.c_str() + at + 6);
 +            else step = 2;
 +        }
@@ -4118,7 +4123,7 @@ index 8c96414..3f3e274 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1252,30 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1257,30 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4149,7 +4154,7 @@ index 8c96414..3f3e274 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1303,12 @@ void Draw() noexcept {
+@@ -906,10 +1308,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4163,7 +4168,7 @@ index 8c96414..3f3e274 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1333,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1338,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
@@ -9034,10 +9039,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..4e48d79
+index 0000000..88b7042
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,748 @@
+@@ -0,0 +1,900 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9065,6 +9070,7 @@ index 0000000..4e48d79
 +#include "nsmbw_online_room.h"
 +
 +#include "runtime_config.h"
++#include "nand_path.h"
 +
 +#include <SDL3/SDL_video.h>
 +#include <SDL3/SDL_events.h>
@@ -9100,6 +9106,7 @@ index 0000000..4e48d79
 +#include <cstdlib>
 +#include <cstring>
 +#include <filesystem>
++#include <fstream>
 +#include <random>
 +#include <string>
 +#include <vector>
@@ -9113,7 +9120,13 @@ index 0000000..4e48d79
 +
 +constexpr uint32_t kMagic = 0x4D52534Eu; // "NSRM"
 +constexpr uint8_t kVersion = 1;
-+enum : uint8_t { kHello = 1, kWelcome, kRefuse, kRoster, kPing, kPong, kStart, kStartAck, kLeave };
++enum : uint8_t { kHello = 1, kWelcome, kRefuse, kRoster, kPing, kPong, kStart, kStartAck, kLeave, kSave, kSaveAck };
++// The host's save (NAND title/00010004/534d4e45, the US game's save folder): sent in chunks before
++// START when the host chose to play on it, so every copy starts from the host's progress.
++constexpr const char* kSaveFiles[] = {"wiimj2d.sav", "banner.bin"};
++constexpr size_t kSaveFileCount = 2;
++constexpr size_t kChunk = 384;
++constexpr const char* kSaveDir = "title/00010004/534d4e45";
 +constexpr size_t kNameLen = 24;
 +constexpr auto kResend = std::chrono::milliseconds(500);
 +constexpr auto kTimeout = std::chrono::seconds(5);
@@ -9125,6 +9138,7 @@ index 0000000..4e48d79
 +    Clock::time_point lastHeard{};
 +    int pingMs = -1;
 +    bool acked = false;
++    std::vector<bool> chunksAcked; // host: the save chunks this joiner has
 +};
 +
 +struct Room {
@@ -9140,6 +9154,11 @@ index 0000000..4e48d79
 +    Clock::time_point lastSend{};
 +    Clock::time_point startedAt{};
 +    std::string status;
++    // The host's save, when the session uses it: file contents (host: read at Start; joiner: received).
++    bool useHostSave = false;
++    std::vector<std::vector<uint8_t>> saveFiles;
++    std::vector<std::vector<bool>> saveHave; // joiner: chunks received per file
++    bool sendingSave = false;   // host: chunks out, START waits for every joiner to have them all
 +    // Start in progress.
 +    bool starting = false;
 +    Clock::time_point startSentAt{};
@@ -9283,6 +9302,34 @@ index 0000000..4e48d79
 +    return -1;
 +}
 +
++size_t ChunkCount(size_t bytes) { return bytes == 0 ? 1 : (bytes + kChunk - 1) / kChunk; }
++size_t TotalChunks() {
++    size_t n = 0;
++    for (const auto& f : r.saveFiles) n += ChunkCount(f.size());
++    return n;
++}
++// Chunk k (over all files in order) as a SAVE packet: u8 file, u8 files, u32 file size, u32 offset,
++// u16 length, data.
++std::vector<uint8_t> SaveChunkPacket(size_t k) {
++    size_t file = 0;
++    while (k >= ChunkCount(r.saveFiles[file].size())) k -= ChunkCount(r.saveFiles[file++].size());
++    const std::vector<uint8_t>& data = r.saveFiles[file];
++    const size_t offset = k * kChunk, len = std::min(kChunk, data.size() - std::min(data.size(), offset));
++    std::vector<uint8_t> b = Header(kSave, r.token);
++    b.push_back(uint8_t(file));
++    b.push_back(uint8_t(r.saveFiles.size()));
++    Put32(b, uint32_t(data.size()));
++    Put32(b, uint32_t(offset));
++    Put16(b, uint16_t(len));
++    b.insert(b.end(), data.begin() + long(offset), data.begin() + long(offset + len));
++    return b;
++}
++size_t GlobalChunk(size_t file, uint32_t offset) {
++    size_t k = 0;
++    for (size_t f = 0; f < file; ++f) k += ChunkCount(r.saveFiles[f].size());
++    return k + offset / kChunk;
++}
++
 +// After a joiner left: slots 1..n again, in join order; the ones that moved get a new WELCOME.
 +void CompactSlots() {
 +    std::sort(r.peers.begin(), r.peers.end(), [](const Peer& a, const Peer& b) { return a.slot < b.slot; });
@@ -9342,6 +9389,13 @@ index 0000000..4e48d79
 +        peer->pingMs = int((NowMicros() - Get64(buf + 12)) / 1000);
 +    } else if (type == kStartAck) {
 +        peer->acked = true;
++    } else if (type == kSaveAck && len >= 12 + 1 + 4 && r.sendingSave) {
++        const size_t file = buf[12];
++        if (file < r.saveFiles.size()) {
++            const size_t k = GlobalChunk(file, Get32(buf + 13));
++            if (peer->chunksAcked.size() != TotalChunks()) peer->chunksAcked.assign(TotalChunks(), false);
++            if (k < peer->chunksAcked.size()) peer->chunksAcked[k] = true;
++        }
 +    } else if (type == kLeave) {
 +        std::fprintf(stderr, "[nsmbw][room] %s left\n", peer->name.c_str());
 +        r.peers.erase(r.peers.begin() + (peer - r.peers.data()));
@@ -9384,6 +9438,32 @@ index 0000000..4e48d79
 +        std::vector<uint8_t> b = Header(kPong, r.token);
 +        Put64(b, Get64(buf + 13));
 +        SendTo(from, b);
++    } else if (type == kSave && len >= 12 + 12) {
++        const size_t file = buf[12], files = buf[13];
++        const uint32_t size = Get32(buf + 14), offset = Get32(buf + 18);
++        const uint16_t chunkLen = Get16(buf + 22);
++        if (files == 0 || files > kSaveFileCount || file >= files || size > 256 * 1024 || offset > size ||
++            chunkLen > kChunk || offset + chunkLen > size || len != 24u + chunkLen) {
++            return;
++        }
++        if (r.saveFiles.size() != files) {
++            r.saveFiles.assign(files, {});
++            r.saveHave.assign(files, {});
++        }
++        if (r.saveFiles[file].size() != size) {
++            r.saveFiles[file].assign(size, 0);
++            r.saveHave[file].assign(ChunkCount(size), false);
++        }
++        std::memcpy(r.saveFiles[file].data() + offset, buf + 24, chunkLen);
++        if (!r.saveHave[file][offset / kChunk] && offset == 0) {
++            std::fprintf(stderr, "[nsmbw][room] receiving the host's save (file %zu, %u bytes)\n", file, size);
++        }
++        r.saveHave[file][offset / kChunk] = true;
++        std::vector<uint8_t> ack = Header(kSaveAck, r.token);
++        ack.push_back(uint8_t(file));
++        Put32(ack, offset);
++        SendTo(from, ack);
++        r.status = "Receiving the host's save...";
 +    } else if (type == kStart && len >= 12 + 4 + 2) {
 +        const uint32_t sessionToken = Get32(buf + 12);
 +        const int delay = buf[16], players = buf[17];
@@ -9400,6 +9480,16 @@ index 0000000..4e48d79
 +        }
 +        // The host sees itself as 0.0.0.0: use the address we reached it on.
 +        slots[0] = r.hostAddr;
++        // Played on the host's save: every chunk must be here, matching the host's hash.
++        const size_t tail = 18 + size_t(players) * 6;
++        r.useHostSave = len >= tail + 9 && buf[tail] == 1;
++        if (r.useHostSave) {
++            bool complete = r.saveFiles.size() == kSaveFileCount;
++            for (const auto& have : r.saveHave) for (bool c : have) complete = complete && c;
++            uint64_t h = 0xCBF29CE484222325ull;
++            for (const auto& f : r.saveFiles) for (uint8_t c : f) h = (h ^ c) * 0x100000001B3ull;
++            if (!complete || h != Get64(buf + tail + 1)) return; // not yet: the host resends START
++        }
 +        std::vector<uint8_t> ack = Header(kStartAck, r.token);
 +        ack.push_back(uint8_t(r.mySlot));
 +        for (int i = 0; i < 3; ++i) SendTo(r.hostAddr, ack);
@@ -9494,6 +9584,15 @@ index 0000000..4e48d79
 +    const auto nand = RuntimeConfigFile::ApplicationDataDirectory() / "netplay_session" / "NAND";
 +    std::filesystem::remove_all(nand, ec);
 +    std::filesystem::create_directories(nand, ec);
++    if (r.useHostSave) {
++        const auto dir = nand / kSaveDir;
++        std::filesystem::create_directories(dir, ec);
++        for (size_t i = 0; i < r.saveFiles.size() && i < kSaveFileCount; ++i) {
++            std::ofstream f(dir / kSaveFiles[i], std::ios::binary | std::ios::trunc);
++            f.write(reinterpret_cast<const char*>(r.saveFiles[i].data()), std::streamsize(r.saveFiles[i].size()));
++        }
++        std::fprintf(stderr, "[nsmbw][room] the session plays on the host's save\n");
++    }
 +    SetEnv("NSMBW_NAND_ROOT", RuntimeConfigFile::PathToUtf8(nand));
 +    // The session copy must not open a room of its own (the room test switches are for the
 +    // copy before the relaunch).
@@ -9638,11 +9737,35 @@ index 0000000..4e48d79
 +        Put32(b, a.sin_addr.s_addr);
 +        Put16(b, ntohs(a.sin_port));
 +    }
++    r.saveFiles.clear();
++    if (r.useHostSave) {
++        const auto dir = RuntimeNandPath::DiscoverNandRootPath() / kSaveDir;
++        for (const char* name : kSaveFiles) {
++            std::ifstream f(dir / name, std::ios::binary);
++            if (!f) {
++                error = "No save on this computer yet (play once, or use a fresh save)";
++                r.saveFiles.clear();
++                return false;
++            }
++            r.saveFiles.emplace_back(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
++        }
++        uint64_t h = 0xCBF29CE484222325ull;
++        for (const auto& file : r.saveFiles) for (uint8_t c : file) h = (h ^ c) * 0x100000001B3ull;
++        b.push_back(1);
++        Put64(b, h);
++        for (Peer& p : r.peers) p.chunksAcked.assign(TotalChunks(), false);
++        r.sendingSave = true;
++        std::fprintf(stderr, "[nsmbw][room] sending the save: %zu + %zu bytes, %zu chunks\n", r.saveFiles[0].size(),
++                     r.saveFiles[1].size(), TotalChunks());
++    } else {
++        b.push_back(0);
++        Put64(b, 0);
++    }
 +    r.starting = true;
 +    r.startPacket = b;
 +    r.startSentAt = Clock::now();
-+    for (const Peer& p : r.peers) SendTo(p.addr, b);
-+    r.status = "Starting...";
++    if (!r.sendingSave) for (const Peer& p : r.peers) SendTo(p.addr, b);
++    r.status = r.sendingSave ? "Sending the save..." : "Starting...";
 +    std::fprintf(stderr, "[nsmbw][room] starting with %d players, delay %d\n", players, delay);
 +    // The rest happens in Poll: resend until every joiner acked (1 s at most), then relaunch.
 +    return true;
@@ -9654,6 +9777,38 @@ index 0000000..4e48d79
 +    if (r.role == Role::None) return;
 +    const auto now = Clock::now();
 +    if (r.role == Role::Hosting) {
++        if (r.starting && r.sendingSave) {
++            // Each poll: every chunk a joiner lacks, at most 64 per joiner (UDP; acks come back).
++            bool done = true;
++            for (Peer& p : r.peers) {
++                int sent = 0;
++                for (size_t k = 0; k < p.chunksAcked.size() && sent < 64; ++k) {
++                    if (p.chunksAcked[k]) continue;
++                    done = false;
++                    if (now - r.lastSend >= std::chrono::milliseconds(60)) {
++                        SendTo(p.addr, SaveChunkPacket(k));
++                        ++sent;
++                    }
++                }
++            }
++            if (now - r.lastSend >= std::chrono::milliseconds(60)) r.lastSend = now;
++            if (!done) {
++                if (now - r.startSentAt >= std::chrono::seconds(15)) {
++                    size_t have = 0, total = 0;
++                    for (const Peer& p : r.peers) for (bool c : p.chunksAcked) { have += c; ++total; }
++                    std::fprintf(stderr, "[nsmbw][room] save not delivered in 15 s (%zu of %zu chunks acked)\n", have, total);
++                    r.starting = r.sendingSave = false;
++                    r.status = "Could not send the save; try again";
++                }
++                return;
++            }
++            r.sendingSave = false;
++            r.startSentAt = now;
++            std::fprintf(stderr, "[nsmbw][room] every joiner has the save\n");
++            for (const Peer& p : r.peers) SendTo(p.addr, r.startPacket);
++            r.status = "Starting...";
++            return;
++        }
 +        if (r.starting) {
 +            bool all = true;
 +            for (const Peer& p : r.peers) all = all && p.acked;
@@ -9734,6 +9889,8 @@ index 0000000..4e48d79
 +}
 +
 +bool Active() { return r.role != Role::None; }
++void SetUseHostSave(bool on) { r.useHostSave = on; }
++bool UseHostSave() { return r.useHostSave; }
 +
 +std::string EndedMessage() {
 +    const char* m = std::getenv("NSMBW_ONLINE_ENDED");
@@ -9788,10 +9945,10 @@ index 0000000..4e48d79
 +}
 diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
 new file mode 100644
-index 0000000..294e990
+index 0000000..26912ee
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,65 @@
 +#pragma once
 +// Online play rooms (NSMBW repo docs/online-play.md, sections 5 and 7): the part before a session.
 +// One machine hosts a room on a UDP port, the others join it by address; the room screen
@@ -9834,6 +9991,9 @@ index 0000000..294e990
 +void Poll();
 +View Snapshot();
 +bool Active();
++// Host: play the session on this machine's save (sent to everyone at Start) instead of a fresh one.
++void SetUseHostSave(bool on);
++bool UseHostSave();
 +// This copy is running an online session (started by a room's Start, or by hand with NSMBW_NETPLAY_*).
 +bool InSession();
 +// Set in the normal game after a session ended (the reason), empty otherwise.
