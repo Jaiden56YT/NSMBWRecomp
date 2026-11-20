@@ -707,6 +707,12 @@ state checks by frame 1200, 0 out of sync, the Mac waited on 41 of 1200 frames. 
 still on the same home network underneath, so the Hamachi path ran locally; a friend elsewhere
 remains the real test.
 
+**Four players over Hamachi (2026-11-20).** Two copies on the Mac (host + one joiner) and two on the
+PC, all joining the Mac's Hamachi address: the room filled to 4, the session started with delay 3
+on the direct mesh (no relay), and all four copies reached frame 1800 with about 120 state checks
+each and 0 out of sync. Two game copies per machine made the waits longer (one PC copy waited 278 of
+1200 frames); one copy per player would not share a machine.
+
 **Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
 a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
