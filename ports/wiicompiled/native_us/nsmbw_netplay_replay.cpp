@@ -230,6 +230,59 @@ struct FrameDrivenAudioFromStart {
     }
 } g_frameDrivenAudioFromStart;
 
+// NSMBW_REPLAY_MATH_TEST=<frame>: at that frame boundary, call the game's own sinf (0x802E84C4),
+// cosf (0x802E7FBC) and nw4r::math::SinCosFIdx (0x80237CA0) on fixed inputs and print a hash of
+// the result bits per function plus the first results. Run on two machines and compare: a Mac
+// and a Windows build disagreed in the low bits of boot-time circle vertices (docs/online-play.md).
+void MathTest() {
+    static const uint32_t at = [] {
+        const char* v = std::getenv("NSMBW_REPLAY_MATH_TEST");
+        return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 10)) : 0xFFFFFFFFu;
+    }();
+    if (g.frame != at) return;
+    CpuContext* ctx = CurrentCpuContext();
+    const CpuContext saved = *ctx;
+    uint32_t fpscrBits = static_cast<uint32_t>(saved.fpscr);
+    auto bitsOf = [](double d) { float f = static_cast<float>(d); uint32_t b; std::memcpy(&b, &f, 4); return b; };
+    auto input = [](int i) { return static_cast<float>(i) * 0.09817477f - 3.1415927f; }; // 64 steps around a circle
+    for (int fn = 0; fn < 3; ++fn) {
+        uint64_t h = 0xCBF29CE484222325ull;
+        std::string first;
+        for (int i = 0; i < 4096; ++i) {
+            const float x = i < 64 ? input(i) : (fn == 2 ? static_cast<float>(i) * 0.37f : static_cast<float>(i - 2048) * 0.0123f);
+            *ctx = saved;
+            ctx->gpr[1] = saved.gpr[1] - 0x200;
+            const uint32_t out = ctx->gpr[1] + 0x100;
+            uint32_t r0 = 0, r1 = 0;
+            if (fn == 2) {
+                const float fidx = i < 64 ? static_cast<float>(i) * 4.0f : x; // 256 steps per turn
+                ctx->gpr[3] = out;
+                ctx->gpr[4] = out + 4;
+                ctx->fpr[1].d = fidx;
+                InvokeDirectCpu<0x80237CA0u>(ctx);
+                Memory::TryRead32(out, r0);
+                Memory::TryRead32(out + 4, r1);
+            } else {
+                ctx->fpr[1].d = x;
+                if (fn == 0) InvokeDirectCpu<0x802E84C4u>(ctx); else InvokeDirectCpu<0x802E7FBCu>(ctx);
+                r0 = bitsOf(ctx->fpr[1].d);
+            }
+            h = (h ^ r0) * 0x100000001B3ull;
+            h = (h ^ r1) * 0x100000001B3ull;
+            if (i < 64 && i % 8 == 0) {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), " %08X", r0);
+                first += buf;
+                if (fn == 2) { std::snprintf(buf, sizeof(buf), "/%08X", r1); first += buf; }
+            }
+        }
+        std::fprintf(stderr, "[nsmbw][mathtest] %s hash %016llx first%s\n", fn == 0 ? "sinf" : fn == 1 ? "cosf" : "SinCosFIdx",
+                     static_cast<unsigned long long>(h), first.c_str());
+    }
+    std::fprintf(stderr, "[nsmbw][mathtest] fpscr %08X\n", fpscrBits);
+    *ctx = saved;
+}
+
 void Flush() {
     if (g.record) std::fflush(g.record);
     if (g.hashes) std::fflush(g.hashes);
@@ -248,6 +301,7 @@ extern "C" void NsmbwReplayBeginFrame() {
     Init();
     TimeBase_SetFrame(g.frame);
     ApplySeed();
+    MathTest();
     TestStall();
     AdvanceAudio();
     uint32_t tick = 0;
