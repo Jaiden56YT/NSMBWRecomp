@@ -6,8 +6,8 @@ co-op (up to four players), with the remote players' inputs arriving over the ne
 and Coin Battle come along for free, because the design synchronises input, not game modes.
 
 Status: design, plus step 0 (the determinism check, sections 8a and 8b) built and run on the Mac,
-the frame-driven audio output buffered and paced (8c), and the guest clock counted in game
-frames (8d).
+the frame-driven audio output buffered and paced (8c), the guest clock counted in game
+frames (8d), and step 1: lockstep between a Mac and a Windows PC over a LAN, in sync (8f).
 Section 8 is the build order. Step 0's answer: input + seed + frame counting reproduce the game
 state; the audio engine's timing reached scene transitions until audio was driven by game frames
 (8b). With that, replays match the recording frame for frame through boot, title, movie, map and
@@ -516,6 +516,60 @@ Fix (runtime, in the patch): every non-Windows fiber gets a 4 MB stack (`fiber_m
 are only committed when touched), and on the Mac libco maps each stack with an inaccessible page
 below it (`third_party/libco/aarch64.c`), so an overflow faults where it happens instead of
 corrupting something else.
+
+## 8f. Step 1: lockstep, and a Mac against a Windows PC (2026-11-20)
+
+**The lockstep layer** (`ports/wiicompiled/native_us/nsmbw_netplay_lockstep.cpp`, configured by
+`NSMBW_NETPLAY_SLOT / _PLAYERS / _PORT / _BIND / _PEERS / _DELAY / _TOKEN`): at each game frame
+boundary the local player's input is scheduled for frame N + D and sent, with every frame the peer
+has not acknowledged, over UDP; frame N runs once every slot's input for N is in. Every 30 frames a
+state hash (both random generators, the scene, and the MEM1 pages host timing does not write) is
+exchanged and compared. Full mesh, one local player per copy. Setting the port turns on frame mode
+(frame-driven audio, frame clock, fixed seed), so copies launched together start in the same state.
+Before a peer's first packet there is no time limit (copies started by hand, firewall prompts);
+after it, 20 s of silence from a peer being waited on ends the session. `tools/tests/netplay_run.sh`
+runs two muted copies on localhost.
+
+**Two copies on one Mac:** 1200 frames boot to world map, in step, no state-check mismatch.
+
+**A Windows build.** The PC (Windows 11, x86-64) had nothing installed; it got CMake and LLVM-MinGW,
+the runtime from GitHub at the patch's base commit, this repo as a git bundle, and the user's game
+files, by USB stick. Translation and build needed no source change (setup notes in the untracked
+`netplay-pc/WINDOWS-SETUP.md`: Windows git checks the patch's two symlinks out as text files, and
+`generated/RuntimeConfig.h` has to be copied by hand). A replay of a Mac recording on the PC went
+through every scene change on the same frame as on the Mac, but 18 memory pages differed. Causes:
+1. **The runtime FST** gave the extracted `sys/` files synthetic disc offsets in the host's folder
+   listing order (macOS and Windows list differently). Fixed: path order (`dvd.cpp`).
+2. **ARM: ps_msub / ps_nmsub were not fused.** `_mm_fmsub_ps` is, in SIMDe on ARM,
+   `sub(mul(a, b), c)`, two roundings; x86 and Broadway fuse. A display list the game builds at
+   boot then had exact zeros on the Mac where x86 kept the fused residue (~1e-15). Fixed: fmadd with
+   c negated off x86 (`ppc_isa_float.h`). This was also an accuracy bug on the Mac and the Switch.
+3. **ARM: fnmadd / fnmsub sign of zero.** clang on ARM64 folded `-(fma(a, c, b))` into one FNMADD,
+   which gives +0 where PPC gives -0. Fixed with a register barrier.
+Found with `tools/tests/fp_isa_check.cpp` (a hash of every float helper over the same inputs,
+compared between machines) and `NSMBW_REPLAY_MATH_TEST` (the game's own sinf / cosf / SinCosFIdx:
+identical on both). Ruled out on the way: fast-math in the runtime / native / aurora code (building
+all of it strict changed nothing on either machine), host paths in guest memory, the rounding mode.
+Left: x86 gives a negative default NaN (0xFFC00000) for invalid operations like 0/0, PPC and ARM a
+positive one; only the bits of NaN results differ. After the fixes the boot data matched block for
+block.
+
+**Live session, Mac (slot 0) against the PC (slot 1), home LAN, delay 3, 3000 frames:** boot,
+title, opening movie, world map, a course and back to the map, with the Mac running the scripted
+test input and the PC's player 2 pressing on the map. Both ran to frame 3000 and exited cleanly;
+**about 100 state checks compared on each side, 0 out of sync**; the recorded agreed input is
+byte-identical on both machines (SHA-1 a25ea65d...). The Mac was the slower side (the Mac never
+waited for the PC after the start; the PC waited on 58% of frames, ~19 ms each): this Mac was
+heavily loaded by other sessions' builds (load average above 100), so the session ran at ~34 fps
+(1.76 retraces per frame). Firewalls: the Windows prompt allowed for NSMBWCompiled.exe; macOS's
+application firewall is on. The Mac build included the 4 MB fiber stacks (8e); the PC's did not (Windows uses its own
+fibers). Stack size is host memory only and cannot change guest results.
+
+Limits of what was checked: the in-session state hash leaves out MEM2 and four MEM1 pages (the VI
+retrace count and EGG's copies, and two pages a host thread writes at the frame boundary); the
+per-frame full-memory hashes from both sides were not compared (they are on different machines).
+Not tested yet: two real players, a level played through with enemies, a session over the internet,
+packet loss.
 
 ## 9. Open questions for the user
 
