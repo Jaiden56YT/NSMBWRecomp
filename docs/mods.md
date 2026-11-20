@@ -481,6 +481,37 @@ commands go through the same `Dispatch`), more than five packs (scrolling), 4:3 
 Test switch: `NSMBW_MODS_MENU_TEST=<d|u|s|b...>` sends down / up / select / back to the mods
 screen, one every 40 frames after it opens.
 
+## 6c. mkwcat's nsmbw-project: what support would take (research, 2026-11-20)
+
+github.com/mkwcat/nsmbw-project (MPL-2.0; latest release v0.6.5, mkwcat-nsmbw.zip, 7.6 MB; master
+read at 14178ff4f0). One Riivolution pack: up to 8 players (4 Wii Remotes + 4 GameCube
+controllers), death messages, single-player Free-for-all / Coin Battle. US Rev 2 is supported
+(`address-map.txt` [E2], loader rev-2 path, `d_project_E2.imp`).
+
+How its code gets in: the XML points boot-scene state 20 (0x80328130) at a loader blob written to
+0x800047E0 (main.dol .init), adds `/mkwcat.arc`, redirects the save (`<savegame external>`), plus 3
+small code patches and option bytes at 0x80006784. The loader (loader/Loader.cpp) decompresses
+`rels/d_project.rel.szs` and the region's `.imp` into a 0xC0000 heap block, OSLinks it, and calls
+its `_prolog`, which then rewrites the game: ~665 replaced functions (a `b` at each entry, from a
+`replace_array`), 13 call-original thunks, 39 reference patches (16-bit immediates to enlarged
+arrays), ~288 player-count immediates (`Four.cpp`), then runs the mod's `main` (dProject_c: GC
+controller manager, 8-channel remote manager, its own PAD library).
+
+The runtime runs no code it has not translated (no interpreter / JIT) and has no live OSLink, so
+the route is the one `mod_build.py` already takes for Kamek: link the mod's REL at a fixed address
+(splicing the E2 `.imp` as the loader does), bake what `_prolog` writes into the main.dol / REL
+copies, translate it as a fifth module (function starts from its `d_project.SMAP`), and replace
+the loader at 0x800047E0 with a native one that calls the translated `_prolog`. The patch tables
+have to be recovered from the release REL's relocations (no data symbols), or recorded by running
+`_prolog` once and diffing (no extra tools), or read exactly from an ELF built with the mod's own
+Clang fork (a long LLVM build; no macOS binary). Two recomp overrides overlap the mod (0x8015FC10,
+0x801AD4E0). GameCube controllers need native overrides at the mod's PADInit / PADRead (the
+runtime's SI does no transfers), and online play would need 8 slots and per-slot PAD status.
+
+First step (needs the user's OK to download the release zip): a `mod_build.py --dry-run` for the
+pack that unpacks and links the REL and reports the recovered tables, to compare with the counts
+above.
+
 ## 7. Next steps
 
 1. NewerSMBW: play further worlds (bosses, Koopatlas features, the credits) to find what else
