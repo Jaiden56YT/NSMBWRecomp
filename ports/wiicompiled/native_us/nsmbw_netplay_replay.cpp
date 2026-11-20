@@ -18,7 +18,8 @@
 //   NSMBW_REPLAY_STALL=<every>:<ms>  hold the game <ms> every <every> frames (audio output test).
 //   NSMBW_LOG_TIME_READS=1      every 300 frames, time-base reads by guest thread and caller.
 //   NSMBW_LOG_KPAD_CALLERS=1    log the first KPAD reads with their guest LR (frame-boundary check).
-// Any of the first three switches the KPAD override (nsmbw_kpad_overrides.cpp) into frame mode:
+// Any of the first three (or a lockstep session, NSMBW_NETPLAY_PORT: nsmbw_netplay_lockstep.cpp)
+// switches the KPAD override (nsmbw_kpad_overrides.cpp) into frame mode:
 // input is sampled once per game frame instead of once per VI tick, because lockstep has to count
 // game frames - a slow frame spans several VI ticks.
 //
@@ -141,7 +142,7 @@ void Init() {
     if (const char* p = AURORA_ENV("NSMBW_REPLAY_EXIT_AT")) g.exitAt = static_cast<uint32_t>(std::strtoul(p, nullptr, 10));
     if (const char* p = AURORA_ENV("NSMBW_REPLAY_SEED")) g.seed = static_cast<uint32_t>(std::strtoul(p, nullptr, 16));
     Memory::TryRead32(kSeedAddr, g.seedAtStart);
-    g.frameMode = g.record || g.play || g.hashes;
+    g.frameMode = g.record || g.play || g.hashes || AURORA_ENV("NSMBW_NETPLAY_PORT");
 }
 
 // See "Random seed" in the header comment. Runs on the game thread, at a frame boundary.
@@ -222,7 +223,7 @@ void TestStall() {
 struct FrameDrivenAudioFromStart {
     FrameDrivenAudioFromStart() {
         const bool frameMode = std::getenv("NSMBW_REPLAY_RECORD") || std::getenv("NSMBW_REPLAY_PLAY") ||
-                               std::getenv("NSMBW_REPLAY_HASHES");
+                               std::getenv("NSMBW_REPLAY_HASHES") || std::getenv("NSMBW_NETPLAY_PORT");
         if (frameMode && !std::getenv("NSMBW_REPLAY_HOST_AUDIO")) Audio_HLE_SetFrameDriven();
         // Same for the guest time base (TimeBase_SetFrame in NsmbwReplayBeginFrame).
         if (frameMode && !std::getenv("NSMBW_REPLAY_HOST_CLOCK")) TimeBase_EnableFrameClock();
@@ -334,3 +335,6 @@ extern "C" void NsmbwReplayRecordInput(uint32_t channels, const uint32_t* hold, 
 }
 
 extern "C" void NsmbwReplayEndFrame() { ++g.frame; }
+
+// The game frame being run (for the lockstep layer, nsmbw_netplay_lockstep.cpp).
+extern "C" uint32_t NsmbwReplayCurrentFrame() { return g.frame; }

@@ -94,6 +94,9 @@ extern "C" void NsmbwReplayBeginFrame();
 extern "C" bool NsmbwReplayTakeInput(uint32_t* channels, uint32_t* hold, float* tilt, int32_t* skip);
 extern "C" void NsmbwReplayRecordInput(uint32_t channels, const uint32_t* hold, const float* tilt, int32_t skip);
 extern "C" void NsmbwReplayEndFrame();
+extern "C" bool NsmbwNetplayActive();
+extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_t localSkip, uint32_t* channels,
+                                     uint32_t* hold, float* tilt, int32_t* skip);
 // Set by nsmbw_tick_read_pump.cpp's self-test (NSMBW_AUTO_PRESS_SELFTEST): a synthetic A press
 // is delivered as one frame of "held" through the same path as a real key.
 extern "C" uint32_t g_nsmbwSelfTestPressBits;
@@ -311,7 +314,12 @@ int32_t SampleForGameFrame() {
     float tilt[kMaxRemotes];
     uint32_t connected = ReadLocalInput(hold, tilt); // also keeps SDL / the boot-screen skip running
     int32_t skip = NsmbwMovieSkipTake();
-    if (!NsmbwReplayTakeInput(&connected, hold, tilt, &skip)) NsmbwReplayRecordInput(connected, hold, tilt, skip);
+    if (!NsmbwReplayTakeInput(&connected, hold, tilt, &skip)) {
+        // Lockstep: the local player 1 drives this copy's slot; every channel gets the input all
+        // copies agreed on for this frame. Recording then records the session's input.
+        if (NsmbwNetplayActive()) NsmbwNetplayExchange(hold[0], tilt[0], skip, &connected, hold, tilt, &skip);
+        NsmbwReplayRecordInput(connected, hold, tilt, skip);
+    }
     g_connectedRemotes = connected;
     NsmbwWpadSetConnectedCount(g_connectedRemotes);
     for (uint32_t chan = 0; chan < kMaxRemotes; ++chan) UpdateChannel(chan, hold[chan], tilt[chan], tick);
