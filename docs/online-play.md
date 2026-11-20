@@ -651,6 +651,15 @@ internet, and everything else follows from the joiners' own packets.
 3. Alternative with no router change: a VPN that puts everyone on one virtual network (Hamachi,
    ZeroTier, Radmin VPN), then join with the VPN address as on a LAN.
 
+**VPN (2026-11-20).** The host's room screen now also shows this machine's VPN address when one is
+up ("Others join with: 192.168.x.x:47100 or Hamachi 25.x.x.x:47100"; Hamachi = 25.0.0.0/8,
+Tailscale = 100.64/10, ZeroTier = a zt* interface; getifaddrs on the Mac, the host name's addresses
+on Windows). Hamachi's 25.x range now counts as the same network, so VPN sessions use the direct
+mesh, not the internet relay. Tested on the Mac with Hamachi running: a second copy joined through
+the host's Hamachi address; 1800+ frames, about 60 state checks each, 0 out of sync, delay 3.
+Setting up the VPN itself (accounts, one shared network, friends joining it) is done in the VPN's
+own app by the players.
+
 **What changed in the transport.**
 - A joiner's session port is the port its own room socket is bound to (getsockname), not the port
   the host saw: a router may translate it on the way out, and rebinding the same local port after

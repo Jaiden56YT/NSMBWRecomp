@@ -3604,7 +3604,7 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..bc18379 100644
+index 8c96414..e439a5f 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
 @@ -9,7 +9,10 @@
@@ -3973,7 +3973,7 @@ index 8c96414..bc18379 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1025,204 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1025,206 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4052,6 +4052,8 @@ index 8c96414..bc18379 100644
 +        std::string where = v.addresses.empty() ? std::string("this computer's address") : v.addresses[0];
 +        if (upnp.state == nsmbw_upnp::State::Open && !upnp.externalIp.empty()) {
 +            where += "  or  " + upnp.externalIp + ":" + std::to_string(nsmbw_room::kDefaultPort);
++        } else if (!v.vpnAddress.empty()) {
++            where += "  or " + v.vpnName + " " + v.vpnAddress;
 +        }
 +        c.Text("Others join with: " + where, 0, y, where.size() > 34 ? 14 : 16, {.white = Rgb(255, 255, 160), .outline = true});
 +        y -= 26;
@@ -4178,7 +4180,7 @@ index 8c96414..bc18379 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1288,30 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1290,30 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4209,7 +4211,7 @@ index 8c96414..bc18379 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1339,12 @@ void Draw() noexcept {
+@@ -906,10 +1341,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4223,7 +4225,7 @@ index 8c96414..bc18379 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1369,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1371,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
@@ -9125,10 +9127,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..f186e5e
+index 0000000..a188e97
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,939 @@
+@@ -0,0 +1,998 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9177,6 +9179,8 @@ index 0000000..f186e5e
 +#include <netdb.h>
 +#include <netinet/in.h>
 +#include <sys/socket.h>
++#include <ifaddrs.h>
++#include <net/if.h>
 +#include <unistd.h>
 +#if defined(__APPLE__)
 +#include <mach-o/dyld.h>
@@ -9291,8 +9295,9 @@ index 0000000..f186e5e
 +// or one a VPN such as Hamachi/ZeroTier puts both machines on. Anything else is the internet.
 +bool IsPrivateAddress(const sockaddr_in& a) {
 +    const uint32_t ip = ntohl(a.sin_addr.s_addr);
-+    return (ip >> 24) == 10 || (ip >> 24) == 127 || (ip >> 20) == (172u << 4 | 1u) || (ip >> 16) == (192u << 8 | 168u) ||
-+           (ip >> 16) == (169u << 8 | 254u) || (ip >> 22) == (100u << 2 | 1u);
++    // 25.0.0.0/8 is Hamachi's virtual network: everyone on it reaches everyone, as on a LAN.
++    return (ip >> 24) == 10 || (ip >> 24) == 127 || (ip >> 24) == 25 || (ip >> 20) == (172u << 4 | 1u) ||
++           (ip >> 16) == (192u << 8 | 168u) || (ip >> 16) == (169u << 8 | 254u) || (ip >> 22) == (100u << 2 | 1u);
 +}
 +
 +std::string AddrText(const sockaddr_in& a) {
@@ -9365,6 +9370,53 @@ index 0000000..f186e5e
 +        out.push_back(AddrText(local));
 +    }
 +    CloseSocket(s);
++    return out;
++}
++
++// This machine's address on a VPN that puts friends on one virtual network, for the room screen
++// (docs/online-play.md 8h): Hamachi (25.x), Tailscale (100.64/10), ZeroTier (a zt* interface).
++// Empty when none is up.
++std::string VpnAddress(uint16_t port, std::string& name) {
++    name.clear();
++    std::string out;
++    auto consider = [&](uint32_t addrNet, const char* ifName) {
++        const uint32_t ip = ntohl(addrNet);
++        const char* kind = nullptr;
++        if ((ip >> 24) == 25) kind = "Hamachi";
++        else if ((ip >> 22) == (100u << 2 | 1u)) kind = "Tailscale";
++        else if (ifName && std::strncmp(ifName, "zt", 2) == 0) kind = "ZeroTier";
++        if (!kind || !out.empty()) return;
++        sockaddr_in a{};
++        a.sin_family = AF_INET;
++        a.sin_addr.s_addr = addrNet;
++        a.sin_port = htons(port);
++        out = AddrText(a);
++        name = kind;
++    };
++#ifdef _WIN32
++    // Every IPv4 address of this machine (adapter names are not needed: the ranges identify the VPN).
++    char hostName[256] = {};
++    if (gethostname(hostName, sizeof(hostName)) == 0) {
++        addrinfo hints{};
++        hints.ai_family = AF_INET;
++        addrinfo* res = nullptr;
++        if (getaddrinfo(hostName, nullptr, &hints, &res) == 0) {
++            for (addrinfo* i = res; i; i = i->ai_next) {
++                consider(reinterpret_cast<sockaddr_in*>(i->ai_addr)->sin_addr.s_addr, nullptr);
++            }
++            freeaddrinfo(res);
++        }
++    }
++#else
++    ifaddrs* list = nullptr;
++    if (getifaddrs(&list) == 0) {
++        for (ifaddrs* i = list; i; i = i->ifa_next) {
++            if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || !(i->ifa_flags & IFF_UP)) continue;
++            consider(reinterpret_cast<sockaddr_in*>(i->ifa_addr)->sin_addr.s_addr, i->ifa_name);
++        }
++        freeifaddrs(list);
++    }
++#endif
 +    return out;
 +}
 +
@@ -10002,6 +10054,15 @@ index 0000000..f186e5e
 +    v.mySlot = r.mySlot;
 +    if (r.role == Role::Hosting) {
 +        v.addresses = LocalAddresses(r.port);
++        // Interface lists change rarely: refreshed every 2 s, not every frame.
++        static auto lastVpnCheck = Clock::time_point{};
++        static std::string vpnAddr, vpnName;
++        if (Clock::now() - lastVpnCheck >= std::chrono::seconds(2)) {
++            lastVpnCheck = Clock::now();
++            vpnAddr = VpnAddress(r.port, vpnName);
++        }
++        v.vpnAddress = vpnAddr;
++        v.vpnName = vpnName;
 +        v.members.push_back({0, r.myName, 0});
 +        std::vector<Peer> sorted = r.peers;
 +        std::sort(sorted.begin(), sorted.end(), [](const Peer& a, const Peer& b) { return a.slot < b.slot; });
@@ -10070,10 +10131,10 @@ index 0000000..f186e5e
 +}
 diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
 new file mode 100644
-index 0000000..26912ee
+index 0000000..b355bf4
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,67 @@
 +#pragma once
 +// Online play rooms (NSMBW repo docs/online-play.md, sections 5 and 7): the part before a session.
 +// One machine hosts a room on a UDP port, the others join it by address; the room screen
@@ -10098,6 +10159,8 @@ index 0000000..26912ee
 +    Role role = Role::None;
 +    std::string status;               // one line for the screen ("Waiting for players", errors)
 +    std::vector<std::string> addresses; // hosting: this machine's LAN addresses with the port
++    std::string vpnAddress;           // hosting: this machine's address on a VPN (Hamachi, ZeroTier, ...), with the port
++    std::string vpnName;              // "Hamachi", "ZeroTier", "Tailscale" or "VPN"
 +    std::vector<Member> members;
 +    int mySlot = -1;
 +    bool canStart = false;            // hosting with at least one other player
