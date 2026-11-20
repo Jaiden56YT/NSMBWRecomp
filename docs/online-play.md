@@ -713,6 +713,15 @@ on the direct mesh (no relay), and all four copies reached frame 1800 with about
 each and 0 out of sync. Two game copies per machine made the waits longer (one PC copy waited 278 of
 1200 frames); one copy per player would not share a machine.
 
+**High frame rates (2026-11-20).** Mac host + PC joiner over Hamachi, both with
+frame_interpolation_fps = 180: 0 out of sync to frame 1800 (about 40 checks each). The Mac presented
+about 155-172 fps during the session; the PC held 160-172 in the first scenes and fell to about
+47-65 fps in later gameplay, with the game thread waiting on the GPU worker's FIFO drain for ~37% of
+its time (a renderer/GPU limit on that PC; netplay waits were ~4%). The developer then chose 120 fps.
+Neither machine has the HD texture pack installed (empty texture_replacements folders), so HD was
+not exercised. Interpolation only changes what is drawn, and the state checks confirm it does not
+touch the shared game state.
+
 **Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
 a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
