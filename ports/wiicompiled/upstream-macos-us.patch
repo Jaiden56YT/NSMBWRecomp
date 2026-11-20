@@ -8616,7 +8616,7 @@ index 6a71078..6cbd703 100644
          var adjustedSections = ApplyBssLayout(sections, bssSectionIndex, bssOffset, bssSize);
          var imports = ParseImports(raw, importTableOffset, importTableSize);
 diff --git a/translator/src/Translator.Core/Lifting/PpcLifter.cs b/translator/src/Translator.Core/Lifting/PpcLifter.cs
-index c32cdc6..affebb4 100644
+index c32cdc6..e1e0967 100644
 --- a/translator/src/Translator.Core/Lifting/PpcLifter.cs
 +++ b/translator/src/Translator.Core/Lifting/PpcLifter.cs
 @@ -1942,14 +1942,36 @@ public sealed partial class PpcLifter
@@ -8657,6 +8657,20 @@ index c32cdc6..affebb4 100644
                      var instructions = new List<IrInstruction>();
                      if ((bo & 0x04) == 0)
                      {
+@@ -2034,7 +2056,12 @@ public sealed partial class PpcLifter
+                         var bi = biOp.Value;
+                         var crFieldIdx = bi / 4;
+                         var crBitIdx = bi % 4;
+-                        var target = operands[2];
++                        // The decoded target, not operands[2]: for a CR field other than cr0 the decoder
++                        // puts a crN operand before the target (bo, bi, crN, target), so operands[2]
++                        // was "cr7" for `bc 14,28,...` (blt- cr7 with a branch hint, which GCC/Clang emit
++                        // and CodeWarrior doesn't). That became a label with no block behind it, and the
++                        // branch fell through to the function's return (nsmbw-project's memset, 0x41DC0008).
++                        var target = TargetLabel(ins, validAddresses, preferFallthrough: false);
+                         var fallthrough = $"0x{ins.EndAddress:X8}";
+ 
+                         var instructions = new List<IrInstruction>();
 diff --git a/translator/src/Translator.Core/Translation/FunctionTranslator.cs b/translator/src/Translator.Core/Translation/FunctionTranslator.cs
 index 34bb2aa..27bdcdf 100644
 --- a/translator/src/Translator.Core/Translation/FunctionTranslator.cs
@@ -10060,3 +10074,35 @@ index 3839cbf..c823cee 100644
          return false;
      }
      if (gameFilter.regions) {
+diff --git a/translator/tests/Translator.Tests/HintedCrBranchLifterTests.cs b/translator/tests/Translator.Tests/HintedCrBranchLifterTests.cs
+new file mode 100644
+index 0000000..00c7d1e
+--- /dev/null
++++ b/translator/tests/Translator.Tests/HintedCrBranchLifterTests.cs
+@@ -0,0 +1,26 @@
++using System.Linq;
++using Translator.Core.Disassembly;
++using Translator.Core.Ir;
++using Translator.Core.Lifting;
++using Xunit;
++
++namespace Translator.Tests;
++
++// A conditional branch with a BO hint (BO = 01110, "blt- cr7") on a CR field other than cr0 decodes
++// to the generic `bc bo, bi, crN, target`. The lifter took the target from operands[2], which is the
++// crN operand there, so the branch went to a label "cr7" with no code behind it. Found in
++// nsmbw-project's memset (GCC/Clang emit hinted branches; the game's CodeWarrior code never does).
++public class HintedCrBranchLifterTests
++{
++    [Theory]
++    [InlineData(0x41DC0008u, "0x817D22C0")] // blt- cr7, +8
++    [InlineData(0x41C20048u, "0x817D2300")] // beq- cr0, +0x48 (no crN operand: worked before)
++    public void HintedBcTargetsTheDecodedAddress(uint word, string expected)
++    {
++        var ins = PpcDecoder.Decode(0x817D22B8u, word);
++        var lifted = new PpcLifter().Lift(new[] { ins });
++        var branch = Assert.Single(lifted.SelectMany(static l => l.Ir).OfType<IrBranch>());
++        Assert.Equal(expected, branch.TrueLabel);
++        Assert.Equal("0x817D22BC", branch.FalseLabel);
++    }
++}

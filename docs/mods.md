@@ -543,16 +543,31 @@ dir configured offline with the same dependency sources as build_mac and
 - Runtime fix: an XML naming `disc="0"` (this pack) was rejected because the runtime passed no disc
   number; an unknown disc number / revision no longer rejects (riivolution_contract.h).
 
-Status: the pack is accepted, mkwcat.arc is found (entry 176), the handle is set up, and the
-module's _prolog runs to the end (preinit, constructors, main). The boot scene's teardown then
-crashes: fBase_c::postDelete (0x80161F60) is called with 0x815E74F4, 0x1C into the boot scene
-(0x815E74D8), not an object start, and calls through the "heap" at its +0x5C (state data,
-0x802FEAF8 since tick 4) - a null virtual call. So an object list holds a node or owner pointer the
-mod's replaced list / delete code reads differently from the game's. Not yet found: which
-replacement, and why it differs from a console (where the boot scene is also created before the
-loader). Next: trace the fManager / fLiMgBa calls between the loader and the crash
-(NSMBW_TRACE-style call logging after _prolog), and compare the object lists with the mod's
-expectations; also check that the translator handles the gates' +4 entries in REL functions.
+Status (2026-11-20): **boots to the World 1 map** at 60 fps (self-test presses, muted, 2 min: boot,
+CRSIN, title, game setup, opening movie, map; no crash; screenshots at 40 s and 110 s). Levels,
+GameCube controllers and the mod's own features are not tested yet. Two bugs stood in the way:
+
+1. Translator: a hinted conditional branch on a CR field other than cr0 (`blt- cr7`, word
+   0x41DC0008: BO=01110, which GCC/Clang emit and the game's CodeWarrior code never does) decodes to
+   the generic `bc bo, bi, crN, target`. The lifter took the target from operands[2], which is the
+   `crN` operand there, so the branch went to a label `loc_cr7` with no code behind it and fell
+   through to the function's return. In the mod's memset (0x817D2268) that branch is taken on most
+   calls, so memset returned without writing: fBase_c's operator new clears each new object with
+   memset, and objects kept the previous occupant's bytes. The crash: a new object at 0x815E74F4
+   (the "0x1C into the boot scene" above was a misreading - 0x815E74D8 + 0x1C is the heap block's
+   payload) kept 0x802FEAF8 in mHeap (+0x5C), and fBase_c::postDelete called mHeap->destroy() through
+   a null vtable. Found by watching that word in a vanilla build (it becomes 0 when the object is
+   built at tick 232) against the mod build (it never does). Fix: the lifter uses the decoded branch
+   target (PpcLifter.cs, in the patch; test HintedCrBranchLifterTests.cs, not run here: its NuGet
+   packages aren't cached). 10 mod functions had such a label, 0 in the game.
+2. mod_mkwcat.py: the module's relocations into a game REL's .bss used .bss right after the REL's
+   last section; the recomp (and a console) put it at ROUND_UP(fixSize, 0x20), 0x8F8 bytes higher for
+   d_basesNP (translator RelFile.cs). The mod's dScCrsin_c then changed state to a "state ID" that was
+   another object (null virtual call in sStateMethod_c::changeStateMethod). Fix: game_layout follows
+   the fixSize rule.
+
+Ruled out on the way: leaf inlining (none of the 775 replaced functions is inlined in the mod
+build's translation), the reference / player-count patches, the state-change diagnostic override.
 
 Original plan for route (a), for reference: next is a mod_build mode that writes the 775 branches,
 the 692 immediates and the 288 player-count immediates into the main.dol / REL copies, adds the

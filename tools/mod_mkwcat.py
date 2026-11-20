@@ -97,16 +97,23 @@ class Rel:
             self.sections.append((off & ~1, size, bool(off & 1)))
 
     def game_layout(self, base):
-        """Section addresses as the recomp places a game REL (bss after the last real section)."""
+        """Section addresses as the recomp places a game REL. BSS goes where the console's
+        DynamicModuleControl::do_link puts it, at ROUND_UP(fixSize, 0x20), not right after the last
+        section (translator RelFile.cs: for d_basesNP the two differ by 0x8F8, and the mod's state
+        IDs in that BSS then pointed at other objects). Section end only for headers without fixSize."""
         addrs, end = {}, 0
         for i, (off, size, _) in enumerate(self.sections):
             if off:
                 addrs[i] = base + off
                 end = max(end, off + size)
-        a = self.bss_align or 32
+        if self.fix_size and self.fix_size >= end:
+            bss = (self.fix_size + 0x1F) // 0x20 * 0x20
+        else:
+            a = self.bss_align or 32
+            bss = (end + a - 1) // a * a
         for i, (off, size, _) in enumerate(self.sections):
             if off == 0 and size:
-                addrs[i] = base + (end + a - 1) // a * a
+                addrs[i] = base + bss
         return addrs
 
     def imports(self):
