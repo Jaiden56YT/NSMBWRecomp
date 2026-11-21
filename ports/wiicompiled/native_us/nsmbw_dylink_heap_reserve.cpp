@@ -19,10 +19,9 @@
 // allocated there; afterwards the padding blocks are freed so the game can still use those gaps.
 // Every result is checked against the image address and logged.
 //
-// Block size per REL is fixSize + bssSize from its .rel header (+0x48, +0x20), the size the
-// console's loader shrinks each REL's block to after OSLinkFixed (c_dylink.cpp); the retail
-// addresses fit that exactly (d_profileNP 0x807684C0 + 0x4F84 + 0x208 -> header/alignment ->
-// d_basesNP 0x8076D6C0). It covers the image RestoreRelImages() copies (sections + .bss).
+// Block size per REL is its image's extent: fixSize (.rel header +0x48) rounded up to 32 bytes,
+// where the translation puts .bss, plus bssSize (+0x20). It covers the image RestoreRelImages()
+// copies (sections + .bss); see BssEnd below for what plain fixSize + bssSize missed.
 //
 // createDylinkHeap (0x8016EB20) itself is a structural copy of the translated body
 // (build/nsmbw/functions/func_8016EC60.cpp): call mHeap::createHeap(size, parent, name) at
@@ -46,14 +45,24 @@ constexpr uint32_t kBlockHeader = 0x10u;         // MEMiExpHeapMBlock header (me
 struct RelRange {
     const char* name;
     uint32_t base; // where RestoreRelImages() puts the image
-    uint32_t size; // fixSize + bssSize
+    uint32_t size; // the image's extent: .bss starts at ROUND_UP(fixSize, 0x20), then bssSize
 };
+// .bss is placed at the first 32-byte boundary after fixSize (as the translation links it), not
+// at fixSize itself. d_profileNP's fixSize 0x4F84 rounds to 0x4FA0, so its .bss really ends 0x1C
+// bytes past base + fixSize + bssSize. Reserving only fixSize + bssSize (2026-11-20) left
+// [0x8076D68C, 0x8076D6A8) to the heap, which wrote a free-block header ('FR' = 0x46520000) over
+// the function pointer of a dYesNoWindow_c state ID (0x8076D678, member pointer at +0x14): the
+// world-map menu's "Title Screen" -> OK jumped to 0x46520000 and the game quit.
+constexpr uint32_t BssEnd(uint32_t fixSize, uint32_t bssSize) { return ((fixSize + 0x1Fu) & ~0x1Fu) + bssSize; }
 constexpr RelRange kRels[] = {
-    {"d_profileNP", 0x80768500u, 0x4F84u + 0x208u},
-    {"d_basesNP", 0x8076D6C0u, 0x223168u + 0x12484u},
-    {"d_enemiesNP", 0x809A2CE0u, 0x16E780u + 0xB4E0u},
-    {"d_en_bossNP", 0x80B1C960u, 0x6D170u + 0x487Cu},
+    {"d_profileNP", 0x80768500u, BssEnd(0x4F84u, 0x208u)},
+    {"d_basesNP", 0x8076D6C0u, BssEnd(0x223168u, 0x12484u)},
+    {"d_enemiesNP", 0x809A2CE0u, BssEnd(0x16E780u, 0xB4E0u)},
+    {"d_en_bossNP", 0x80B1C960u, BssEnd(0x6D170u, 0x487Cu)},
 };
+static_assert(0x80768500u + BssEnd(0x4F84u, 0x208u) <= 0x8076D6C0u - 0x10u, "d_profileNP overlaps d_basesNP's block");
+static_assert(0x8076D6C0u + BssEnd(0x223168u, 0x12484u) <= 0x809A2CE0u - 0x10u, "d_basesNP overlaps d_enemiesNP's block");
+static_assert(0x809A2CE0u + BssEnd(0x16E780u, 0xB4E0u) <= 0x80B1C960u - 0x10u, "d_enemiesNP overlaps d_en_bossNP's block");
 
 // First free block's header address: EGG::Heap::mHeapHandle (+0x10) -> MEMiHeapHead, whose
 // MEMiExpHeapHead (free list head at +0x3C) follows the 0x3C-byte common header.

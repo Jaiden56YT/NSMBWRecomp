@@ -85,6 +85,22 @@ need a mod build: `python3 -I tools/mod_build.py <mod dir> --build` re-translate
 Survey, design and status: `docs/mods.md`. In game, the file select's third button (Mods) lists the
 packs with On / Off switches (writes `mod.toml`; applies at the next launch).
 
+## Fix (2026-11-20): world-map "Title Screen" quit the game
+
+Symptom: on the world map, + -> Title Screen -> OK closed the game ("missing indirect jump
+target 0x46520000"). Root cause: `native_us/nsmbw_dylink_heap_reserve.cpp` reserved each
+pre-loaded REL as fixSize + bssSize, but the translation places .bss at ROUND_UP(fixSize, 0x20).
+For d_profileNP (fixSize 0x4F84) that left [0x8076D68C, 0x8076D6A8) to the dylink heap, which
+wrote a free-block header ('FR' = 0x46520000) there at boot, over the member-function pointer of
+a dYesNoWindow_c state ID (0x8076D678); OK in that yes/no window changed to that state and jumped
+through it. Found with `NSMBW_WATCH_RANGE=0x8076D600,48` (the write at VI tick 3) and the new
+`NSMBW_DIAG_RING_AT_EXIT=1` (the recent-call ring when a fatal path ends in `std::exit`). Fix:
+reserve up to the real .bss end (static_asserts check the four blocks don't overlap). After:
+d_profileNP reserved to 0x8076D6B0, no write inside it, and Title Screen -> OK goes to the title
+(scenes 0x3 -> 0x6 0x7 0x5) and on to the file select with the save intact (Mac, vanilla build;
+the mod build reserves the same ranges). Scope: NSMBW-specific constants, general class (the same
+rounding was behind the mod build's .bss fix in tools/mod_mkwcat.py).
+
 ## Next
 1. Mac build of upstream's runtime + aurora (Metal via Dawn): NEON versions of the x86
    SIMD in runtime/include/isa (ppc_isa_float.h, ppc_isa_quantized.h, ppc_isa_fpenv.h),

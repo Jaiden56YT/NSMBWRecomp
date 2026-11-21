@@ -4340,7 +4340,7 @@ index 8c96414..078512d 100644
 +extern "C" bool NsmbwOptionsMenuIsOpen() { return nsmbw_options_menu::IsOpen(); }
 +extern "C" bool NsmbwOnlineMenuTakeClosed() { return nsmbw_options_menu::g_onlineClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..690391d 100644
+index a63636b..1d9472b 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -37,14 +37,22 @@
@@ -4986,6 +4986,16 @@ index a63636b..690391d 100644
  
      std::printf("[nsmbw] Invoking entry point 0x%08X...\n", kNsmbwEntryAddress);
      // FatalMissingGuestTarget (an unimplemented HLE call) already exits cleanly on its own - this
+@@ -1082,6 +1482,9 @@ int main() {
+     // "terminating due to uncaught exception" abort).
+     std::atomic<bool> diagFinished{false};
+     StartDiagWatchdog(diagFinished);
++    // NSMBW_DIAG_RING_AT_EXIT=1: print the recent-call ring when the process exits (a fatal path
++    // that ends in std::exit, e.g. a missing indirect jump target, prints none of its own).
++    if (std::getenv("NSMBW_DIAG_RING_AT_EXIT")) std::atexit(+[] { DiagDumpRecentCalls(-1); });
+ #if defined(_WIN32)
+     StartProfileSampler();
+ #endif
 diff --git a/runtime/src/recomp_mod_loader.cpp b/runtime/src/recomp_mod_loader.cpp
 index 104ff0d..d99697d 100644
 --- a/runtime/src/recomp_mod_loader.cpp
