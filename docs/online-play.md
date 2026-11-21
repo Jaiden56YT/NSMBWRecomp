@@ -795,8 +795,15 @@ so before this the mod saw no GameCube controller at all.
 - **Test (Mac, 5 mod copies, delay 4, self-test presses):** every copy logged "GameCube port 0 is player
   5 (slot 4)" from frame 5; all five went boot -> title -> game setup -> movie -> map, 2400 frames,
   240+ state checks each, **0 out of sync**. Two normal (vanilla) copies on protocol 3: 0 out of sync.
-- **Not shown yet:** that the mod lets a GameCube-port player join on the player screen and gives each
-  of the 8 a different character; that is the 8-player test (4 Mac + 4 PC).
+- **8 players, Mac + PC over Hamachi (2026-11-21 04:54 UTC):** Mac copies = slots 0-3 (UDP 47340-47343),
+  PC copies = slots 4-7 (47344-47347, PC 25.34.21.215), delay 6, self-test presses on every copy,
+  started by clock on both machines. Every Mac copy logged GameCube ports 0-3 as players 5-8 from
+  frame 5 and ran to frame 3600: 704 state checks each (against all 7 others), **0 out of sync**;
+  scenes boot, opening, title, game setup, then the opening movie of a new file. Waits were long
+  (~78 s over the run: four GPU-bound copies per machine; screenshots ~31-39 fps).
+- **Still not shown:** the self-test made a 1-player file and went into the opening movie, so the
+  player-entry screen with 8 joined players (and whether each gets a different character) was not
+  reached; that needs presses from players 2-8 on that screen.
 
 ## 9. Open questions for the user
 
