@@ -1,6 +1,8 @@
 # Playing NSMBW online with friends
 
-Up to 4 players, each on their own computer with their own controller or keyboard. One person
+Up to 4 players (8 with the nsmbw-project mod build: players 5-8 reach the game as GameCube
+controllers, but use their normal controls), each on their own computer with their own controller or
+keyboard. Windows and Mac copies of the same version play together. One person
 **hosts**; everyone else **joins**. You all connect through **Hamachi**, a free app that puts
 your computers on one private network over the internet.
 

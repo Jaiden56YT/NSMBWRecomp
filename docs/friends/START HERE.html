@@ -38,8 +38,8 @@
 <body>
 <main>
   <h1>NSMBW Online</h1>
-  <p class="lead">New Super Mario Bros. Wii with up to 4 friends, each on their own computer.
-    Do the one-time setup once, then pick what you're doing today.</p>
+  <p class="lead">New Super Mario Bros. Wii with the nsmbw-project mod: up to 8 players, each on their own
+    computer (Windows or Mac, mixed is fine). Do the one-time setup once, then pick what you're doing today.</p>
 
   <h2>One-time setup</h2>
   <ol class="steps">
@@ -52,8 +52,12 @@
       <p>Get Hamachi free from <a href="https://vpn.net">vpn.net</a> and sign in. Then <b>Network → Join an existing
         network</b>, using the name and password your host sends you. Wait for a <b>green dot</b> next to the host.</p></li>
     <li><h3>Open the game once</h3>
-      <p>Double-click <code>NSMBWCompiled.exe</code>. When Windows asks about the firewall, click <b>Allow</b> and tick
-        <b>Public networks</b> too (Hamachi counts as public).</p>
+      <p><b>Windows:</b> double-click <code>NSMBWCompiled.exe</code>. When Windows asks about the firewall, click
+        <b>Allow</b> and tick <b>Public networks</b> too (Hamachi counts as public).</p>
+      <p><b>Mac</b> (Apple Silicon): open <b>Terminal</b>, type <code>xattr -dr com.apple.quarantine </code> (with a space
+        at the end), drag this whole folder onto the Terminal window and press Return. Then double-click
+        <code>NSMBW Online.app</code>. If macOS still says it can't be opened, go to <b>System Settings → Privacy &amp;
+        Security</b> and click <b>Open Anyway</b>. Allow incoming connections if it asks.</p>
       <p>The very first time you may see <b>“Preparing graphics”</b> for up to half a minute. That only happens once.</p></li>
     <li><h3>Set your controls</h3>
       <p>Press <kbd>F10</kbd> → <b>Controls</b> and set your keyboard keys or controller.
@@ -75,7 +79,8 @@
       <li><h3>Wait for the host</h3>
         <p>When the host presses Start, your game restarts by itself. That's normal.</p></li>
       <li><h3>Join with your character</h3>
-        <p>On the <b>“2 Players”</b> (or 3, 4) screen, press your <b>confirm</b> button to join. Then play!</p></li>
+        <p>On the players screen, press your <b>confirm</b> button to join. Then play! Players 5-8 use their
+          normal controls too (the game sees them as GameCube controllers; nobody needs one).</p></li>
     </ol>
   </section>
 
@@ -97,7 +102,8 @@
       <li>If someone's game hitches, everyone waits a moment (“Waiting for player N…” in the title bar).</li>
       <li>Leaving (<kbd>F10</kbd> → Online → Leave the session) or closing the window <b>ends the game for everyone</b>. The host can open a new room.</li>
       <li>Progress made online <b>isn't copied back</b> to the host's normal save yet.</li>
-      <li>Everyone must use <b>this same version</b> of the game.</li>
+      <li>Everyone must use <b>this same version</b> of the game (the Windows and Mac downloads from the same
+        day go together). Older versions won't connect.</li>
     </ul>
   </div>
 
