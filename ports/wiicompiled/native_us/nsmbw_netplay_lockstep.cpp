@@ -129,6 +129,7 @@ struct Net {
     bool leaving = false;      // set once this copy leaves: every packet from then on says so
     bool relay = false;        // NSMBW_NETPLAY_RELAY: non-host copies reach each other through the host
     uint64_t relayedOut = 0;   // host: packets forwarded for other copies
+    std::chrono::steady_clock::time_point startedAt{}; // when this copy joined the session
 };
 Net n;
 
@@ -230,6 +231,7 @@ void Init() {
         n.lastCompared[s] = kNone;
     }
     n.active = true;
+    n.startedAt = std::chrono::steady_clock::now();
     std::atexit(SendLeave); // a normal quit (the window closed) tells the others at once
     Log("slot %u of %u, port %s, input delay %u frames, %zu peer(s)%s", n.slot, n.players, port, n.delay, n.peers.size(),
         n.relay ? (n.slot == 0 ? ", relaying for the others" : ", through the host") : "");
@@ -501,12 +503,26 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
             titleShown = true;
         }
         // A peer we are still waiting on ends the session after 20 s with no packet from it. Before
-        // its first packet (copies started by hand on two machines, a firewall prompt still open)
-        // there is no limit. Timed from its last packet, not from the start of this wait: the first
+        // its first packet the limit is 45 s from the start of the session (below). Timed from its last packet, not from the start of this wait: the first
         // version ended a session the moment the first packet arrived after a 32 s wait.
         bool silent = false;
         for (const Peer& p : n.peers) {
             if (!Has(p.slot, frame) && p.heard && now - p.lastPacket >= std::chrono::seconds(20)) silent = true;
+        }
+        // A peer never heard from at all, 45 s after this copy started the session: its packets
+        // are not getting through (a firewall prompt hidden behind a fullscreen window, a blocked
+        // Hamachi network). Without this the session waited forever on a black screen before its
+        // first frame (2026-11-20, the developer and a friend).
+        uint32_t neverHeard = kNone;
+        for (const Peer& p : n.peers) {
+            if (!p.heard && now - n.startedAt >= std::chrono::seconds(45)) neverHeard = p.slot;
+        }
+        if (neverHeard != kNone) {
+            Log("frame %u: nothing from slot %u in 45 s, ending the session", frame, neverHeard);
+            NsmbwOnlineSetWaitingTitle(nullptr);
+            char why[96];
+            std::snprintf(why, sizeof(why), "Couldn't reach player %u (check the firewall and Hamachi)", neverHeard + 1);
+            NsmbwOnlineEndSession(why);
         }
         if (silent) {
             Log("frame %u: no input for 20 s, ending the session", frame);

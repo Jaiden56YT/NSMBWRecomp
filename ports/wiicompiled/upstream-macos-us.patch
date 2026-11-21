@@ -4340,7 +4340,7 @@ index 8c96414..078512d 100644
 +extern "C" bool NsmbwOptionsMenuIsOpen() { return nsmbw_options_menu::IsOpen(); }
 +extern "C" bool NsmbwOnlineMenuTakeClosed() { return nsmbw_options_menu::g_onlineClosed.exchange(false); }
 diff --git a/runtime/src/product/nsmbw_product.cpp b/runtime/src/product/nsmbw_product.cpp
-index a63636b..7cbcbf7 100644
+index a63636b..690391d 100644
 --- a/runtime/src/product/nsmbw_product.cpp
 +++ b/runtime/src/product/nsmbw_product.cpp
 @@ -37,14 +37,22 @@
@@ -4903,7 +4903,32 @@ index a63636b..7cbcbf7 100644
  #ifdef _WIN32
      // Window/taskbar icon: SDL3 only takes an icon from the exe's resources when these hints name
      // one (they can be given as environment variables; set before aurora initializes SDL). Resource
-@@ -829,7 +1194,10 @@ int main() {
+@@ -810,6 +1175,24 @@ int main() {
+         std::freopen(logPath.c_str(), "w", stdout);
+         std::freopen(logPath.c_str(), "a", stderr);
+     }
++#endif
++#if !defined(_WIN32) && !defined(NSMBW_RELEASE) && !defined(__SWITCH__)
++    // Started from Finder (a Mac app bundle), stderr is /dev/null and every log line was lost: the
++    // online black screen of 2026-11-20 left nothing to read. Then log to NSMBWCompiled.log in the
++    // user-data folder (UserData\ in a portable app). Runs with stderr on a terminal, a pipe or a
++    // file (every test script) are unchanged.
++    {
++        struct stat errStat {}, nullStat {};
++        if (fstat(STDERR_FILENO, &errStat) == 0 && stat("/dev/null", &nullStat) == 0 &&
++            errStat.st_dev == nullStat.st_dev && errStat.st_ino == nullStat.st_ino) {
++            std::error_code ec;
++            const auto dir = RuntimeConfigFile::ApplicationDataDirectory();
++            std::filesystem::create_directories(dir, ec);
++            const std::string logPath = (dir / "NSMBWCompiled.log").string();
++            std::freopen(logPath.c_str(), "w", stdout);
++            std::freopen(logPath.c_str(), "a", stderr);
++        }
++    }
+ #endif
+     if (AURORA_ENV("NSMBW_UNBUFFERED_LOG") != nullptr) {
+         std::setvbuf(stdout, nullptr, _IONBF, 0);
+@@ -829,7 +1212,10 @@ int main() {
      }
      {
          std::error_code ec;
@@ -4915,7 +4940,7 @@ index a63636b..7cbcbf7 100644
          std::filesystem::create_directories(cacheDir, ec);
          ResetPersistentStateForCleanRun(cacheDir);
          g_crashMarkerPath = (cacheDir / kCrashMarkerName).string();
-@@ -863,7 +1231,7 @@ int main() {
+@@ -863,7 +1249,7 @@ int main() {
      SeedLowMemDefaults();
      // Release builds only (nsmbw_disc_setup.cpp): ask for the disc if dvd_root isn't valid yet.
      NsmbwEnsureDiscFolder();
@@ -4924,7 +4949,7 @@ index a63636b..7cbcbf7 100644
      // __DVDFSInit, which latches OSBootInfo.FSTLocation once and early-returns when it reads
      // zero - so the FST has to be published before the guest starts, or every disc path lookup
      // fails for the rest of the run. This is MKW's DVDInit HLE, reused for its index build and
-@@ -973,7 +1341,21 @@ int main() {
+@@ -973,7 +1359,21 @@ int main() {
                      const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
                      std::fprintf(stderr, "[nsmbw][interp]   pipelines: %u compiled, %u queued\n", created - prevCreated,
                                   aurora_get_queued_pipeline_count());
@@ -4946,7 +4971,7 @@ index a63636b..7cbcbf7 100644
                  }
                  {
                      uint64_t drainTotal = 0, drainMax = 0;
-@@ -1068,11 +1450,11 @@ int main() {
+@@ -1068,11 +1468,11 @@ int main() {
      // Deliberately NOT run here any more. main.dol's .ctors and the four REL _prolog()s all
      // write guest BSS, and NSMBW's own __start (0x80004050) calls __init_data (0x80004250) which
      // memsets BSS clean at 0x80004600 - so anything initialized before the entry point was wiped
