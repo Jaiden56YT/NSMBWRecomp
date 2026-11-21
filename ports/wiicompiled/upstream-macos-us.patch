@@ -3637,10 +3637,10 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..e439a5f 100644
+index 8c96414..6b3be1a 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
-@@ -9,7 +9,10 @@
+@@ -9,16 +9,23 @@
  #include "nsmbw_menu_art.h"
  #include "nsmbw_menu_draw.h"
  #include "nsmbw_movie_skip.h"
@@ -3651,7 +3651,9 @@ index 8c96414..e439a5f 100644
  #include "memory.h"
  #include "runtime_config.h"
  #include "settings_overlay.h"
-@@ -17,8 +20,10 @@
+ 
++#include <aurora/gfx.h>
++
  #include <SDL3/SDL_events.h>
  #include <SDL3/SDL_gamepad.h>
  #include <SDL3/SDL_keyboard.h>
@@ -3662,7 +3664,7 @@ index 8c96414..e439a5f 100644
  #include <array>
  #include <atomic>
  #include <cstdio>
-@@ -156,23 +161,23 @@ std::vector<Row> BuildRows(int tab) {
+@@ -156,23 +163,23 @@ std::vector<Row> BuildRows(int tab) {
  }
  
  // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
@@ -3691,7 +3693,7 @@ index 8c96414..e439a5f 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,18 +191,21 @@ bool g_soundPaused = false;
+@@ -186,18 +193,21 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3716,7 +3718,7 @@ index 8c96414..e439a5f 100644
      uint32_t word = 0;
      if (Memory::TryRead32(kGameStopAddr, word)) {
          uint32_t next = word;
-@@ -234,7 +242,7 @@ void SetGameStopped(bool stopped) {
+@@ -234,7 +244,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3725,7 +3727,7 @@ index 8c96414..e439a5f 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
-@@ -254,7 +262,7 @@ void LogMenu(const char* what, const char* why) {
+@@ -254,7 +264,7 @@ void LogMenu(const char* what, const char* why) {
  
  // ---- Screens and state --------------------------------------------------------------------------
  
@@ -3734,7 +3736,7 @@ index 8c96414..e439a5f 100644
  Screen g_screen = Screen::Options;
  
  // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
-@@ -271,6 +279,28 @@ struct BindState {
+@@ -271,6 +281,28 @@ struct BindState {
      bool capturing = false;
  } g_bind;
  
@@ -3763,7 +3765,7 @@ index 8c96414..e439a5f 100644
  // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
  // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
  int BindSlots() { return 4; }
-@@ -278,6 +308,9 @@ int BindSlots() { return 4; }
+@@ -278,6 +310,9 @@ int BindSlots() { return 4; }
  // Set when a menu opened from the pause window has finished closing; the pause input handler
  // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
  std::atomic<bool> g_returnToPause{false};
@@ -3773,7 +3775,7 @@ index 8c96414..e439a5f 100644
  
  // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
  void Close(const char* why) {
-@@ -299,6 +332,12 @@ void FinishClose() {
+@@ -299,6 +334,12 @@ void FinishClose() {
      SetGameStopped(false);
      if (g.fromPause) g_returnToPause = true;
      g.fromPause = false;
@@ -3786,7 +3788,7 @@ index 8c96414..e439a5f 100644
  }
  
  void Open(const char* why, bool fromPause) {
-@@ -319,6 +358,23 @@ void ShowScreen(Screen screen) {
+@@ -319,6 +360,23 @@ void ShowScreen(Screen screen) {
      g.openedAt = draw::Now();
  }
  
@@ -3810,7 +3812,7 @@ index 8c96414..e439a5f 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +523,164 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +525,164 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3975,7 +3977,7 @@ index 8c96414..e439a5f 100644
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -566,6 +776,12 @@ void SetOpen(bool open) noexcept {
+@@ -566,6 +778,12 @@ void SetOpen(bool open) noexcept {
      }
      Play(kSndPause);
      Open("F10", false);
@@ -3988,7 +3990,7 @@ index 8c96414..e439a5f 100644
  }
  
  void HandleEvents(const AuroraEvent* events) noexcept {
-@@ -588,7 +804,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +806,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
@@ -3998,7 +4000,7 @@ index 8c96414..e439a5f 100644
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -599,6 +816,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -599,6 +818,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              }
              continue;
          }
@@ -4006,7 +4008,7 @@ index 8c96414..e439a5f 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1025,206 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1027,275 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4170,6 +4172,75 @@ index 8c96414..e439a5f 100644
 +    c.Text(text, -296, 214, 15, {.white = colour, .align = Align::Left, .outline = true});
 +}
 +
++// Cold-start shader hold (2026-11-20, developer request: "compile all the shaders at once ... so the
++// game is smoother throughout"). At boot aurora queues every known pipeline (the shipped seed plus
++// what this install has seen) for its background workers. With a warm shader cache that queue is
++// empty within a second; cold (first launch, or after an update cleared the cache) it took 26.5 s on
++// the Windows PC (D3D12, ~5200 compiles) and 1.0 s on the Mac, while the game was already running
++// and hitching (3 frames over 50 ms, the worst 104 ms). So: half a second after the first frame, if
++// more than 100 pipelines are still queued, hold the game (the stop the menu uses) on a progress
++// screen until the queue is empty, at most 3 minutes. Never in an online session (holding one copy's
++// game would desync it); NSMBW_NO_SHADER_HOLD=1 turns it off. NSMBW_SHADER_HOLD_TEST=<frames> forces
++// the hold for that many frames with simulated progress (machines that compile too fast to see it).
++bool ShaderPrewarmHold() {
++    static int state = 0; // 0 deciding, 1 holding, 2 done
++    static float start = -1, holdStart = 0;
++    static uint32_t total = 0;
++    if (state == 2) return false;
++    if (std::getenv("NSMBW_NO_SHADER_HOLD") != nullptr || nsmbw_room::InSession()) {
++        state = 2;
++        return false;
++    }
++    const float now = draw::Now();
++    if (start < 0) start = now;
++    static const int testFrames = [] {
++        const char* v = std::getenv("NSMBW_SHADER_HOLD_TEST");
++        return v ? std::atoi(v) : 0;
++    }();
++    uint32_t queued = aurora_get_queued_pipeline_count();
++    if (testFrames > 0) {
++        const float t = state == 1 ? now - holdStart : 0.0f;
++        queued = uint32_t(1532.0f * std::max(0.0f, 1.0f - t / float(testFrames)));
++    }
++    total = std::max(total, queued);
++    if (state == 0) {
++        if (now - start < 30) return false;
++        if (queued < 100) {
++            state = 2;
++            return false;
++        }
++        state = 1;
++        holdStart = now;
++        std::fprintf(stderr, "[nsmbw][shaders] first start: holding the game while %u shaders compile\n", queued);
++    }
++    if (queued == 0 || now - holdStart > 60.0f * 180.0f) {
++        SetGameStopped(false);
++        state = 2;
++        std::fprintf(stderr, "[nsmbw][shaders] %s after %.1f s; the game continues\n",
++                     queued == 0 ? "all shaders compiled" : "gave up waiting", (now - holdStart) / 60.0f);
++        return false;
++    }
++    SetGameStopped(true);
++    if (art::Load()) {
++        const draw::Canvas c(/*shrinkOthers=*/false, 1.0f);
++        c.FillDisplay(Rgb(0, 0, 0, 215));
++        const uint32_t done = total > queued ? total - queued : 0;
++        const float frac = total ? float(done) / float(total) : 0.0f;
++        c.Text("Preparing graphics", 0, 40, 24, {.white = draw::kWhite, .outline = true});
++        c.Text("First start: compiling shaders once so play stays smooth", 0, 10, 15,
++               {.white = Rgb(200, 215, 230), .outline = true});
++        constexpr float kBarW = 360, kBarH = 14;
++        c.Rect(0, -24, kBarW, kBarH, Rgb(255, 255, 255, 40), Rgb(255, 255, 255, 120));
++        if (frac > 0) {
++            const float w = kBarW * frac;
++            c.Rect(-kBarW / 2 + w / 2, -24, w, kBarH, Rgb(120, 200, 255), Rgb(120, 200, 255));
++        }
++        c.Text(std::to_string(done) + " of " + std::to_string(total), 0, -50, 15,
++               {.white = Rgb(200, 215, 230), .outline = true});
++    }
++    return true;
++}
++
 +// Set on the game thread by the file select's Online button once its press animation has played.
 +std::atomic<bool> g_openOnline{false};
 +
@@ -4213,7 +4284,7 @@ index 8c96414..e439a5f 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1290,30 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1361,31 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4236,6 +4307,7 @@ index 8c96414..e439a5f 100644
      if (!g.open && g_openFromPause.exchange(false)) Open("pause menu", true);
 +    if (!g.open && !g.closing && g_openMods.exchange(false)) OpenMods();
 +    if (!g.open && !g.closing && g_openOnline.exchange(false)) OpenOnline();
++    if (!g.open && ShaderPrewarmHold()) return; // cold start: shaders first (before the first-launch menu)
      if (!g.open) OpenOnFirstLaunch();
      if (!g.open) {
          ClearHeldIfReleased();
@@ -4244,7 +4316,7 @@ index 8c96414..e439a5f 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1341,12 @@ void Draw() noexcept {
+@@ -906,10 +1413,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4258,7 +4330,7 @@ index 8c96414..e439a5f 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1371,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1443,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
