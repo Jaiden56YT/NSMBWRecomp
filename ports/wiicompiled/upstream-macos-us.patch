@@ -8947,10 +8947,21 @@ index 92ea526..295f62f 100644
  extern "C" void OS_HLE_ProcessAlarmsDeferred(int maxToProcess);
  extern "C" void OS_HLE_BeginDeferredGuestCallbacks();
 diff --git a/runtime/src/hle/gx/gx_copy.cpp b/runtime/src/hle/gx/gx_copy.cpp
-index 156ba23..3ea5814 100644
+index 156ba23..a78cdba 100644
 --- a/runtime/src/hle/gx/gx_copy.cpp
 +++ b/runtime/src/hle/gx/gx_copy.cpp
-@@ -27,16 +27,47 @@ void RememberEfbCopyDestination(uint32_t addr, uint32_t size) {
+@@ -22,21 +22,64 @@ namespace {
+ std::mutex g_efbCopyDestinationsMutex;
+ std::map<uint32_t, uint32_t> g_efbCopyDestinations;
+ uint32_t g_largestEfbCopyDestination = 0;
++// The bytes each copy actually writes (start -> length), which can be far less than its
++// destination texture: NSMBW's tile animation copies a 32x32 tile into a 1024x1024 tileset
++// (GXSetTexCopyDst 1024 wide), which writes 8 block rows (64 KB), not the 2 MB texture size above.
++std::map<uint32_t, uint32_t> g_efbCopyWrittenSpans;
++uint32_t g_largestEfbCopyWrittenSpan = 0;
+ 
+-void RememberEfbCopyDestination(uint32_t addr, uint32_t size) {
++void RememberEfbCopyDestination(uint32_t addr, uint32_t size, uint32_t writtenSpan) {
      if (size == 0) {
          return;
      }
@@ -8961,31 +8972,38 @@ index 156ba23..3ea5814 100644
 -    // destination on every DCStoreRange.
 -    g_largestEfbCopyDestination = std::max(g_largestEfbCopyDestination, size);
 +    const uint32_t start = CanonicalizeGxMainRamAddress(addr);
-+    const uint64_t end = static_cast<uint64_t>(start) + size;
++    writtenSpan = std::min(std::max(writtenSpan, 1u), size);
++    const uint64_t writtenEnd = static_cast<uint64_t>(start) + writtenSpan;
 +    std::vector<uint32_t> retired;
 +    {
 +        std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
-+        // The new copy overwrites any older destination it overlaps, so those entries (and their
-+        // GPU textures) are dead. Without this, destinations at addresses that are never flushed
-+        // again piled up for the whole session: the walk in InvalidateEfbCopyDestinationsForRange
-+        // runs on every DCStoreRange, and the game slowed down the longer it ran (run44, 58 -> 50
-+        // fps on the title level over 30 minutes).
-+        const uint64_t earliest = start > g_largestEfbCopyDestination ? start - g_largestEfbCopyDestination : 0;
-+        for (auto it = g_efbCopyDestinations.lower_bound(static_cast<uint32_t>(earliest));
-+             it != g_efbCopyDestinations.end() && static_cast<uint64_t>(it->first) < end;) {
++        // An older destination whose written bytes this copy completely overwrites is dead: drop
++        // it and its GPU texture. Without this, destinations at addresses never flushed again
++        // piled up for the whole session (the walk in InvalidateEfbCopyDestinationsForRange runs
++        // on every DCStoreRange; run44: 58 -> 50 fps over 30 minutes on the Switch). Only full
++        // cover of what the older copy wrote, measured by written bytes: the first version
++        // retired anything inside the new copy's destination-texture size (2 MB for a tile
++        // copied into the 1024x1024 tileset), which destroyed the coin animation's own small
++        // copy textures - placed coins in levels became invisible (2026-11-20).
++        const uint64_t earliest = start;
++        for (auto it = g_efbCopyWrittenSpans.lower_bound(static_cast<uint32_t>(earliest));
++             it != g_efbCopyWrittenSpans.end() && static_cast<uint64_t>(it->first) < writtenEnd;) {
 +            const uint64_t otherEnd = static_cast<uint64_t>(it->first) + it->second;
-+            if (it->first == start || otherEnd <= start) {
++            if (it->first == start || otherEnd > writtenEnd) {
 +                ++it;
 +                continue;
 +            }
 +            retired.push_back(it->first);
-+            it = g_efbCopyDestinations.erase(it);
++            g_efbCopyDestinations.erase(it->first);
++            it = g_efbCopyWrittenSpans.erase(it);
 +        }
 +        g_efbCopyDestinations[start] = size;
++        g_efbCopyWrittenSpans[start] = writtenSpan;
 +        // A conservative monotonic maximum lets invalidation jump directly to
 +        // the only map interval that could overlap instead of walking every copy
 +        // destination on every DCStoreRange.
 +        g_largestEfbCopyDestination = std::max(g_largestEfbCopyDestination, size);
++        g_largestEfbCopyWrittenSpan = std::max(g_largestEfbCopyWrittenSpan, writtenSpan);
 +    }
 +    for (const uint32_t copyAddr : retired) {
 +        GXDestroyCopyTex(GuestToHostPtr(copyAddr));
@@ -9004,6 +9022,34 @@ index 156ba23..3ea5814 100644
  void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
      if (size == 0) {
          return;
+@@ -58,6 +101,7 @@ void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
+                 continue;
+             }
+             retired.push_back(it->first);
++            g_efbCopyWrittenSpans.erase(it->first);
+             it = g_efbCopyDestinations.erase(it);
+         }
+     }
+@@ -351,9 +395,16 @@ extern "C" void GX__CopyTex_8016fd74(uint32_t da, uint32_t c) {
+                          g_texCopyState.dstFormat, rawSrcLeft, rawSrcTop, rawSrcWidth, rawSrcHeight);
+         }
+     }
+-    RememberEfbCopyDestination(
+-        da, GXGetTexBufferSize(g_texCopyState.dstWidth, g_texCopyState.dstHeight,
+-                               g_texCopyState.dstFormat, GX_FALSE, 0));
++    {
++        // The rows actually written: the source height (halved for a box-filtered copy) across
++        // the destination's width, which is the row stride of the texture being written into.
++        const uint32_t writtenRows =
++            std::max<uint32_t>(1u, g_texCopyState.dstMipmap ? g_texCopyState.srcHeight / 2u : g_texCopyState.srcHeight);
++        RememberEfbCopyDestination(
++            da,
++            GXGetTexBufferSize(g_texCopyState.dstWidth, g_texCopyState.dstHeight, g_texCopyState.dstFormat, GX_FALSE, 0),
++            GXGetTexBufferSize(g_texCopyState.dstWidth, uint16_t(writtenRows), g_texCopyState.dstFormat, GX_FALSE, 0));
++    }
+     GXSetTexCopySrc(rawSrcLeft, rawSrcTop, rawSrcWidth, rawSrcHeight);
+ }
+ PPC_NATIVE_OVERRIDE_VOID(8016fd74, GX__CopyTex_8016fd74, (uint32_t da, uint32_t c), (da, c));
 diff --git a/runtime/include/audio_backend.h b/runtime/include/audio_backend.h
 index ae05827..9ea5e1e 100644
 --- a/runtime/include/audio_backend.h
