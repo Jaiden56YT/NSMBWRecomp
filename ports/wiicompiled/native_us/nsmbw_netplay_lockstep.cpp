@@ -85,6 +85,10 @@ extern "C" bool NsmbwOnlineTakeLeaveRequest();
 extern "C" [[noreturn]] void NsmbwOnlineEndSession(const char* reason);
 extern "C" void NsmbwOnlineSetWaitingTitle(const char* textOrNull);
 extern "C" bool NsmbwOnlinePumpEventsQuit(); // pumps window events; true if the window was closed
+// nsmbw_controls.cpp: local players 5-8 for the mod build's GameCube ports when not online.
+extern "C" bool NsmbwControlsHasDevice(uint32_t chan);
+extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan);
+extern "C" float NsmbwControlsReadTilt(uint32_t chan);
 
 namespace {
 constexpr uint32_t kMagic = 0x504E534Eu; // "NSNP"
@@ -582,18 +586,22 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
 // lockstep unchanged and turned into a PADStatus here, the same way on every copy. The button mapping
 // is the inverse of the mod's GameCube mapping (d_game_key_core.cpp, setConfigKey, DOLPHIN case:
 // D-pad/stick -> sideways directions, A -> 2, B -> 1 (+Z), X -> A, Y -> B (+1), Z -> shake + minus,
-// START -> plus); tilt goes to the triggers (the mod tilts by R - L). Offline it reports no
-// controllers, as before. Writes 4 x 12-byte PADStatus (big-endian) and returns 0 (no motors).
+// START -> plus); tilt goes to the triggers (the mod tilts by R - L). Offline, port `port` is local
+// player 5 + port, with their own controller and buttons from the options menu's Controls tab
+// (nsmbw_controls.cpp, players 5-8); a player without a controller reports none. Writes 4 x 12-byte
+// PADStatus (big-endian) and returns 0 (no motors).
 extern "C" uint32_t NsmbwModPadRead(uint32_t statusPtr) {
     if (statusPtr == 0) return 0;
     Init();
     for (uint32_t port = 0; port < 4; ++port) {
         uint8_t st[12] = {};
         const uint32_t slot = kRemoteSlots + port;
-        if (!n.active || slot >= n.players) {
+        const bool local = !n.active && NsmbwControlsHasDevice(slot);
+        if (!local && (!n.active || slot >= n.players)) {
             st[10] = 0xFF; // PAD_ERR_NO_CONTROLLER (-1)
         } else {
-            const uint32_t w = n.gcHold[port];
+            const uint32_t w = local ? NsmbwControlsReadWpad(slot) : n.gcHold[port];
+            const float tilt = local ? NsmbwControlsReadTilt(slot) : n.gcTilt[port];
             uint16_t b = 0;
             if (w & 0x8u) b |= 0x0001;    // screen left  (sideways: remote up)    -> PAD left
             if (w & 0x4u) b |= 0x0002;    // screen right (remote down)            -> PAD right
@@ -607,14 +615,18 @@ extern "C" uint32_t NsmbwModPadRead(uint32_t statusPtr) {
             if (w & (0x1000u | 0x80000000u)) b |= 0x0010; // minus, or the spin/shake action -> Z
             st[0] = static_cast<uint8_t>(b >> 8);
             st[1] = static_cast<uint8_t>(b);
-            const float t = std::clamp(n.gcTilt[port], -1.0f, 1.0f);
+            const float t = std::clamp(tilt, -1.0f, 1.0f);
             st[6] = static_cast<uint8_t>(t < 0.0f ? -t * 255.0f : 0.0f); // triggerL
             st[7] = static_cast<uint8_t>(t > 0.0f ? t * 255.0f : 0.0f);  // triggerR
             st[10] = 0; // PAD_ERR_NONE
             static bool logged[4] = {};
             if (!logged[port]) {
                 logged[port] = true;
-                Log("GameCube port %u is player %u (slot %u), frame %u", port, slot + 1, slot, n.curFrame);
+                if (local) {
+                    Log("GameCube port %u is local player %u", port, slot + 1);
+                } else {
+                    Log("GameCube port %u is player %u (slot %u), frame %u", port, slot + 1, slot, n.curFrame);
+                }
             }
         }
         for (uint32_t i = 0; i < 12; ++i) Memory::Write8(statusPtr + port * 12 + i, st[i]);

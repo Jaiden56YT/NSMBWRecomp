@@ -805,6 +805,26 @@ so before this the mod saw no GameCube controller at all.
   player-entry screen with 8 joined players (and whether each gets a different character) was not
   reached; that needs presses from players 2-8 on that screen.
 
+## 8k. Controls for players 5-8, and the World 2 castle door report (2026-11-21, Mac)
+
+- **Controls tab:** in the mod build (rooms of 8, `nsmbw_room::Capacity() > 4`) F10 -> Controls lists Players
+  1-8 in a tighter list (rows 20 units apart, smaller text); the normal build still shows 4.
+  `nsmbw_controls.cpp` keeps bindings and a controller choice for 8 players (`p5.` .. `p8.` in
+  `nsmbw_controls.ini`); only players 1-4 count as connected Wii Remotes.
+- **Local players 5-8:** offline, `NsmbwModPadRead` now feeds GameCube port N from local player 5+N's own
+  controller and buttons (same mapping as online); a player with no controller reports none. Checked: a test
+  copy with players 5 and 7 on the keyboard logged `GameCube port 0 is local player 5` and `port 2 is local
+  player 7`, and the Controls tab showed all 8 rows (screenshot in the session). Not checked: those players
+  actually joining on the Select Players screen.
+- `NSMBW_TEST_EXIT_AFTER_S=<s>`: a test run quits by itself after that many seconds (scripted runs
+  that are not online otherwise keep running; SIGTERM does not stop the game).
+- **Door softlock in World 2's castle (user report, not fixed):** the user's mod app also had the
+  *Meltdown* level mod installed (its own 02-24.arc), and Meltdown's one code patch
+  (`0x80117F6C li r0,3`, in func_80117DC0) is skipped by the mod build ("needs a mod build"). The door
+  could not be reproduced yet: `startGame` (0x800BB780) loads the course itself, so changing the start
+  info at scene creation is too late, and the castle file placed in the 2-1 slot hangs in
+  `dScStage_c::getLoopPosX`.
+
 ## 9. Open questions for the user
 
 - Four buttons, or Mods and Online combined behind one Extras button?

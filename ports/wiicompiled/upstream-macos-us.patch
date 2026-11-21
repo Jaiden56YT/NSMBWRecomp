@@ -3256,7 +3256,7 @@ index 9d8157e..ed34dff 100644
 +
 +#endif  // x86-64 only: other hosts have no ISA level to check
 diff --git a/runtime/src/product/nsmbw_controls.cpp b/runtime/src/product/nsmbw_controls.cpp
-index d0b2e6f..c8a0a04 100644
+index d0b2e6f..401dfd4 100644
 --- a/runtime/src/product/nsmbw_controls.cpp
 +++ b/runtime/src/product/nsmbw_controls.cpp
 @@ -15,9 +15,9 @@
@@ -3292,7 +3292,30 @@ index d0b2e6f..c8a0a04 100644
  constexpr uint32_t kGameModeTitle = 2, kGameModeTitleReplay = 3;
  constexpr uint32_t kProfileWorldMap = 3, kProfileStage = 5;
  
-@@ -296,9 +298,11 @@ struct Capture {
+@@ -266,14 +268,17 @@ struct Binding {
+ };
+ 
+ std::mutex g_mutex; // bindings are read on the guest thread, edited from the overlay
+-// Per player (Wii Remote channel 0..3), per context, per action. A player's keys are read when the
+-// keyboard is one of their devices (ResolveLocked); players 2-4 have no default keys, so several
+-// players can share the keyboard on keys of their own.
+-constexpr size_t kPlayers = 4;
++// Per player, per context, per action. Players 1-4 are the Wii Remote channels 0..3; players 5-8
++// exist only in the 8-player mod build, where they are the mod's GameCube ports 0..3
++// (NsmbwModPadRead in nsmbw_netplay_lockstep.cpp). A player's keys are read when the keyboard is
++// one of their devices (ResolveLocked); players 2-8 have no default keys, so several players can
++// share the keyboard on keys of their own.
++constexpr size_t kPlayers = 8;
++constexpr uint32_t kRemotePlayers = 4;
+ std::array<std::array<std::vector<Binding>, kAllContexts.size()>, kPlayers> g_bindings;
+ // Each player's controller choice from the options menu: "auto", "keyboard", "none" or
+ // "pad:<SDL GUID>:<name>" (the name is kept so a disconnected pad can still be shown).
+-std::array<std::string, kPlayers> g_controller{"auto", "auto", "auto", "auto"};
++std::array<std::string, kPlayers> g_controller{"auto", "auto", "auto", "auto", "auto", "auto", "auto", "auto"};
+ bool g_loaded = false;
+ 
+ // A pending "press a button" from a menu.
+@@ -296,9 +301,11 @@ struct Capture {
  // Per player: how many frames each combination member has been down (ReadWpad runs once per frame
  // per player), and the members a combination used, silent until released.
  constexpr int kComboGraceFrames = 3; // 50 ms at 60 Hz
@@ -3306,7 +3329,35 @@ index d0b2e6f..c8a0a04 100644
  };
  std::array<ComboState, kPlayers> g_combo;
  
-@@ -461,6 +465,58 @@ bool KeyPartDown(const bool* keys, int numKeys, const std::string& part) {
+@@ -331,7 +338,7 @@ void Save() {
+     if (!f) return;
+     f << "# NSMBW controls, edited from the options menu. <context>.<action>.pad / .key = up to two\n";
+     f << "# bindings, each a control name or a combination joined with + (back+start).\n";
+-    f << "# Player 1 has no prefix (the format before per-player bindings); players 2-4 use p2. .. p4.\n";
++    f << "# Player 1 has no prefix (the format before per-player bindings); players 2-8 use p2. .. p8.\n";
+     f << "# controller = auto | keyboard | none | pad:<SDL GUID>:<name>\n";
+     for (uint32_t p = 0; p < kPlayers; ++p) {
+         const std::string prefix = p == 0 ? "" : "p" + std::to_string(p + 1) + ".";
+@@ -368,7 +375,7 @@ void LoadLocked() {
+         std::string key = trim(line.substr(0, eq));
+         const std::string value = trim(line.substr(eq + 1));
+         uint32_t player = 0;
+-        if (key.size() > 3 && key[0] == 'p' && key[1] >= '2' && key[1] <= '4' && key[2] == '.') {
++        if (key.size() > 3 && key[0] == 'p' && key[1] >= '2' && key[1] <= '8' && key[2] == '.') {
+             player = uint32_t(key[1] - '1');
+             key = key.substr(3);
+         }
+@@ -399,7 +406,8 @@ void LoadLocked() {
+             }
+         }
+     }
+-    // A file from before per-player bindings: players 2-4 start with player 1's buttons.
++    // A file from before per-player bindings (or before players 5-8): those players start with
++    // player 1's buttons.
+     for (uint32_t p = 1; p < kPlayers; ++p) {
+         if (!saved[p]) g_bindings[p] = g_bindings[0];
+     }
+@@ -461,6 +469,58 @@ bool KeyPartDown(const bool* keys, int numKeys, const std::string& part) {
      const SDL_Scancode code = NameToKey(part);
      return keys != nullptr && code != SDL_SCANCODE_UNKNOWN && code < numKeys && keys[code];
  }
@@ -3365,7 +3416,7 @@ index d0b2e6f..c8a0a04 100644
  // Every part down. An empty binding is never down.
  bool PadBindingDown(SDL_Gamepad* pad, const std::string& binding) {
      if (binding.empty()) return false;
-@@ -543,7 +599,40 @@ struct Device {
+@@ -543,7 +603,40 @@ struct Device {
      bool keyboard = false;
      SDL_Gamepad* pad = nullptr;
  };
@@ -3406,7 +3457,7 @@ index d0b2e6f..c8a0a04 100644
      std::array<Device, kPlayers> out{};
      std::vector<SDL_Gamepad*> free = OrderedPads();
      auto take = [&](size_t i) {
-@@ -620,10 +709,10 @@ const char* ContextName(Context context) noexcept {
+@@ -620,10 +713,10 @@ const char* ContextName(Context context) noexcept {
  namespace {
  // Whether a game object (fBase_c) of this profile is alive, from fManager_c's execute list: every
  // created base is on it, also while the F10 menu stops its updates. The list is a cLineMg_c at
@@ -3419,7 +3470,7 @@ index d0b2e6f..c8a0a04 100644
  uint32_t FindProfile(uint16_t profile) {
      uint32_t node = 0;
      Memory::TryRead32(kExecuteListAddr, node);
-@@ -664,12 +753,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
+@@ -664,12 +757,12 @@ constexpr uint16_t kProfileModelPlayManager = 729;
  
  // Any scene: it is a course (scene 5), not the world map as first assumed.
  // The manager exists for the whole hint course, so "open" is its state machine leaving the idle
@@ -3437,7 +3488,7 @@ index d0b2e6f..c8a0a04 100644
  bool HintListOpen() {
      static const bool off = std::getenv("NSMBW_NO_HINT_LIST_CONTEXT") != nullptr; // diagnostic A/B
      if (off) return false;
-@@ -722,7 +811,7 @@ std::string AliveMenuProfiles() {
+@@ -722,7 +815,7 @@ std::string AliveMenuProfiles() {
  
  // The hint movie list confirms with A, not 2: it opens from a block inside a small course (scene
  // 5), where the Gameplay bindings applied and the developer found B (bubble = A) confirmed and Y
@@ -3446,7 +3497,42 @@ index d0b2e6f..c8a0a04 100644
  // 1 (0x200; 1 | B with a Nunchuk). So while it is open the Menu actions are used, with 2 and A
  // swapped: confirm (normally 2) is sent as A, "A button" as 2; back stays 1. ListBit applies the
  // swap to what is sent; the prompt glyphs use the same swap (it is its own inverse) to find the
-@@ -1274,36 +1363,56 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
+@@ -1250,7 +1343,8 @@ void SetControllerChoice(uint32_t chan, const std::string& id) {
+ 
+ } // namespace nsmbw_controls
+ 
+-// Players with a controller: 1 (keyboard) or the number of connected gamepads, at most 4.
++// Players with a controller: 1 (keyboard) or the number of connected gamepads, at most 4 (this is
++// the number of Wii Remotes reported connected; players 5-8 are read through NsmbwControlsHasDevice).
+ extern "C" uint32_t NsmbwControlsPlayerCount() {
+     using namespace nsmbw_controls;
+     std::lock_guard lock(g_mutex);
+@@ -1258,12 +1352,23 @@ extern "C" uint32_t NsmbwControlsPlayerCount() {
+     // Remotes 1..N are reported connected, so N is the last player with a device (at least 1).
+     const auto devices = ResolveLocked();
+     uint32_t count = 1;
+-    for (uint32_t p = 0; p < kPlayers; ++p) {
++    for (uint32_t p = 0; p < kRemotePlayers; ++p) {
+         if (devices[p].keyboard || devices[p].pad != nullptr) count = p + 1;
+     }
+     return count;
+ }
+ 
++// Whether a player (0-based) has a keyboard or gamepad: the mod build's GameCube ports report "no
++// controller" for players 5-8 without one, so the game doesn't offer them a place.
++extern "C" bool NsmbwControlsHasDevice(uint32_t chan) {
++    using namespace nsmbw_controls;
++    if (chan >= kPlayers) return false;
++    std::lock_guard lock(g_mutex);
++    LoadLocked();
++    const auto devices = ResolveLocked();
++    return devices[chan].keyboard || devices[chan].pad != nullptr;
++}
++
+ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
+     using namespace nsmbw_controls;
+     if (settings_overlay::InputBlocked()) return 0;
+@@ -1274,36 +1379,56 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
      const auto& defs = ActionsFor(c);
      const auto& binds = g_bindings[chan < kPlayers ? chan : 0][size_t(c)];
      const Device device = chan < kPlayers ? ResolveLocked()[chan] : Device{};
@@ -3515,7 +3601,7 @@ index d0b2e6f..c8a0a04 100644
              ++combo.downFrames[m];
          } else {
              combo.downFrames.erase(m);
-@@ -1312,21 +1421,25 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
+@@ -1312,21 +1437,25 @@ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan) {
      }
      // A single control counts unless it is a combination member that is still in its grace frames
      // or was used by a combination and not yet released.
@@ -3548,7 +3634,7 @@ index d0b2e6f..c8a0a04 100644
          }
          if (down) out |= defs[i].wpad;
      }
-@@ -1365,8 +1478,9 @@ extern "C" float NsmbwControlsReadTilt(uint32_t chan) {
+@@ -1365,8 +1494,9 @@ extern "C" float NsmbwControlsReadTilt(uint32_t chan) {
      const auto& defs = ActionsFor(Context::Gameplay);
      const auto& binds = g_bindings[chan < kPlayers ? chan : 0][size_t(Context::Gameplay)];
      const Device device = chan < kPlayers ? ResolveLocked()[chan] : Device{};
@@ -3560,7 +3646,7 @@ index d0b2e6f..c8a0a04 100644
      int numKeys = 0;
      const bool* keys = device.keyboard ? SDL_GetKeyboardState(&numKeys) : nullptr;
  
-@@ -1374,18 +1488,20 @@ extern "C" float NsmbwControlsReadTilt(uint32_t chan) {
+@@ -1374,18 +1504,20 @@ extern "C" float NsmbwControlsReadTilt(uint32_t chan) {
      auto amount = [&](const Binding& b) {
          float best = 0.0f;
          for (const auto& name : b.key) {
@@ -3587,6 +3673,27 @@ index d0b2e6f..c8a0a04 100644
                  if (control->kind == PadKind::Button) {
                      if (SDL_GetGamepadButton(p, SDL_GamepadButton(control->id))) best = 1.0f;
                      continue;
+diff --git a/runtime/src/product/nsmbw_controls.h b/runtime/src/product/nsmbw_controls.h
+index c14ebf5..ad7b369 100644
+--- a/runtime/src/product/nsmbw_controls.h
++++ b/runtime/src/product/nsmbw_controls.h
+@@ -83,11 +83,15 @@ void DrawMenu() noexcept;
+ } // namespace nsmbw_controls
+ 
+ // Called once per VI frame by the KPAD override (nsmbw_kpad_overrides.cpp): WPAD hold bits for
+-// this frame, plus bit 31 while a "shake" action is held. Per player (Wii Remote channel 0..3):
++// this frame, plus bit 31 while a "shake" action is held. Per player (Wii Remote channel 0..3, and
++// players 5-8 as 4..7 in the mod build):
+ // each player reads the device(s) its controller choice resolves to (ControllerChoices).
+ extern "C" uint32_t NsmbwControlsReadWpad(uint32_t chan);
+ // How many players have a controller (1..4); channels below this report a connected remote.
+ extern "C" uint32_t NsmbwControlsPlayerCount();
++// Whether player chan (0..7) has a keyboard or gamepad. Players 5-8 (chan 4..7) exist only in the
++// 8-player mod build, which reads them as GameCube ports through NsmbwModPadRead.
++extern "C" bool NsmbwControlsHasDevice(uint32_t chan);
+ // Also once per VI frame: remote tilt from the tilt_left / tilt_right actions, -1 (left) .. +1
+ // (right), proportional for sticks; 0 outside courses.
+ extern "C" float NsmbwControlsReadTilt(uint32_t chan);
 diff --git a/runtime/src/product/nsmbw_movie_skip.cpp b/runtime/src/product/nsmbw_movie_skip.cpp
 index bb5a62f..e9b177c 100644
 --- a/runtime/src/product/nsmbw_movie_skip.cpp
@@ -3637,7 +3744,7 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..f78d8b6 100644
+index 8c96414..b8228e0 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
 @@ -9,16 +9,23 @@
@@ -3664,7 +3771,37 @@ index 8c96414..f78d8b6 100644
  #include <array>
  #include <atomic>
  #include <cstdio>
-@@ -156,23 +163,23 @@ std::vector<Row> BuildRows(int tab) {
+@@ -45,6 +52,10 @@ using draw::Rgb;
+ constexpr draw::Color kNumberTop = Rgb(255, 255, 0), kNumberBottom = Rgb(20, 220, 0); // T_worldNum_00
+ constexpr std::array<const char*, 4> kTabs = {"Graphics", "Audio", "Controls", "Advanced"};
+ constexpr std::array<float, 5> kRowY = {50, 20, -10, -40, -70};
++// The Controls tab of the 8-player mod build lists 8 players: a tighter list between the same two
++// lines (70 and -98), 20 units apart.
++constexpr size_t kMaxRows = 8;
++float RowY(size_t i, size_t count) { return count <= kRowY.size() ? kRowY[i] : 56.0f - 20.0f * float(i); }
+ constexpr int kControlsTab = 2;
+ 
+ enum class Kind { Picker, Toggle, Slider, Player };
+@@ -121,7 +132,9 @@ std::vector<Row> BuildRows(int tab) {
+         break;
+     }
+     case kControlsTab: {
+-        for (uint32_t p = 0; p < 4; ++p) {
++        // Players 5-8 exist only in the 8-player mod build, whose rooms take 8 (nsmbw_room::Capacity).
++        const uint32_t players = nsmbw_room::Capacity() > 4 ? 8 : 4;
++        for (uint32_t p = 0; p < players; ++p) {
+             Row r{"Player " + std::to_string(p + 1), Kind::Player};
+             const auto choices = nsmbw_controls::ControllerChoices(p);
+             std::vector<std::string> ids;
+@@ -151,28 +164,30 @@ std::vector<Row> BuildRows(int tab) {
+         break;
+     }
+     }
+-    if (rows.size() > kRowY.size()) rows.resize(kRowY.size());
++    if (rows.size() > (tab == kControlsTab ? kMaxRows : kRowY.size())) {
++        rows.resize(tab == kControlsTab ? kMaxRows : kRowY.size());
++    }
+     return rows;
  }
  
  // The game's own stop word (dGameCom game-stop flags, read by isGameStop at [r13 - 22360] with
@@ -3693,7 +3830,7 @@ index 8c96414..f78d8b6 100644
  constexpr uint32_t kGameStopOtasukePause = 0x4u;
  uint32_t g_stopBitsAdded = 0; // only the bits this menu set
  
-@@ -186,18 +193,21 @@ bool g_soundPaused = false;
+@@ -186,18 +201,21 @@ bool g_soundPaused = false;
  
  // That flag alone only stops what checks it: actors stopped, but the camera, effects and the
  // scene's own logic kept running (developer report, 2026-10-28). The framework has a full stop:
@@ -3718,7 +3855,7 @@ index 8c96414..f78d8b6 100644
      uint32_t word = 0;
      if (Memory::TryRead32(kGameStopAddr, word)) {
          uint32_t next = word;
-@@ -234,7 +244,7 @@ void SetGameStopped(bool stopped) {
+@@ -234,7 +252,7 @@ void SetGameStopped(bool stopped) {
  
  // ---- Sounds ---------------------------------------------------------------------------------------
  // The game's own system sounds (NSMBW-Decomp constants/sound_list.h; SE_SYS_CURSOR = 120 matches
@@ -3727,7 +3864,7 @@ index 8c96414..f78d8b6 100644
  // They have to start on the game thread, so they wait here until the KPAD override takes them
  // (NsmbwOptionsMenuTakeSound, nsmbw_kpad_overrides.cpp).
  enum Sound : int32_t { kSndCursor = 120, kSndDecide = 121, kSndBack = 122, kSndInvalid = 123, kSndPause = 124 };
-@@ -254,7 +264,7 @@ void LogMenu(const char* what, const char* why) {
+@@ -254,7 +272,7 @@ void LogMenu(const char* what, const char* why) {
  
  // ---- Screens and state --------------------------------------------------------------------------
  
@@ -3736,7 +3873,7 @@ index 8c96414..f78d8b6 100644
  Screen g_screen = Screen::Options;
  
  // The bindings screen ("Player N buttons"), opened by a player's Rebind button.
-@@ -271,6 +281,28 @@ struct BindState {
+@@ -271,6 +289,28 @@ struct BindState {
      bool capturing = false;
  } g_bind;
  
@@ -3765,7 +3902,7 @@ index 8c96414..f78d8b6 100644
  // Every player has keyboard slots: players can share the keyboard on keys of their own (players 2-4
  // pick Keyboard as their controller; until 2026-10-31 only player 1 had keyboard slots).
  int BindSlots() { return 4; }
-@@ -278,6 +310,9 @@ int BindSlots() { return 4; }
+@@ -278,6 +318,9 @@ int BindSlots() { return 4; }
  // Set when a menu opened from the pause window has finished closing; the pause input handler
  // (nsmbw_pause_options.cpp) takes it on the game thread and plays the window's open animation.
  std::atomic<bool> g_returnToPause{false};
@@ -3775,7 +3912,7 @@ index 8c96414..f78d8b6 100644
  
  // Starts the window's out animation (the pause window's outWindow); Draw finishes the close.
  void Close(const char* why) {
-@@ -299,6 +334,12 @@ void FinishClose() {
+@@ -299,6 +342,12 @@ void FinishClose() {
      SetGameStopped(false);
      if (g.fromPause) g_returnToPause = true;
      g.fromPause = false;
@@ -3788,7 +3925,7 @@ index 8c96414..f78d8b6 100644
  }
  
  void Open(const char* why, bool fromPause) {
-@@ -319,6 +360,23 @@ void ShowScreen(Screen screen) {
+@@ -319,6 +368,23 @@ void ShowScreen(Screen screen) {
      g.openedAt = draw::Now();
  }
  
@@ -3812,7 +3949,7 @@ index 8c96414..f78d8b6 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +525,163 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +533,163 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3976,7 +4113,7 @@ index 8c96414..f78d8b6 100644
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -566,6 +777,12 @@ void SetOpen(bool open) noexcept {
+@@ -566,6 +785,12 @@ void SetOpen(bool open) noexcept {
      }
      Play(kSndPause);
      Open("F10", false);
@@ -3989,7 +4126,7 @@ index 8c96414..f78d8b6 100644
  }
  
  void HandleEvents(const AuroraEvent* events) noexcept {
-@@ -588,7 +805,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +813,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
@@ -3999,7 +4136,7 @@ index 8c96414..f78d8b6 100644
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -599,6 +817,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -599,6 +825,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              }
              continue;
          }
@@ -4007,7 +4144,44 @@ index 8c96414..f78d8b6 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1026,276 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -637,8 +864,10 @@ void DrawPrompts(const draw::Canvas& c, float y, std::initializer_list<Prompt> p
+     }
+ }
+ 
+-void DrawRow(const draw::Canvas& c, const Row& r, float y, bool focused) {
+-    c.Label(r.label, -262, y, 22, Align::Left, false, focused ? draw::kWhite : Rgb(225, 235, 225));
++void DrawRow(const draw::Canvas& c, const Row& r, float y, bool focused, bool compact = false) {
++    // compact: the 8-player list (rows 20 apart), with smaller text and buttons.
++    const float rowH = compact ? 18 : 21, textSize = compact ? 15 : 17;
++    c.Label(r.label, -262, y, compact ? 19 : 22, Align::Left, false, focused ? draw::kWhite : Rgb(225, 235, 225));
+     switch (r.kind) {
+     case Kind::Picker: {
+         const std::string& text = r.options.empty() ? std::string() : r.options[size_t(std::clamp(r.value, 0, int(r.options.size()) - 1))];
+@@ -659,10 +888,10 @@ void DrawRow(const draw::Canvas& c, const Row& r, float y, bool focused) {
+         // edge, 126 + 157/2, meets Rebind's, 242 - 75/2).
+         const bool onPick = focused && !g.rebindFocused, onRebind = focused && g.rebindFocused;
+         const std::string& text = r.options.empty() ? std::string() : r.options[size_t(std::clamp(r.value, 0, int(r.options.size()) - 1))];
+-        const ImVec2 size = c.Button(text, 126, y, 150, 21, onPick, 17, false, true);
++        const ImVec2 size = c.Button(text, 126, y, 150, rowH, onPick, textSize, false, true);
+         if (onPick) c.Cursor(126, y, size.x + 4, size.y + 4, 0.55f);
+         if (onRebind && g.pressPending) c.Press(242, y, 68);
+-        const ImVec2 rebind = c.Button("Rebind", 242, y, 68, 21, onRebind, 17, r.dim, true);
++        const ImVec2 rebind = c.Button("Rebind", 242, y, 68, rowH, onRebind, textSize, r.dim, true);
+         if (onRebind) c.Cursor(242, y, rebind.x, rebind.y, 0.55f);
+         break;
+     }
+@@ -701,7 +930,9 @@ void DrawOptions(const draw::Canvas& c) {
+     const std::vector<Row> rows = BuildRows(g.tab);
+     int& focus = g.focus[size_t(g.tab)];
+     focus = rows.empty() ? 0 : std::clamp(focus, 0, int(rows.size()) - 1);
+-    for (size_t i = 0; i < rows.size(); ++i) DrawRow(c, rows[i], kRowY[i], int(i) == focus);
++    for (size_t i = 0; i < rows.size(); ++i) {
++        DrawRow(c, rows[i], RowY(i, rows.size()), int(i) == focus, rows.size() > kRowY.size());
++    }
+ 
+     c.Rect(0, -98, 540, 1.5f, Rgb(255, 255, 255, 70), Rgb(255, 255, 255, 70));
+     // No description lines (turned down as too long, 2026-10-29); only a note that matters, such as
+@@ -807,6 +1038,276 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4284,7 +4458,25 @@ index 8c96414..f78d8b6 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1361,31 @@ void RunScriptedOpenClose() {
+@@ -845,7 +1346,7 @@ void OpenOnFirstLaunch() {
+ 
+ // NSMBW_OPTIONS_MENU_TEST=<open>,<close>: test runs open the menu that many frames (60 fps menu time)
+ // after the first frame of scene <profile> in NSMBW_OPTIONS_MENU_TEST_SCENE (default 5), and close it
+-// again, without keyboard focus.
++// again, without keyboard focus. NSMBW_OPTIONS_MENU_TEST_TAB picks the tab it opens on.
+ void RunScriptedOpenClose() {
+     static const char* spec = std::getenv("NSMBW_OPTIONS_MENU_TEST");
+     if (spec == nullptr) return;
+@@ -865,6 +1366,8 @@ void RunScriptedOpenClose() {
+     if (step == 0 && t >= openAt) {
+         Play(kSndPause);
+         Open("test", false);
++        // NSMBW_OPTIONS_MENU_TEST_TAB=<n>: which tab the scripted open shows (2 = Controls).
++        if (const char* tab = std::getenv("NSMBW_OPTIONS_MENU_TEST_TAB")) g.tab = std::atoi(tab);
+         step = 1;
+     } else if (step == 1 && t >= closeAt) {
+         Close("test");
+@@ -872,13 +1375,31 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4316,7 +4508,7 @@ index 8c96414..f78d8b6 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1413,12 @@ void Draw() noexcept {
+@@ -906,10 +1427,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4330,7 +4522,7 @@ index 8c96414..f78d8b6 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1443,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1457,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }

@@ -58,7 +58,9 @@
 
 #include <aurora/gfx.h>
 
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 constexpr uint32_t kOtherSceneFlgAddr = 0x80428736u;
@@ -118,6 +120,17 @@ extern "C" uint32_t g_nsmbwCurrentScenePtr = 0;
 
 extern "C" uint32_t CreateNextScene_Diag_800E1ED0()
 {
+    // NSMBW_TEST_EXIT_AFTER_S=<seconds> (test runs only): the game quits by itself that long after
+    // its first scene check, so a scripted run never outlives its script.
+    static const char* exitAfter = std::getenv("NSMBW_TEST_EXIT_AFTER_S");
+    if (exitAfter != nullptr) {
+        static const auto started = std::chrono::steady_clock::now();
+        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(std::atoi(exitAfter))) {
+            std::fprintf(stderr, "[nsmbw][test] exit after %s s\n", exitAfter);
+            std::fflush(nullptr);
+            std::_Exit(0);
+        }
+    }
     const uint8_t otherSceneFlg = Memory::Read8(kOtherSceneFlgAddr);
     const uint16_t nextScene = Memory::Read16(kNextSceneAddr);
 
