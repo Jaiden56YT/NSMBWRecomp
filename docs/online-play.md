@@ -722,6 +722,15 @@ Neither machine has the HD texture pack installed (empty texture_replacements fo
 not exercised. Interpolation only changes what is drawn, and the state checks confirm it does not
 touch the shared game state.
 
+**First real game: Mac Mario + the developer as Luigi on the PC (2026-11-20, ba2544f, 120 fps).**
+The Mac hosted on its save, Mario scripted through the menus (NSMBW_TEST_INPUT: title, file 1,
+"Number of Players" down to 2 + A); the developer joined as Luigi on the "2 Players" screen with
+the PC's own controls, pressed Start Game, and the two played and cleared 1-1 with all three Star
+Coins. 18000 frames (~5 min), 601 state checks, 0 out of sync, no disconnects; the map afterwards
+showed 1-1 cleared, Mario x5 and Luigi x7. Learned: a session from a fresh save plays the long
+opening movie first (use the host's save), and the scripted self-test's A presses pick "1 player"
+on that screen.
+
 **Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
 a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT
