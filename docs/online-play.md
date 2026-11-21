@@ -764,6 +764,11 @@ Step 1 of 8-player online: the mod build (`build_mac_mod_mkwcat`) online for 2-4
   the user's own copy held 47100): the host sent 0 + 0 + 2065 bytes in 8 chunks; the joiner's session
   NAND got a byte-identical mkwcat-nsmbw.json; both copies booted straight to the world map from
   that save (scenes ... 0xA, 0x3), 2400 frames, **0 out of sync**.
+- **PC build of the mod (step 6):** the Mac-translated `data_sections_init_blobs.S` had only Mach-O and
+  ELF sections, and the PC's clang rejected the ELF `.section .rodata,"a",@progbits` line. The
+  translator (`AssemblyBlobWriter.cs`) now always writes a `_WIN32` (`.rdata,"dr"`), an Apple and an
+  ELF branch, and the GNU-stack note only for ELF, so a file translated on one platform builds on the
+  others. The Mac's generated file was given the same header; the Mac mod build still boots to the map.
 - A hand-written JSON (not a real mod save) makes the mod hang at boot even solo, so test with a
   save the mod wrote itself.
 

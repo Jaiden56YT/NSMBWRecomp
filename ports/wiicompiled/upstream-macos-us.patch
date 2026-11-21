@@ -5282,37 +5282,41 @@ index 8b07d12..1e14a7f 100644
      constexpr uint32_t kBusClockHz =
          static_cast<uint32_t>(TimeBaseContract::kBusClockHz);
 diff --git a/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs b/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs
-index 3a295f0..60c5df9 100644
+index 3a295f0..8b657dc 100644
 --- a/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs
 +++ b/translator/src/Translator.Core/IO/AssemblyBlobWriter.cs
-@@ -27,9 +27,23 @@ internal static class AssemblyBlobWriter
-         // allocatable-only flag plus an explicit @progbits type. The build always targets
-         // whichever platform the translator itself runs on (there is no cross-compilation
-         // support), so that's what this picks the section syntax from.
+@@ -22,14 +22,22 @@ internal static class AssemblyBlobWriter
+         var expectedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+         var assembly = new StringBuilder();
+         foreach (var header in headerLines) assembly.AppendLine(header);
+-        // PE/COFF (Windows) and ELF (Linux) spell a read-only data section differently in GNU-as
+-        // syntax - COFF section flags ("dr" = data, read-only) versus an ELF section needing an
+-        // allocatable-only flag plus an explicit @progbits type. The build always targets
+-        // whichever platform the translator itself runs on (there is no cross-compilation
+-        // support), so that's what this picks the section syntax from.
 -        assembly.AppendLine(OperatingSystem.IsWindows()
 -            ? ".section .rdata,\"dr\""
 -            : ".section .rodata,\"a\",@progbits");
-+        if (OperatingSystem.IsWindows())
-+        {
-+            assembly.AppendLine(".section .rdata,\"dr\"");
-+            assembly.AppendLine("#define MKW_BLOB_SYM(x) x");
-+        }
-+        else
-+        {
-+            // .S files are preprocessed, so one file serves ELF and Mach-O (macOS: C symbols
-+            // carry a leading underscore and read-only data lives in __TEXT,__const).
-+            assembly.AppendLine("#if defined(__APPLE__)");
-+            assembly.AppendLine(".section __TEXT,__const");
-+            assembly.AppendLine("#define MKW_BLOB_SYM(x) _##x");
-+            assembly.AppendLine("#else");
-+            assembly.AppendLine(".section .rodata,\"a\",@progbits");
-+            assembly.AppendLine("#define MKW_BLOB_SYM(x) x");
-+            assembly.AppendLine("#endif");
-+        }
++        // PE/COFF (Windows), Mach-O (macOS) and ELF (Linux) spell a read-only data section
++        // differently: COFF section flags ("dr" = data, read-only), __TEXT,__const with a leading
++        // underscore on C symbols, or an allocatable-only flag plus an explicit @progbits type.
++        // .S files are preprocessed, so the file carries all three and the compiler picks one: a
++        // file generated on one platform (a mod build translated on a Mac) then builds on the
++        // others too (the PC's mod build failed on the ELF line, 2026-11-20).
++        assembly.AppendLine("#if defined(_WIN32)");
++        assembly.AppendLine(".section .rdata,\"dr\"");
++        assembly.AppendLine("#define MKW_BLOB_SYM(x) x");
++        assembly.AppendLine("#elif defined(__APPLE__)");
++        assembly.AppendLine(".section __TEXT,__const");
++        assembly.AppendLine("#define MKW_BLOB_SYM(x) _##x");
++        assembly.AppendLine("#else");
++        assembly.AppendLine(".section .rodata,\"a\",@progbits");
++        assembly.AppendLine("#define MKW_BLOB_SYM(x) x");
++        assembly.AppendLine("#endif");
          assembly.AppendLine();
  
          foreach (var blob in blobs)
-@@ -40,8 +54,8 @@ internal static class AssemblyBlobWriter
+@@ -40,8 +48,8 @@ internal static class AssemblyBlobWriter
              var hash = ChecksumUtilities.Sha256Hex(blob.Data.Span);
              assembly.AppendLine($"// {blob.Comment}; sha256={hash}");
              assembly.AppendLine(".p2align 4");
@@ -5323,16 +5327,28 @@ index 3a295f0..60c5df9 100644
              var referencePath = Path.Combine(blobReferenceDirectory, blob.FileName);
              assembly.AppendLine($".incbin \"{SanitizeAssemblyPath(referencePath)}\"");
              assembly.AppendLine();
-@@ -59,7 +73,9 @@ internal static class AssemblyBlobWriter
-             // object linked into the binary already does (the norm on modern toolchains, just not
-             // producible without an explicit section since this file is hand-assembled, not
-             // compiler-emitted).
-+            assembly.AppendLine("#if !defined(__APPLE__)");
-             assembly.AppendLine(".section .note.GNU-stack,\"\",@progbits");
-+            assembly.AppendLine("#endif");
+@@ -51,16 +59,11 @@ internal static class AssemblyBlobWriter
+         {
+             if (!expectedFiles.Contains(Path.GetFullPath(stalePath))) File.Delete(stalePath);
          }
+-        if (!OperatingSystem.IsWindows())
+-        {
+-            // Absence of a .note.GNU-stack section makes the linker assume the oldest, most
+-            // conservative default for this object (an executable stack) and warn about it; this
+-            // file has no code needing one, so mark it explicitly like every other GNU-as ELF
+-            // object linked into the binary already does (the norm on modern toolchains, just not
+-            // producible without an explicit section since this file is hand-assembled, not
+-            // compiler-emitted).
+-            assembly.AppendLine(".section .note.GNU-stack,\"\",@progbits");
+-        }
++        // ELF only: without a .note.GNU-stack section the linker assumes this object needs an
++        // executable stack and warns; it has no code, so mark it explicitly.
++        assembly.AppendLine("#if !defined(__APPLE__) && !defined(_WIN32)");
++        assembly.AppendLine(".section .note.GNU-stack,\"\",@progbits");
++        assembly.AppendLine("#endif");
          FileOutput.WriteTextIfChanged(assemblyPath, assembly.ToString());
      }
+ 
 diff --git a/runtime/third_party/libco/aarch64.c b/runtime/third_party/libco/aarch64.c
 index 5c46a48..f0feb37 100644
 --- a/runtime/third_party/libco/aarch64.c
