@@ -902,6 +902,11 @@ def write_mod_source(gen, name, kamek, runtime_patches):
                   "    ctx->gpr[3] = 1;",
                   "}",
                   f"PPC_NATIVE_OVERRIDE_VOID({a}, MkwcatLoader_{a}, (CpuContext* ctx), (ctx));", ""]
+        if getattr(kamek, "pad_read", None):
+            lines += pad_read_override(kamek.pad_read)
+            # Rooms of up to 8 (players 5-8 on the GameCube ports this override feeds).
+            lines += ['extern "C" void NsmbwOnlineSetMaxPlayers(int players); // nsmbw_online_room.cpp',
+                      "namespace { struct MaxPlayers { MaxPlayers() { NsmbwOnlineSetMaxPlayers(8); } } g_maxPlayers; }", ""]
     elif kamek and kamek.loader != NEWER_LOADER:
         # The loader the game calls, replaced natively (Newer's 0x80001800 is in native_us).
         a = f"{kamek.loader:08X}"
@@ -910,6 +915,15 @@ def write_mod_source(gen, name, kamek, runtime_patches):
                   f'extern "C" void ModKamekLoader_{a}(CpuContext* ctx) {{ NsmbwRunKamekLoader(ctx, 0x{a}u); }}',
                   f"PPC_NATIVE_OVERRIDE_VOID({a}, ModKamekLoader_{a}, (CpuContext* ctx), (ctx));", ""]
     (mod_dir / f"mod_{ident}.cpp").write_text("\n".join(lines))
+
+
+def pad_read_override(address):
+    """The mod's PADRead, replaced by the runtime's feed for players 5-8 (GameCube ports): local
+    play sees no GameCube controllers as before; online, slots 4-7 drive ports 0-3."""
+    a = f"{address:08X}"
+    return ['extern "C" uint32_t NsmbwModPadRead(uint32_t statusPtr); // native_us/nsmbw_netplay_lockstep.cpp',
+            f'extern "C" uint32_t MkwcatPadRead_{a}(uint32_t statusPtr) {{ return NsmbwModPadRead(statusPtr); }}',
+            f"PPC_NATIVE_OVERRIDE({a}, MkwcatPadRead_{a}, uint32_t, (uint32_t statusPtr), (statusPtr));", ""]
 
 
 # ---------------------------------------------------------------- translation
@@ -1039,6 +1053,18 @@ def main():
         return
     function_map = write_function_map(out, kamek)
     native_dir, excluded = native_dir_for(out, kamek)
+    if getattr(kamek, "pad_read", None):
+        # The translator only sees overrides in its native dir; the real one is compiled from the
+        # generated mod source, so the dir gets a declaration-only copy (never compiled).
+        if native_dir == PORT / "native_us":
+            dst = out / "native_filtered"
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(native_dir, dst)
+            native_dir = dst
+        (native_dir / "mod_pad_read_decl.cpp").write_text(
+            "// Translator-only copy (not compiled): the override lives in the generated mod source.\n" +
+            "#include \"hle_stubs.h\"\n" + "\n".join(pad_read_override(kamek.pad_read)))
     gen = translate(out, out / "code", args.threads, function_map, native_dir)
     write_mod_source(gen, name, kamek, runtime_patches)
     build_dir = UPSTREAM / f"build_mac_mod_{name}"

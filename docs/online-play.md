@@ -772,6 +772,32 @@ Step 1 of 8-player online: the mod build (`build_mac_mod_mkwcat`) online for 2-4
 - A hand-written JSON (not a real mod save) makes the mod hang at boot even solo, so test with a
   save the mod wrote itself.
 
+## 8j. 8 players online with the nsmbw-project mod build (2026-11-20, Mac)
+
+nsmbw-project gives players 5-8 GameCube ports 0-3 (m_pad.h CHAN_GC_0..3; d_game_key.cpp
+s_channels), read through its own copy of the SDK PAD library. The runtime's SI does no transfers,
+so before this the mod saw no GameCube controller at all.
+
+- **Lockstep (protocol 3):** up to 8 slots; the relayed-to slot uses flag bits 4-6. Slots 0-3 still
+  drive Wii Remote channels 0-3; slots 4-7 are kept apart and fed to the GameCube ports.
+- **Players 5-8 keep their own controls:** each copy sends its local player 1's usual input (the same
+  Wii-Remote-style bits as slots 0-3). Every copy turns slot 4+p into a PADStatus for port p the same
+  way, the inverse of the mod's GameCube mapping (d_game_key_core.cpp setConfigKey, DOLPHIN case):
+  D-pad -> sideways directions, 2 -> A (jump), 1 -> B (run), A -> X, B -> Y, plus -> START,
+  minus or the spin action -> Z, tilt -> the L/R triggers (the mod tilts by R - L; direction not
+  checked yet). Offline the ports still report no controller.
+- **Where:** `NsmbwModPadRead` (native_us/nsmbw_netplay_lockstep.cpp); `tools/mod_build.py` generates
+  the override at the mod's PADRead (0x817CFC14, from the pack's SMAP) into the mod source, plus a
+  declaration-only copy in the translator's native dir so direct calls reach it; the vanilla build
+  has no such override.
+- **Rooms:** 4 players, or 8 in the mod build (the generated source calls NsmbwOnlineSetMaxPlayers(8));
+  the member list gets tighter from the fifth player.
+- **Test (Mac, 5 mod copies, delay 4, self-test presses):** every copy logged "GameCube port 0 is player
+  5 (slot 4)" from frame 5; all five went boot -> title -> game setup -> movie -> map, 2400 frames,
+  240+ state checks each, **0 out of sync**. Two normal (vanilla) copies on protocol 3: 0 out of sync.
+- **Not shown yet:** that the mod lets a GameCube-port player join on the player screen and gives each
+  of the 8 a different character; that is the 8-player test (4 Mac + 4 PC).
+
 ## 9. Open questions for the user
 
 - Four buttons, or Mods and Online combined behind one Extras button?

@@ -4,7 +4,8 @@
 // stay in the same state.
 //
 //   NSMBW_NETPLAY_SLOT=<n>        this copy's player slot (0 = host, Wii Remote channel n)
-//   NSMBW_NETPLAY_PLAYERS=<n>     players in the session (2-4); every copy sees that many remotes
+//   NSMBW_NETPLAY_PLAYERS=<n>     players in the session (2-8); slots 0-3 are Wii Remote channels 0-3,
+//                                 slots 4-7 (the nsmbw-project mod build only) GameCube ports 0-3
 //   NSMBW_NETPLAY_PORT=<port>     this copy's UDP port (bound on 127.0.0.1, or NSMBW_NETPLAY_BIND)
 //   NSMBW_NETPLAY_PEERS=<slot>@<host>:<port>,...   every other copy's slot and address
 //   NSMBW_NETPLAY_DELAY=<frames>  input delay D (default 2): input sampled at frame N is used at N+D
@@ -28,7 +29,7 @@
 //     not host-paced) is exchanged and compared; a mismatch is logged as "OUT OF SYNC".
 //
 // Packet (little-endian, at most 512 bytes): u32 magic "NSNP", u8 version, u8 slot, u8 count,
-// u8 flags (bit 0: the sender is leaving the session; bit 1: relayed, for the slot in bits 4-5,
+// u8 flags (bit 0: the sender is leaving the session; bit 1: relayed, for the slot in bits 4-6,
 // which the host forwards unchanged), u32 token, u32 ack (the highest frame of the receiver's input this copy holds, all
 // earlier ones too; 0xFFFFFFFF none), u32 first frame, u32 hash frame, u32 hash (hash frame
 // 0xFFFFFFFF = none), then count x { u32 hold, u32 tilt bits, i8 movie-skip request, 3 pad }.
@@ -67,6 +68,7 @@ inline void NetClose(SocketHandle s) { close(s); }
 #include <aurora/env.hpp>
 
 #include <cstdarg>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -86,8 +88,9 @@ extern "C" bool NsmbwOnlinePumpEventsQuit(); // pumps window events; true if the
 
 namespace {
 constexpr uint32_t kMagic = 0x504E534Eu; // "NSNP"
-constexpr uint8_t kVersion = 2; // 2: relay flags (8h); a version-1 copy is refused, not misread
-constexpr uint32_t kMaxSlots = 4;
+constexpr uint8_t kVersion = 3; // 2: relay flags (8h); 3: 8 slots, relay slot in 3 bits. Older copies are refused
+constexpr uint32_t kMaxSlots = 8;
+constexpr uint32_t kRemoteSlots = 4; // slots 0-3 drive Wii Remote channels; 4-7 GameCube ports (mod build)
 constexpr uint32_t kRing = 256;          // frames of input kept per slot
 constexpr uint32_t kMaxPerPacket = 32;   // frames per packet
 constexpr uint32_t kNone = 0xFFFFFFFFu;
@@ -126,6 +129,8 @@ struct Net {
     uint32_t lastCompared[kMaxSlots];
     uint64_t waits = 0, waitedMicros = 0, desyncs = 0, checks = 0;
     uint32_t curFrame = 0;
+    uint32_t gcHold[kMaxSlots - kRemoteSlots] = {}; // this frame's agreed input of slots 4-7
+    float gcTilt[kMaxSlots - kRemoteSlots] = {};
     bool leaving = false;      // set once this copy leaves: every packet from then on says so
     bool relay = false;        // NSMBW_NETPLAY_RELAY: non-host copies reach each other through the host
     uint64_t relayedOut = 0;   // host: packets forwarded for other copies
@@ -279,7 +284,7 @@ void SendTo(Peer& p, uint32_t newest) {
     b.push_back(kVersion);
     b.push_back(static_cast<uint8_t>(n.slot));
     b.push_back(static_cast<uint8_t>(newest - first + 1));
-    // flags: bit 0 = this copy is leaving the session; bit 1 + bits 4-5 = relayed to slot p.slot
+    // flags: bit 0 = this copy is leaving the session; bit 1 + bits 4-6 = relayed to slot p.slot
     b.push_back(static_cast<uint8_t>((n.leaving ? 1u : 0u) | (p.relayed ? (2u | (p.slot << 4)) : 0u)));
     Put32(b, n.token);
     Put32(b, n.contiguous[p.slot]);
@@ -323,7 +328,7 @@ void Receive() {
         }
         if (!peer) continue;
         const bool relayed = (buf[7] & 2u) != 0;
-        const uint32_t relayTo = (buf[7] >> 4) & 3u;
+        const uint32_t relayTo = (buf[7] >> 4) & 7u;
         if (relayed && relayTo != n.slot) {
             // Host: forward unchanged to the copy it is meant for (only the host relays; a packet
             // that names another slot anywhere else is dropped).
@@ -544,15 +549,18 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
     if (titleShown) NsmbwOnlineSetWaitingTitle(nullptr);
     CompareHashes();
 
-    *channels = n.players;
+    *channels = std::min(n.players, kRemoteSlots);
     *skip = -1;
     for (uint32_t s = 0; s < kMaxSlots; ++s) {
-        hold[s] = 0;
-        tilt[s] = 0.0f;
+        // Slots 0-3 go to the caller's Wii Remote channels, 4-7 to the GameCube ports (NsmbwModPadRead).
+        uint32_t& h = s < kRemoteSlots ? hold[s] : n.gcHold[s - kRemoteSlots];
+        float& t = s < kRemoteSlots ? tilt[s] : n.gcTilt[s - kRemoteSlots];
+        h = 0;
+        t = 0.0f;
         if (s >= n.players || frame < n.delay) continue;
         const FrameInput& in = At(s, frame);
-        hold[s] = in.hold;
-        tilt[s] = in.tilt;
+        h = in.hold;
+        t = in.tilt;
         // The movie-skip request: the lowest slot that asks, so every copy picks the same one.
         if (*skip < 0 && in.skip >= 0) *skip = in.skip;
     }
@@ -562,4 +570,54 @@ extern "C" void NsmbwNetplayExchange(uint32_t localHold, float localTilt, int32_
             static_cast<unsigned long long>(n.checks), static_cast<unsigned long long>(n.desyncs));
         if (n.relay && n.slot == 0) Log("relayed %llu packets", static_cast<unsigned long long>(n.relayedOut));
     }
+}
+
+// The nsmbw-project mod build's PADRead (its own copy of the SDK's PAD library, at an address only
+// that build has: tools/mod_build.py generates the override and calls this). The mod gives players
+// 5-8 GameCube ports 0-3 (m_pad.h CHAN_GC_0..3; d_game_key.cpp s_channels). The runtime's SI does no
+// transfers, so without this the mod sees no GameCube controller at all.
+//
+// Online, slot 4 + port drives port `port`. Each player keeps their own controls: their input is the
+// same Wii-Remote-style bits as slots 0-3 (the local player 1's controller or keys), sent through the
+// lockstep unchanged and turned into a PADStatus here, the same way on every copy. The button mapping
+// is the inverse of the mod's GameCube mapping (d_game_key_core.cpp, setConfigKey, DOLPHIN case:
+// D-pad/stick -> sideways directions, A -> 2, B -> 1 (+Z), X -> A, Y -> B (+1), Z -> shake + minus,
+// START -> plus); tilt goes to the triggers (the mod tilts by R - L). Offline it reports no
+// controllers, as before. Writes 4 x 12-byte PADStatus (big-endian) and returns 0 (no motors).
+extern "C" uint32_t NsmbwModPadRead(uint32_t statusPtr) {
+    if (statusPtr == 0) return 0;
+    Init();
+    for (uint32_t port = 0; port < 4; ++port) {
+        uint8_t st[12] = {};
+        const uint32_t slot = kRemoteSlots + port;
+        if (!n.active || slot >= n.players) {
+            st[10] = 0xFF; // PAD_ERR_NO_CONTROLLER (-1)
+        } else {
+            const uint32_t w = n.gcHold[port];
+            uint16_t b = 0;
+            if (w & 0x8u) b |= 0x0001;    // screen left  (sideways: remote up)    -> PAD left
+            if (w & 0x4u) b |= 0x0002;    // screen right (remote down)            -> PAD right
+            if (w & 0x1u) b |= 0x0004;    // screen down  (remote left)            -> PAD down
+            if (w & 0x2u) b |= 0x0008;    // screen up    (remote right)           -> PAD up
+            if (w & 0x100u) b |= 0x0100;  // 2 (jump)                              -> A
+            if (w & 0x200u) b |= 0x0200;  // 1 (run / fire)                        -> B
+            if (w & 0x800u) b |= 0x0400;  // A                                     -> X
+            if (w & 0x400u) b |= 0x0800;  // B                                     -> Y
+            if (w & 0x10u) b |= 0x1000;   // plus                                  -> START
+            if (w & (0x1000u | 0x80000000u)) b |= 0x0010; // minus, or the spin/shake action -> Z
+            st[0] = static_cast<uint8_t>(b >> 8);
+            st[1] = static_cast<uint8_t>(b);
+            const float t = std::clamp(n.gcTilt[port], -1.0f, 1.0f);
+            st[6] = static_cast<uint8_t>(t < 0.0f ? -t * 255.0f : 0.0f); // triggerL
+            st[7] = static_cast<uint8_t>(t > 0.0f ? t * 255.0f : 0.0f);  // triggerR
+            st[10] = 0; // PAD_ERR_NONE
+            static bool logged[4] = {};
+            if (!logged[port]) {
+                logged[port] = true;
+                Log("GameCube port %u is player %u (slot %u), frame %u", port, slot + 1, slot, n.curFrame);
+            }
+        }
+        for (uint32_t i = 0; i < 12; ++i) Memory::Write8(statusPtr + port * 12 + i, st[i]);
+    }
+    return 0;
 }

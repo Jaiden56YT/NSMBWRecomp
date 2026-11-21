@@ -394,6 +394,9 @@ def link(mod_dir, image, game_rels, module_top, region="E2"):
     # Call-original thunks and gates continue at the game function + 4: an entry point of its own.
     game_seeds = sorted({addr + 4 for addr, _ in externs} | {addr + 4 for addr, _ in replace})
     flush = next((a for a, n in smap_names.items() if n.startswith("__flush_entire_cache")), None)
+    # The mod's own PADRead (its copy of the SDK PAD library): replaced natively so players 5-8
+    # (GameCube ports) can be fed (native_us/nsmbw_netplay_lockstep.cpp, NsmbwModPadRead).
+    pad_read = next((a for a, n in smap_names.items() if n == "PADRead"), None)
 
     print(f"  mkwcat: {arc_path.name}: module {len(rel_raw)} + imports {len(imp_raw)} bytes linked at "
           f"{base:08X} (text {text_lo:08X}-{text_hi:08X}, bss at {own.get(3, 0):08X})")
@@ -405,4 +408,4 @@ def link(mod_dir, image, game_rels, module_top, region="E2"):
         name="d_project", base=gates_base, code=bytes(code), text_size=text_hi - gates_base, flag=flag_at,
         game_patches=patches, seeds=sorted(seeds), game_seeds=game_seeds,
         prolog=own[mod.prolog_sec] + mod.prolog, arc_header=arc_header_at, handle=handle_at, arc_name=name_at,
-        flush=flush, replaced=[a for a, _ in replace])
+        flush=flush, pad_read=pad_read, replaced=[a for a, _ in replace])

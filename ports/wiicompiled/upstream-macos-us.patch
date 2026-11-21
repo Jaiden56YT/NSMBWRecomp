@@ -3637,7 +3637,7 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..078512d 100644
+index 8c96414..f78d8b6 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
 @@ -9,16 +9,23 @@
@@ -4007,7 +4007,7 @@ index 8c96414..078512d 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1026,274 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1026,276 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4093,14 +4093,16 @@ index 8c96414..078512d 100644
 +        y -= 26;
 +    }
 +    if (v.role == Role::Hosting || v.role == Role::Joined) {
++        // Up to 8 in the mod build: a tighter list from the fifth player on, so it fits the panel.
++        const bool tight = v.members.size() > 4;
 +        for (const nsmbw_room::Member& m : v.members) {
 +            std::string who = "Player " + std::to_string(m.slot + 1) + "  " + m.name;
 +            if (m.slot == v.mySlot) who += " (you)";
-+            c.Label(who, -262, y, 19, Align::Left, false, Rgb(225, 235, 225));
++            c.Label(who, -262, y, tight ? 16 : 19, Align::Left, false, Rgb(225, 235, 225));
 +            if (m.slot != 0 && m.pingMs >= 0) {
-+                c.Text(std::to_string(m.pingMs) + " ms", 262, y, 15, {.white = Rgb(200, 215, 230), .align = Align::Right, .outline = true});
++                c.Text(std::to_string(m.pingMs) + " ms", 262, y, tight ? 13 : 15, {.white = Rgb(200, 215, 230), .align = Align::Right, .outline = true});
 +            }
-+            y -= 22;
++            y -= tight ? 17 : 22;
 +        }
 +    } else if (v.role == Role::None && g_online.entering) {
 +        const bool blink = int(draw::Now() / 30) % 2 == 0;
@@ -4282,7 +4284,7 @@ index 8c96414..078512d 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1359,31 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1361,31 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4314,7 +4316,7 @@ index 8c96414..078512d 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1411,12 @@ void Draw() noexcept {
+@@ -906,10 +1413,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4328,7 +4330,7 @@ index 8c96414..078512d 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1441,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1443,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
@@ -9327,10 +9329,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..08b2d5b
+index 0000000..729fee8
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,1016 @@
+@@ -0,0 +1,1028 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9653,8 +9655,15 @@ index 0000000..08b2d5b
 +    for (const Peer& p : r.peers) SendTo(p.addr, b);
 +}
 +
++int g_capacity = 4;
++} // namespace
++
++int Capacity() { return g_capacity; }
++void SetCapacity(int players) { g_capacity = players < 2 ? 2 : players > kMaxPlayers ? kMaxPlayers : players; }
++
++namespace {
 +int FreeSlot() {
-+    for (int s = 1; s < kMaxPlayers; ++s) {
++    for (int s = 1; s < Capacity(); ++s) {
 +        bool used = false;
 +        for (const Peer& p : r.peers) used = used || p.slot == s;
 +        if (!used) return s;
@@ -10347,12 +10356,17 @@ index 0000000..08b2d5b
 +    SDL_PumpEvents();
 +    return SDL_HasEvent(SDL_EVENT_QUIT) || SDL_HasEvent(SDL_EVENT_WINDOW_CLOSE_REQUESTED);
 +}
++
++// Called from the mod build's generated source at startup (tools/mod_build.py): rooms of up to 8.
++extern "C" void NsmbwOnlineSetMaxPlayers(int players) {
++    nsmbw_room::SetCapacity(players);
++}
 diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
 new file mode 100644
-index 0000000..c9999af
+index 0000000..6769a3f
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,72 @@
 +#pragma once
 +// Online play rooms (NSMBW repo docs/online-play.md, sections 5 and 7): the part before a session.
 +// One machine hosts a room on a UDP port, the others join it by address; the room screen
@@ -10385,7 +10399,11 @@ index 0000000..c9999af
 +};
 +
 +constexpr uint16_t kDefaultPort = 47100;
-+constexpr int kMaxPlayers = 4;
++constexpr int kMaxPlayers = 8; // what the protocol carries; a room takes Capacity() players
++// 4, or 8 in the nsmbw-project mod build (players 5-8 on its GameCube ports), which raises it at
++// startup with NsmbwOnlineSetMaxPlayers.
++int Capacity();
++void SetCapacity(int players);
 +
 +bool Host(std::string& error);
 +bool Join(const std::string& address, std::string& error); // "host", "host:port"
