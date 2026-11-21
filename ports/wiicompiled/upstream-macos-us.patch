@@ -1255,10 +1255,21 @@ index b859711..37d4f39 100644
  
  MKW_MEMORY_FORCE_INLINE uint8_t FlatRead8(uint32_t address) {
 diff --git a/runtime/include/runtime_config.h b/runtime/include/runtime_config.h
-index 7b3527e..c48c86a 100644
+index 7b3527e..38ab76e 100644
 --- a/runtime/include/runtime_config.h
 +++ b/runtime/include/runtime_config.h
-@@ -58,6 +58,8 @@ struct RuntimeUserConfig {
+@@ -7,6 +7,10 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <filesystem>
++#if defined(__APPLE__)
++#include <mach-o/dyld.h>
++#include <cstring>
++#endif
+ #include <fstream>
+ #include <iostream>
+ #include <limits>
+@@ -58,6 +62,8 @@ struct RuntimeUserConfig {
      // The one canonical Retro Rewind installation, owned and updated by the frontend. Setup records
      // it here instead of copying the pack, so an asset-only update is visible on the next launch.
      std::optional<std::string> retroRewindRoot;
@@ -1267,7 +1278,7 @@ index 7b3527e..c48c86a 100644
      std::vector<std::string> overlayRoots;
      // Controller mappings use Wii/GameCube button names as keys and up to two
      // comma-separated SDL-style physical button names ("south", or
-@@ -162,7 +164,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
+@@ -162,7 +168,10 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
  }
  
  inline std::optional<std::filesystem::path> ExecutableDirectory() {
@@ -1279,7 +1290,29 @@ index 7b3527e..c48c86a 100644
      std::wstring buffer(MAX_PATH, L'\0');
      for (;;) {
          const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-@@ -448,6 +453,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
+@@ -175,6 +184,21 @@ inline std::optional<std::filesystem::path> ExecutableDirectory() {
+         }
+         buffer.resize(buffer.size() * 2);
+     }
++#elif defined(__APPLE__)
++    // macOS has no /proc: before this branch existed ExecutableDirectory() always failed on the
++    // Mac, so nsmbw_data/ (the shader caches), wii_bootstrap/ and portable.txt were looked up in
++    // the working directory instead of next to the executable (found 2026-11-20: a copy of the
++    // game used the build folder's warm shader cache because it was started from there).
++    uint32_t size = 0;
++    _NSGetExecutablePath(nullptr, &size);
++    std::string buffer(size, '\0');
++    if (size == 0 || _NSGetExecutablePath(buffer.data(), &size) != 0) {
++        return std::nullopt;
++    }
++    buffer.resize(std::strlen(buffer.c_str()));
++    std::error_code ec;
++    const auto resolved = std::filesystem::weakly_canonical(std::filesystem::path(buffer), ec);
++    return (ec ? std::filesystem::path(buffer) : resolved).parent_path();
+ #else
+     // /proc/self/exe is a Linux-specific magic symlink to the running executable; readlink()
+     // does not NUL-terminate and silently truncates if the buffer is too small, so this grows
+@@ -448,6 +472,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
      config.nandRoot = FindConfigValue<std::string>(document, "paths", "nand_root");
      config.dvdRoot = FindConfigValue<std::string>(document, "paths", "dvd_root");
      config.retroRewindRoot = FindConfigValue<std::string>(document, "paths", "retro_rewind_root");
@@ -1287,7 +1320,7 @@ index 7b3527e..c48c86a 100644
      if (auto roots = FindConfigValue<std::vector<std::string>>(document, "paths", "overlay_roots")) {
          for (auto& root : *roots) {
              root = Trim(root);
-@@ -866,6 +872,10 @@ inline std::filesystem::path ResolvedDvdRoot() {
+@@ -866,6 +891,10 @@ inline std::filesystem::path ResolvedDvdRoot() {
  }
  
  /// The canonical Retro Rewind installation the frontend owns, or "" when none is recorded.
