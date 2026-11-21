@@ -745,6 +745,28 @@ changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind ca
 (the screen warns when the router's own address is private: friends outside cannot reach it then,
 and a VPN is the way).
 
+## 8i. Online with the nsmbw-project mod build (2026-11-20, Mac)
+
+Step 1 of 8-player online: the mod build (`build_mac_mod_mkwcat`) online for 2-4 players.
+
+- **Lockstep:** two mod-build copies on the Mac started straight into a session (NSMBW_NETPLAY_*,
+  ports 47310/47311, delay 3, fresh saves): both ran the mod's `_prolog`, went through the same
+  scenes (boot, opening, title, game setup, movie, map, level), 2400 frames, 60/61 state checks,
+  **0 out of sync**.
+- **The host's save:** nsmbw-project does not use wiimj2d.sav; it saves to
+  `title/00010004/534d4e45/mkwcat-nsmbw.json` (section 6c of mods.md). A mod host therefore had "no
+  save" and every session started from a fresh one. Rooms now always send three files: wiimj2d.sav,
+  banner.bin and mkwcat-nsmbw.json, a missing one as an empty file that the joiner does not write
+  (room protocol version 2, so older copies are refused; JSON limit 1 MiB). The host has "no save"
+  only when both wiimj2d.sav and the JSON are missing. Fixed on the way: the joiner never sized its
+  chunk list for an empty file, and would have marked chunk 0 of an empty list.
+- **Test** (room test with NSMBW_ROOM_PORT=47150, a new test switch for another room port because
+  the user's own copy held 47100): the host sent 0 + 0 + 2065 bytes in 8 chunks; the joiner's session
+  NAND got a byte-identical mkwcat-nsmbw.json; both copies booted straight to the world map from
+  that save (scenes ... 0xA, 0x3), 2400 frames, **0 out of sync**.
+- A hand-written JSON (not a real mod save) makes the mod hang at boot even solo, so test with a
+  save the mod wrote itself.
+
 ## 9. Open questions for the user
 
 - Four buttons, or Mods and Online combined behind one Extras button?

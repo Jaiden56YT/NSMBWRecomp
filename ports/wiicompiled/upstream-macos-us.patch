@@ -9301,10 +9301,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..88ea2b4
+index 0000000..08b2d5b
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,1004 @@
+@@ -0,0 +1,1016 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9384,17 +9384,28 @@ index 0000000..88ea2b4
 +using Clock = std::chrono::steady_clock;
 +
 +constexpr uint32_t kMagic = 0x4D52534Eu; // "NSRM"
-+constexpr uint8_t kVersion = 1;
++constexpr uint8_t kVersion = 2; // 2: the save includes the nsmbw-project JSON save
 +enum : uint8_t { kHello = 1, kWelcome, kRefuse, kRoster, kPing, kPong, kStart, kStartAck, kLeave, kSave, kSaveAck };
 +// The host's save (NAND title/00010004/534d4e45, the US game's save folder): sent in chunks before
-+// START when the host chose to play on it, so every copy starts from the host's progress.
-+constexpr const char* kSaveFiles[] = {"wiimj2d.sav", "banner.bin"};
-+constexpr size_t kSaveFileCount = 2;
++// START when the host chose to play on it, so every copy starts from the host's progress. All three
++// are always sent, a missing one as an empty file (not written on the joiner): the game's save, its
++// banner, and nsmbw-project's own JSON save (the mod build saves there instead of wiimj2d.sav).
++constexpr const char* kSaveFiles[] = {"wiimj2d.sav", "banner.bin", "mkwcat-nsmbw.json"};
++constexpr size_t kSaveFileCount = 3;
 +constexpr size_t kChunk = 384;
 +constexpr const char* kSaveDir = "title/00010004/534d4e45";
 +constexpr size_t kNameLen = 24;
 +constexpr auto kResend = std::chrono::milliseconds(500);
 +constexpr auto kTimeout = std::chrono::seconds(5);
++// NSMBW_ROOM_PORT=<port>: rooms on another port (tests next to a copy that holds 47100).
++uint16_t RoomPort() {
++    static const uint16_t port = [] {
++        const char* v = std::getenv("NSMBW_ROOM_PORT");
++        const unsigned long p = v ? std::strtoul(v, nullptr, 10) : 0;
++        return p > 0 && p < 65536 ? uint16_t(p) : kDefaultPort;
++    }();
++    return port;
++}
 +
 +struct Peer {
 +    int slot = 0;
@@ -9765,7 +9776,7 @@ index 0000000..88ea2b4
 +        const size_t file = buf[12], files = buf[13];
 +        const uint32_t size = Get32(buf + 14), offset = Get32(buf + 18);
 +        const uint16_t chunkLen = Get16(buf + 22);
-+        if (files == 0 || files > kSaveFileCount || file >= files || size > 256 * 1024 || offset > size ||
++        if (files == 0 || files > kSaveFileCount || file >= files || size > 1024 * 1024 || offset > size ||
 +            chunkLen > kChunk || offset + chunkLen > size || len != 24u + chunkLen) {
 +            return;
 +        }
@@ -9773,7 +9784,7 @@ index 0000000..88ea2b4
 +            r.saveFiles.assign(files, {});
 +            r.saveHave.assign(files, {});
 +        }
-+        if (r.saveFiles[file].size() != size) {
++        if (r.saveFiles[file].size() != size || r.saveHave[file].size() != ChunkCount(size)) {
 +            r.saveFiles[file].assign(size, 0);
 +            r.saveHave[file].assign(ChunkCount(size), false);
 +        }
@@ -9912,6 +9923,7 @@ index 0000000..88ea2b4
 +        const auto dir = nand / kSaveDir;
 +        std::filesystem::create_directories(dir, ec);
 +        for (size_t i = 0; i < r.saveFiles.size() && i < kSaveFileCount; ++i) {
++            if (r.saveFiles[i].empty()) continue; // the host has no such file
 +            std::ofstream f(dir / kSaveFiles[i], std::ios::binary | std::ios::trunc);
 +            f.write(reinterpret_cast<const char*>(r.saveFiles[i].data()), std::streamsize(r.saveFiles[i].size()));
 +        }
@@ -9974,14 +9986,14 @@ index 0000000..88ea2b4
 +        return false;
 +    }
 +    Reset("");
-+    if (!OpenSocket(kDefaultPort, true, error)) {
++    if (!OpenSocket(RoomPort(), true, error)) {
 +        r.status = error;
 +        return false;
 +    }
 +    std::random_device rd;
 +    r.token = (uint32_t(rd()) << 16 | uint32_t(rd())) | 1u;
 +    r.role = Role::Hosting;
-+    r.port = kDefaultPort;
++    r.port = RoomPort();
 +    r.mySlot = 0;
 +    r.myName = MachineName();
 +    r.status = "Waiting for players to join";
@@ -10005,7 +10017,7 @@ index 0000000..88ea2b4
 +    while (!host.empty() && host.front() == ' ') host.erase(host.begin());
 +    sockaddr_in to{};
 +    to.sin_family = AF_INET;
-+    to.sin_port = htons(portText.empty() ? kDefaultPort : uint16_t(std::strtoul(portText.c_str(), nullptr, 10)));
++    to.sin_port = htons(portText.empty() ? RoomPort() : uint16_t(std::strtoul(portText.c_str(), nullptr, 10)));
 +    if (host == "localhost") host = "127.0.0.1";
 +    if (inet_pton(AF_INET, host.c_str(), &to.sin_addr) != 1) {
 +        addrinfo hints{};
@@ -10090,14 +10102,14 @@ index 0000000..88ea2b4
 +        const auto dir = RuntimeNandPath::DiscoverNandRootPath() / kSaveDir;
 +        for (const char* name : kSaveFiles) {
 +            std::ifstream f(dir / name, std::ios::binary);
-+            if (!f) {
-+                // No save on the host yet: everyone starts from a fresh one (a new game).
-+                r.saveFiles.clear();
-+                r.useHostSave = false;
-+                std::fprintf(stderr, "[nsmbw][room] the host has no save yet: the session starts from a fresh one\n");
-+                break;
-+            }
-+            r.saveFiles.emplace_back(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
++            r.saveFiles.emplace_back();
++            if (f) r.saveFiles.back().assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
++        }
++        if (r.saveFiles[0].empty() && r.saveFiles[2].empty()) {
++            // No save on the host yet: everyone starts from a fresh one (a new game).
++            r.saveFiles.clear();
++            r.useHostSave = false;
++            std::fprintf(stderr, "[nsmbw][room] the host has no save yet: the session starts from a fresh one\n");
 +        }
 +    }
 +    if (r.useHostSave) {
@@ -10107,8 +10119,8 @@ index 0000000..88ea2b4
 +        Put64(b, h);
 +        for (Peer& p : r.peers) p.chunksAcked.assign(TotalChunks(), false);
 +        r.sendingSave = true;
-+        std::fprintf(stderr, "[nsmbw][room] sending the save: %zu + %zu bytes, %zu chunks\n", r.saveFiles[0].size(),
-+                     r.saveFiles[1].size(), TotalChunks());
++        std::fprintf(stderr, "[nsmbw][room] sending the save: %zu + %zu + %zu bytes, %zu chunks\n",
++                     r.saveFiles[0].size(), r.saveFiles[1].size(), r.saveFiles[2].size(), TotalChunks());
 +    } else {
 +        b.push_back(0);
 +        Put64(b, 0);
