@@ -48,12 +48,15 @@
         <b>Properties</b> → <b>Filesystem</b> → right-click <b>Disc</b> → <b>Extract Entire Disc…</b> and choose the
         <code>disc</code> folder next to this page.</p>
       <p>When it's done, <code>disc</code> holds two folders: <code>sys</code> and <code>files</code>.</p></li>
-    <li><h3>Install Hamachi and join the network</h3>
-      <p>Get Hamachi free from <a href="https://vpn.net">vpn.net</a> and sign in. Then <b>Network → Join an existing
-        network</b>, using the name and password your host sends you. Wait for a <b>green dot</b> next to the host.</p></li>
+    <li><h3>Join the group's network (ZeroTier)</h3>
+      <p>Get ZeroTier free from <a href="https://www.zerotier.com/download/">zerotier.com/download</a>. Open its icon
+        (menu bar on Mac, tray on Windows) → <b>Join New Network</b> and paste the <b>Network ID</b> your host sends you.
+        The host then ticks <b>Auth</b> next to you on my.zerotier.com; until then you can't connect.</p>
+      <p>Using Hamachi instead? Get it from <a href="https://vpn.net">vpn.net</a>, <b>Network → Join an existing
+        network</b> with the name and password, and wait for a <b>green dot</b>. ZeroTier ran smoother in our tests.</p></li>
     <li><h3>Open the game once</h3>
       <p><b>Windows:</b> double-click <code>NSMBWCompiled.exe</code>. When Windows asks about the firewall, click
-        <b>Allow</b> and tick <b>Public networks</b> too (Hamachi counts as public).</p>
+        <b>Allow</b> and tick <b>Public networks</b> too (ZeroTier and Hamachi count as public).</p>
       <p><b>Mac</b> (Apple Silicon): open <b>Terminal</b>, type <code>xattr -dr com.apple.quarantine </code> (with a space
         at the end), drag this whole folder onto the Terminal window and press Return. Then double-click
         <code>NSMBW Online.app</code>. If macOS still says it can't be opened, go to <b>System Settings → Privacy &amp;
@@ -75,7 +78,7 @@
       <li><h3>Open the Online screen</h3>
         <p>On the file-select screen choose <b>Online</b> (or press <kbd>F10</kbd> → <b>Online</b>), then <b>Join a room</b>.</p></li>
       <li><h3>Type the host's address</h3>
-        <p>The host sends you something like <code>25.1.2.3:47100</code>. Type or paste it (<kbd>Ctrl</kbd>+<kbd>V</kbd>) and press <b>Join</b>.</p></li>
+        <p>The host sends you something like <code>10.67.48.65:47100</code> (ZeroTier) or <code>25.1.2.3:47100</code> (Hamachi). Type or paste it (<kbd>Ctrl</kbd>+<kbd>V</kbd>) and press <b>Join</b>.</p></li>
       <li><h3>Wait for the host</h3>
         <p>When the host presses Start, your game restarts by itself. That's normal.</p></li>
       <li><h3>Join with your character</h3>
@@ -89,7 +92,9 @@
       <li><h3>Make a room</h3>
         <p>On the file-select screen choose <b>Online</b> (or <kbd>F10</kbd> → <b>Online</b>), then <b>Host a room</b>.</p></li>
       <li><h3>Send your address</h3>
-        <p>The screen shows <b>“Others join with: … or Hamachi 25.x.x.x:47100”</b>. Send everyone the <b>Hamachi</b> one.</p></li>
+        <p><b>ZeroTier:</b> send everyone your ZeroTier address (shown in the ZeroTier app or in the network's
+          Members list, e.g. <code>10.67.48.65</code>) with <code>:47100</code> after it.
+          <b>Hamachi:</b> the screen shows <b>“… or Hamachi 25.x.x.x:47100”</b>; send that one.</p></li>
       <li><h3>Start</h3>
         <p>When everyone is listed, press <b>Start the game</b>. Every game restarts together.</p></li>
       <li><h3>Pick the file and players</h3>
@@ -103,17 +108,19 @@
       <li>Leaving (<kbd>F10</kbd> → Online → Leave the session) or closing the window <b>ends the game for everyone</b>. The host can open a new room.</li>
       <li>Progress made online <b>isn't copied back</b> to the host's normal save yet.</li>
       <li>Everyone must use <b>this same version</b> of the game (the Windows and Mac downloads from the same
-        day go together). Older versions won't connect.</li>
+        day go together). A different version is turned away with “That room runs another version of the game”.</li>
     </ul>
   </div>
 
   <h2>Something not working?</h2>
   <details><summary>“No answer from that address”</summary>
-    <p>Check the host has a green dot in Hamachi, that you typed the <b>Hamachi</b> address (starts with 25.), and that the host allowed the game through the firewall.</p></details>
+    <p>Check you're both on the same ZeroTier network and approved (Auth ticked), or that the host has a green dot in
+      Hamachi; that you typed the host's ZeroTier or Hamachi address; and that the host allowed the game through the
+      firewall.</p></details>
   <details><summary>The game says it can't find the game files</summary>
     <p>The <code>disc</code> folder must contain <code>sys</code> and <code>files</code> directly (not another folder with them inside).</p></details>
   <details><summary>“Player N stopped responding”</summary>
-    <p>Their connection dropped for 20 seconds. Check Hamachi, then the host opens a new room.</p></details>
+    <p>Their connection dropped for 20 seconds. Check ZeroTier or Hamachi, then the host opens a new room.</p></details>
 </main>
 <script>
   document.querySelectorAll('.tabs button').forEach(function (b) {

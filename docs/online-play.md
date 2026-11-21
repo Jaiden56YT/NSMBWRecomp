@@ -838,6 +838,16 @@ so before this the mod saw no GameCube controller at all.
   world/stage and the course file name buffer 0x80373D7C - the entrance is not honoured yet),
   `NSMBW_LOG_START_INFO=1`, `NSMBW_LOG_DEMO_MNG=1` (daPyDemoMng +0x60..+0xC4 on every change).
 
+- **Builds that differ are refused (room protocol 3):** after the door fix the user's Mac (fixed mod build)
+  and a friend (the 9373255 zip) connected and desynced "at times": both spoke room protocol 2 and lockstep 3
+  but simulated doors and area changes differently. HELLO now carries a 32-bit id (FNV-1a of a build tag);
+  the host refuses another id ("That room runs another version of the game"). The tag is the runtime's
+  (`nsmbw runtime 2026-11-21`, bumped by hand when the simulation changes) plus, in a mod build, `mod <name>
+  <sha256 of the patched main.dol/RELs, the module and the run-time patches>` from tools/mod_build.py
+  (`NsmbwOnlineSetBuildTag`). Tested locally: a mod-build joiner joined a mod-build host; a normal-build joiner
+  was refused. The desync itself was not captured (the game's log is overwritten at relaunch).
+- Friends' START HERE: ZeroTier first (it played smoothly for the user), Hamachi as the alternative.
+
 ## 9. Open questions for the user
 
 - Four buttons, or Mods and Online combined behind one Extras button?

@@ -9521,18 +9521,18 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..729fee8
+index 0000000..73b755e
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,1028 @@
+@@ -0,0 +1,1059 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
 +// u16 pad, u32 room token; the host picks the token when it opens the room, and a joiner's HELLO
 +// carries 0):
-+//   HELLO     joiner -> host   name[24]                        resent every 0.5 s until WELCOME
++//   HELLO     joiner -> host   name[24], u32 build id          resent every 0.5 s until WELCOME
 +//   WELCOME   host -> joiner   u8 slot
-+//   REFUSE    host -> joiner   u8 reason (1 full, 2 started, 3 version)
++//   REFUSE    host -> joiner   u8 reason (1 full, 2 started, 3 version or a different build)
 +//   ROSTER    host -> all      u8 count, count x {u8 slot, name[24], i16 ping ms}   every 0.5 s
 +//   PING      either way       u8 slot, u64 sender's clock                          every 0.5 s
 +//   PONG      reply to a PING  u64 the PING's clock
@@ -9604,7 +9604,20 @@ index 0000000..729fee8
 +using Clock = std::chrono::steady_clock;
 +
 +constexpr uint32_t kMagic = 0x4D52534Eu; // "NSRM"
-+constexpr uint8_t kVersion = 2; // 2: the save includes the nsmbw-project JSON save
++constexpr uint8_t kVersion = 3; // 2: the save includes the nsmbw-project JSON save; 3: HELLO has the build id
++// What a session needs to be identical on every machine: copies that simulate differently connect
++// and then desync without any other sign (2026-11-21: a mod build with the door fix against one
++// without). The runtime's part is bumped by hand when a change alters the simulation; a mod build
++// appends its own (tools/mod_build.py: a hash of the patched binaries and the mod's module).
++std::string& BuildTag() {
++    static std::string tag = "nsmbw runtime 2026-11-21";
++    return tag;
++}
++uint32_t BuildId() {
++    uint32_t h = 2166136261u; // FNV-1a
++    for (const char c : BuildTag()) h = (h ^ uint8_t(c)) * 16777619u;
++    return h;
++}
 +enum : uint8_t { kHello = 1, kWelcome, kRefuse, kRoster, kPing, kPong, kStart, kStartAck, kLeave, kSave, kSaveAck };
 +// The host's save (NAND title/00010004/534d4e45, the US game's save folder): sent in chunks before
 +// START when the host chose to play on it, so every copy starts from the host's progress. All three
@@ -9916,6 +9929,12 @@ index 0000000..729fee8
 +        if (SameAddr(p.addr, from)) peer = &p;
 +    }
 +    if (type == kHello && len >= 12 + kNameLen) {
++        if (!peer && (len < 12 + kNameLen + 4 || Get32(buf + 12 + kNameLen) != BuildId())) {
++            std::vector<uint8_t> b = Header(kRefuse, 0);
++            b.push_back(3); // another build: it would desync
++            SendTo(from, b);
++            return;
++        }
 +        if (!peer) {
 +            const int slot = r.starting ? -1 : FreeSlot();
 +            if (slot < 0) {
@@ -9971,7 +9990,7 @@ index 0000000..729fee8
 +    if (!r.peers.empty()) r.peers[0].lastHeard = Clock::now();
 +    if (type == kRefuse && len >= 13) {
 +        const uint8_t why = buf[12];
-+        Reset(why == 1 ? "The room is full" : why == 2 ? "That room has already started" : "That room runs another version");
++        Reset(why == 1 ? "The room is full" : why == 2 ? "That room has already started" : "That room runs another version of the game (everyone needs the same download)");
 +        return;
 +    }
 +    if (type == kWelcome && len >= 13) {
@@ -10456,6 +10475,7 @@ index 0000000..729fee8
 +        if (r.role == Role::Joining) {
 +            std::vector<uint8_t> b = Header(kHello, 0);
 +            PutName(b, r.myName);
++            Put32(b, BuildId());
 +            SendTo(r.hostAddr, b);
 +        } else {
 +            std::vector<uint8_t> b = Header(kPing, r.token);
@@ -10539,6 +10559,11 @@ index 0000000..729fee8
 +    }
 +}
 +
++// The build tag a mod build adds (see BuildTag), and the tag for the room screen.
++void AppendBuildTag(const char* tag) {
++    BuildTag() += " | ";
++    BuildTag() += tag;
++}
 +} // namespace nsmbw_room
 +
 +extern "C" bool NsmbwOnlineTakeLeaveRequest() { return nsmbw_room::TakeLeaveRequest(); }
@@ -10552,6 +10577,12 @@ index 0000000..729fee8
 +// Called from the mod build's generated source at startup (tools/mod_build.py): rooms of up to 8.
 +extern "C" void NsmbwOnlineSetMaxPlayers(int players) {
 +    nsmbw_room::SetCapacity(players);
++}
++
++// Called from every mod build's generated source at startup (tools/mod_build.py): its fingerprint,
++// so a room refuses a copy of another build.
++extern "C" void NsmbwOnlineSetBuildTag(const char* tag) {
++    if (tag != nullptr) nsmbw_room::AppendBuildTag(tag);
 +}
 diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
 new file mode 100644
