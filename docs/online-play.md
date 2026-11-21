@@ -731,6 +731,14 @@ showed 1-1 cleared, Mario x5 and Luigi x7. Learned: a session from a fresh save 
 opening movie first (use the host's save), and the scripted self-test's A presses pick "1 player"
 on that screen.
 
+**No save toggle (2026-11-20, developer request).** The order is now: open a room, everyone joins,
+the host presses Start, every copy restarts, and the host picks the mode, the file and the number of
+players in the game's own menus. Start always sends the host's save (a host without one starts
+everyone fresh); the room screen's "Save: mine / a fresh one" toggle is gone (three host buttons
+now). Tested on the Mac: with a save and with a new install (the game creates an empty save at its
+first boot, so the host always has one) the save was sent (120 chunks) and both copies restarted
+into the session. Test runs can still force a fresh save with NSMBW_ONLINE_TEST=host,fresh.
+
 **Not tested yet.** A real internet session (two different networks); a successful UPnP mapping on
 a router that has it on; the Windows build of these
 changes (nsmbw_upnp.cpp uses Winsock there, not compiled yet); routers behind carrier-grade NAT

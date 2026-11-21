@@ -3637,7 +3637,7 @@ index bb5a62f..e9b177c 100644
  // desync (2026-11-07).
  void LogReplay() {
 diff --git a/runtime/src/product/nsmbw_options_menu.cpp b/runtime/src/product/nsmbw_options_menu.cpp
-index 8c96414..6b3be1a 100644
+index 8c96414..078512d 100644
 --- a/runtime/src/product/nsmbw_options_menu.cpp
 +++ b/runtime/src/product/nsmbw_options_menu.cpp
 @@ -9,16 +9,23 @@
@@ -3812,7 +3812,7 @@ index 8c96414..6b3be1a 100644
  void OpenBindings(uint32_t player) {
      g_bind = BindState{};
      g_bind.player = player;
-@@ -467,10 +525,164 @@ bool BindingsCommand(Cmd cmd, const char* why) {
+@@ -467,10 +525,163 @@ bool BindingsCommand(Cmd cmd, const char* why) {
      return false;
  }
  
@@ -3852,12 +3852,12 @@ index 8c96414..6b3be1a 100644
 +}
 +
 +// The Online screen's rows for the room's state: the actions in order (labels drawn in DrawOnline).
-+enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession, SaveChoice, OpenPort };
++enum class OnlineAction { Host, Join, Connect, Start, Close, Leave, LeaveSession, OpenPort };
 +std::vector<OnlineAction> OnlineActions(const nsmbw_room::View& v) {
 +    using nsmbw_room::Role;
 +    if (nsmbw_room::InSession()) return {OnlineAction::LeaveSession};
 +    if (v.role == Role::Hosting) {
-+        return {OnlineAction::Start, OnlineAction::SaveChoice, OnlineAction::OpenPort, OnlineAction::Close};
++        return {OnlineAction::Start, OnlineAction::OpenPort, OnlineAction::Close};
 +    }
 +    if (v.role == Role::Joining || v.role == Role::Joined) return {OnlineAction::Leave};
 +    if (g_online.entering) return {OnlineAction::Connect};
@@ -3911,10 +3911,9 @@ index 8c96414..6b3be1a 100644
 +            nsmbw_upnp::Open(nsmbw_room::kDefaultPort);
 +            break;
 +        case OnlineAction::LeaveSession: nsmbw_room::RequestLeaveSession(); break;
-+        case OnlineAction::SaveChoice: nsmbw_room::SetUseHostSave(!nsmbw_room::UseHostSave()); break;
 +        }
 +        g_online.error = ok ? std::string() : error;
-+        if (a != OnlineAction::SaveChoice && a != OnlineAction::OpenPort) g_online.row = 0;
++        if (a != OnlineAction::OpenPort) g_online.row = 0;
 +        Play(ok ? kSndDecide : kSndInvalid);
 +        g.pressPending = ok;
 +        break;
@@ -3977,7 +3976,7 @@ index 8c96414..6b3be1a 100644
      return g_screen == Screen::Options ? OptionsCommand(cmd, why) : BindingsCommand(cmd, why);
  }
  
-@@ -566,6 +778,12 @@ void SetOpen(bool open) noexcept {
+@@ -566,6 +777,12 @@ void SetOpen(bool open) noexcept {
      }
      Play(kSndPause);
      Open("F10", false);
@@ -3990,7 +3989,7 @@ index 8c96414..6b3be1a 100644
  }
  
  void HandleEvents(const AuroraEvent* events) noexcept {
-@@ -588,7 +806,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -588,7 +805,8 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              SetOpen(!g.open);
              continue;
          }
@@ -4000,7 +3999,7 @@ index 8c96414..6b3be1a 100644
              Dispatch(action == "tab_prev" ? Cmd::TabPrev : Cmd::TabNext, "tab binding");
              continue;
          }
-@@ -599,6 +818,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
+@@ -599,6 +817,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
              }
              continue;
          }
@@ -4008,7 +4007,7 @@ index 8c96414..6b3be1a 100644
          switch (e.type) {
          case SDL_EVENT_KEY_DOWN: OnKey(e.key); break;
          case SDL_EVENT_GAMEPAD_BUTTON_DOWN: OnButton(e.gbutton); break;
-@@ -807,6 +1027,275 @@ void DrawBindings(const draw::Canvas& c) {
+@@ -807,6 +1026,274 @@ void DrawBindings(const draw::Canvas& c) {
      }
  }
  
@@ -4117,7 +4116,7 @@ index 8c96414..6b3be1a 100644
 +    }
 +
 +    static constexpr const char* kLabels[] = {"Host a room", "Join a room", "Join", "Start the game", "Close the room",
-+                                              "Leave the room", "Leave the session", "", "Open port (internet)"};
++                                              "Leave the room", "Leave the session", "Open port (internet)"};
 +    // The host's four actions in a 2 x 2 grid (it fits under four players); one column otherwise.
 +    const bool grid = v.role == Role::Hosting && !nsmbw_room::InSession();
 +    float rowY = grid ? std::min(y - 4, -46.0f) : std::min(y - 6, -40.0f);
@@ -4130,9 +4129,7 @@ index 8c96414..6b3be1a 100644
 +        const float width = grid ? 240.0f : 220.0f;
 +        if (focused && g.pressPending) c.Press(cx, cy, width);
 +        std::string label = kLabels[int(actions[i])];
-+        if (actions[i] == OnlineAction::SaveChoice) {
-+            label = nsmbw_room::UseHostSave() ? "Save: mine (host's)" : "Save: a fresh one";
-+        } else if (actions[i] == OnlineAction::OpenPort && upnp.state == nsmbw_upnp::State::Open) {
++        if (actions[i] == OnlineAction::OpenPort && upnp.state == nsmbw_upnp::State::Open) {
 +            label = "Port open";
 +        } else if (working) {
 +            label = "Opening the port...";
@@ -4244,7 +4241,7 @@ index 8c96414..6b3be1a 100644
 +// Set on the game thread by the file select's Online button once its press animation has played.
 +std::atomic<bool> g_openOnline{false};
 +
-+// NSMBW_ONLINE_TEST=host[,save][,start@<players>] | join=<address>: test runs use the room without the
++// NSMBW_ONLINE_TEST=host[,save|,fresh][,start@<players>] | join=<address>: test runs use the room without the
 +// screen: host (and press Start once that many players are in) or join, 3 s after the first frame.
 +// NSMBW_ONLINE_TEST_SHOW=1 also opens the Online screen, to look at it.
 +void RunScriptedOnline() {
@@ -4265,6 +4262,7 @@ index 8c96414..6b3be1a 100644
 +        } else {
 +            nsmbw_room::Host(err);
 +            if (s.find(",save") != std::string::npos) nsmbw_room::SetUseHostSave(true);
++            if (s.find(",fresh") != std::string::npos) nsmbw_room::SetUseHostSave(false); // tests only
 +            if (const size_t at = s.find("start@"); at != std::string::npos) startAt = std::atoi(s.c_str() + at + 6);
 +            else step = 2;
 +        }
@@ -4284,7 +4282,7 @@ index 8c96414..6b3be1a 100644
  // Set on the game thread by the pause window's Options button (nsmbw_pause_options.cpp) once that
  // window has played its press and out animations; opened here on the next frame. The game already
  // played its own decide sound.
-@@ -872,13 +1361,31 @@ void RunScriptedOpenClose() {
+@@ -872,13 +1359,31 @@ void RunScriptedOpenClose() {
      }
  }
  
@@ -4316,7 +4314,7 @@ index 8c96414..6b3be1a 100644
          return;
      }
      if (!art::Load()) { // logged once by Load; without the art there is nothing to draw with
-@@ -906,10 +1413,12 @@ void Draw() noexcept {
+@@ -906,10 +1411,12 @@ void Draw() noexcept {
      }
      const float fade = g.closing ? zoom : std::min(1.0f, (now - g.openedAt) / draw::kWindowFrames);
      const draw::Canvas c(/*shrinkOthers=*/true, zoom); // rows and tabs are too close for grown buttons
@@ -4330,7 +4328,7 @@ index 8c96414..6b3be1a 100644
      else DrawOptions(c);
      g.pressPending = false;
  }
-@@ -934,3 +1443,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
+@@ -934,3 +1441,10 @@ extern "C" int32_t NsmbwOptionsMenuTakeSound() { return nsmbw_options_menu::Take
  extern "C" int64_t NsmbwOptionsMenuTakeSoundPauseWord() { return nsmbw_options_menu::g_soundPauseWord.exchange(-1); }
  extern "C" void NsmbwOptionsMenuRequestOpen() { nsmbw_options_menu::g_openFromPause = true; }
  extern "C" bool NsmbwOptionsMenuTakeReturnToPause() { return nsmbw_options_menu::g_returnToPause.exchange(false); }
@@ -9278,10 +9276,10 @@ index a89e4a4..1e3b84c 100644
      const uint64_t base = (static_cast<uint64_t>(baseHi) << 32) | baseLo;
 diff --git a/runtime/src/product/nsmbw_online_room.cpp b/runtime/src/product/nsmbw_online_room.cpp
 new file mode 100644
-index 0000000..a188e97
+index 0000000..88ea2b4
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.cpp
-@@ -0,0 +1,998 @@
+@@ -0,0 +1,1004 @@
 +// Online play rooms: see nsmbw_online_room.h.
 +//
 +// Protocol (UDP, little-endian, every packet starts with u32 magic "NSRM", u8 version, u8 type,
@@ -9397,7 +9395,9 @@ index 0000000..a188e97
 +    Clock::time_point startedAt{};
 +    std::string status;
 +    // The host's save, when the session uses it: file contents (host: read at Start; joiner: received).
-+    bool useHostSave = false;
++    // The session plays on the host's save (the host then picks a file in the normal file select),
++    // or a fresh one when the host has none yet (developer request, 2026-11-20).
++    bool useHostSave = true;
 +    std::vector<std::vector<uint8_t>> saveFiles;
 +    std::vector<std::vector<bool>> saveHave; // joiner: chunks received per file
 +    bool sendingSave = false;   // host: chunks out, START waits for every joiner to have them all
@@ -10066,12 +10066,16 @@ index 0000000..a188e97
 +        for (const char* name : kSaveFiles) {
 +            std::ifstream f(dir / name, std::ios::binary);
 +            if (!f) {
-+                error = "No save on this computer yet (play once, or use a fresh save)";
++                // No save on the host yet: everyone starts from a fresh one (a new game).
 +                r.saveFiles.clear();
-+                return false;
++                r.useHostSave = false;
++                std::fprintf(stderr, "[nsmbw][room] the host has no save yet: the session starts from a fresh one\n");
++                break;
 +            }
 +            r.saveFiles.emplace_back(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 +        }
++    }
++    if (r.useHostSave) {
 +        uint64_t h = 0xCBF29CE484222325ull;
 +        for (const auto& file : r.saveFiles) for (uint8_t c : file) h = (h ^ c) * 0x100000001B3ull;
 +        b.push_back(1);
@@ -10282,10 +10286,10 @@ index 0000000..a188e97
 +}
 diff --git a/runtime/src/product/nsmbw_online_room.h b/runtime/src/product/nsmbw_online_room.h
 new file mode 100644
-index 0000000..b355bf4
+index 0000000..c9999af
 --- /dev/null
 +++ b/runtime/src/product/nsmbw_online_room.h
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,68 @@
 +#pragma once
 +// Online play rooms (NSMBW repo docs/online-play.md, sections 5 and 7): the part before a session.
 +// One machine hosts a room on a UDP port, the others join it by address; the room screen
@@ -10330,7 +10334,8 @@ index 0000000..b355bf4
 +void Poll();
 +View Snapshot();
 +bool Active();
-+// Host: play the session on this machine's save (sent to everyone at Start) instead of a fresh one.
++// Host: play the session on this machine's save (sent to everyone at Start; the default, and a fresh
++// one when there is none yet) or force a fresh one (test runs: NSMBW_ONLINE_TEST=host,fresh).
 +void SetUseHostSave(bool on);
 +bool UseHostSave();
 +// This copy is running an online session (started by a room's Start, or by hand with NSMBW_NETPLAY_*).
