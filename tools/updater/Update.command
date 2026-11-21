@@ -62,9 +62,18 @@ rm -rf "$HERE/NSMBW Online.app"
 ditto "$NEW/NSMBW Online.app" "$HERE/NSMBW Online.app"
 rm -rf "$HERE/NSMBW Online.app/Contents/MacOS/UserData"
 ditto "$TMP/keep/UserData" "$HERE/NSMBW Online.app/Contents/MacOS/UserData"
-for f in "START HERE.html" "ABOUT THE MOD.txt" "Update.command" "update.cfg" "build.txt"; do
+xattr -dr com.apple.quarantine "$HERE/NSMBW Online.app" 2>/dev/null
+# Putting UserData back changes the bundle: sign it again (ad hoc, as the download was).
+codesign --force --deep -s - "$HERE/NSMBW Online.app" >/dev/null 2>&1
+for f in "START HERE.html" "ABOUT THE MOD.txt" "update.cfg" "build.txt"; do
     [ -e "$NEW/$f" ] && cp "$NEW/$f" "$HERE/$f"
 done
-xattr -dr com.apple.quarantine "$HERE/NSMBW Online.app" 2>/dev/null
 echo "Updated to $TAG. Your game files, saves and settings were kept."
+# This script is running: its new copy goes in under another name and is renamed over it (bash
+# keeps reading the old file), as the very last step.
+if [ -e "$NEW/Update.command" ]; then
+    cp "$NEW/Update.command" "$HERE/.Update.command.new" && chmod +x "$HERE/.Update.command.new" &&
+        mv -f "$HERE/.Update.command.new" "$HERE/Update.command"
+fi
 read -r -p "Press Return to close." _
+exit 0
