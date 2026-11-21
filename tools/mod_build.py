@@ -27,6 +27,7 @@ Usage (from the repo root):
 """
 
 import argparse
+import bisect
 import os
 import re
 import shutil
@@ -337,6 +338,60 @@ class GameImage:
         (out_code / "main.dol").write_bytes(dol)
         for name in RELS:
             (out_code / "rels" / f"{name}.rel").write_bytes(self.files[name])
+
+
+def static_constructor_ranges(image):
+    """[start, end) of every game static constructor: main.dol's .ctors list and each REL's .ctors
+    section (its ADDR32 relocations). They run before any mod is loaded - at boot (main.dol) and
+    when a REL is linked - so on the console they always run the game's original code; a code
+    patch the mod's loader makes later never executes inside them. Ends come from the next
+    function in function_map_us.txt."""
+    starts = sorted({int(line.split()[0], 16) for line in (PORT / "function_map_us.txt").read_text().splitlines()
+                     if line.strip() and not line.startswith("#")})
+    text = [sec for sec in image.sections if sec.executable]
+
+    def is_text(v):
+        return any(sec.address <= v < sec.address + sec.size for sec in text)
+
+    ctors = set()
+    dol = image.files["main.dol"]
+    for sec in image.sections:  # main.dol: the data section that is a zero-ended list of text pointers
+        if sec.module != "main.dol" or sec.executable or sec.size < 8:
+            continue
+        words = [struct.unpack_from(">I", dol, sec.file_offset + i)[0] for i in range(0, sec.size - 3, 4)]
+        n = 0
+        while n < len(words) and is_text(words[n]):
+            n += 1
+        if n >= 16 and n < len(words) and words[n] == 0:
+            ctors.update(words[:n])
+    for name, (base, _) in RELS.items():
+        d = image.files[name]
+        count, table = struct.unpack(">II", d[0x0C:0x14])
+        offs = [struct.unpack(">I", d[table + i * 8:table + i * 8 + 4])[0] & ~3 for i in range(count)]
+        rel_id = struct.unpack(">I", d[0:4])[0]
+        imp_offset, imp_size = struct.unpack(">II", d[0x28:0x30])
+        for i in range(imp_size // 8):
+            module, cursor = struct.unpack(">II", d[imp_offset + i * 8:imp_offset + i * 8 + 8])
+            if module != rel_id:
+                continue
+            patched = pos = 0
+            while True:
+                offset, rtype, section, addend = struct.unpack(">HBBI", d[cursor:cursor + 8])
+                cursor += 8
+                if rtype == 203:
+                    break
+                if rtype == 202:
+                    patched, pos = section, 0
+                    continue
+                pos += offset
+                # .ctors is section 2 in the game's RELs (Metrowerks layout: .text, .ctors, .dtors, ...)
+                if patched == 2 and rtype == 1:
+                    ctors.add(base + offs[section] + addend)
+    ranges = []
+    for c in sorted(ctors):
+        i = bisect.bisect_right(starts, c)
+        ranges.append((c, starts[i] if i < len(starts) else c + 4))
+    return ranges
 
 
 def add_dol_section(dol, address, data, text):
@@ -807,18 +862,28 @@ def build_inputs(mod_dir, out_code):
         # data (profile tables and objects). Its code patches are baked (constructors never write
         # code); its data patches are applied by the native loader at that same moment, otherwise
         # the constructors would overwrite them with vanilla values.
-        loader_data = kamek_code = 0
+        loader_data = kamek_code = in_ctors = 0
+        # Baked code runs from boot, the loader's patches only after it: a patch inside a game
+        # static constructor would run there, which never happens on the console (2026-11-21:
+        # mkwcat moves d_a_player_manager's statics into its own memory; baked into that file's
+        # constructor, the game built its 0x98-byte daPyDemoMng and the next object on top of the
+        # mod's 0xC8-byte one, which then lost its door queue - the door softlock).
+        ctor_ranges = static_constructor_ranges(image)
         for address, value in kamek.game_patches:
             section = image.section_for(address, len(value))
             if section is None or not section.executable:
                 runtime_patches.append((address, value))
                 loader_data += 1
                 continue
+            if any(lo <= address < hi for lo, hi in ctor_ranges):
+                in_ctors += 1
+                continue
             image.write(address, value)
             stats["baked"] += 1
             kamek_code += 1
         print(f"  kamek: {kamek_code} code patch(es) baked, {loader_data} data patch(es) "
-              "applied by the native loader at run time")
+              f"applied by the native loader at run time, {in_ctors} left out of game static "
+              f"constructors ({len(ctor_ranges)} found; they run before the loader, as on the console)")
     if kamek and getattr(kamek, "kind", "") != "mkwcat":
         for address, original, value, why in KAMEK_COMPAT_PATCHES:
             if image.read(address, 4) == bytes.fromhex(original):

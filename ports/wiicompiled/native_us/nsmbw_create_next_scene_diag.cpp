@@ -61,6 +61,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 
 namespace {
 constexpr uint32_t kOtherSceneFlgAddr = 0x80428736u;
@@ -131,6 +133,33 @@ extern "C" uint32_t CreateNextScene_Diag_800E1ED0()
             std::_Exit(0);
         }
     }
+    // NSMBW_LOG_DEMO_MNG=1 (door investigation): daPyDemoMng_c (m_instance = r13 - 0x59EC =
+    // 0x80429C94) words +0x60..+0xC4 whenever any word changes ("|" before +0x60, +0x70, +0xA8, +0xB8). +0x60/+0x70 are the course-in/out lists (4
+    // players); the nsmbw-project mod adds 4 more of each at +0xA8/+0xB8.
+    static const bool logDemo = std::getenv("NSMBW_LOG_DEMO_MNG") != nullptr;
+    if (logDemo) {
+        static uint32_t last[50] = {};
+        const uint32_t mng = Memory::Read32(0x80429C94u);
+        if (mng >= 0x80000000u && mng < 0x81800000u) {
+            uint32_t now[50];
+            bool changed = false;
+            for (uint32_t i = 0; i < 50; ++i) {
+                now[i] = Memory::Read32(mng + i * 4);
+                changed = changed || now[i] != last[i];
+            }
+            if (changed) {
+                std::string line;
+                char buf[16];
+                for (uint32_t i = 0x18; i < 50; ++i) { // from +0x60
+                    std::snprintf(buf, sizeof(buf), "%s%d", i == 0x18 || i == 0x1C || i == 0x2A || i == 0x2E ? " | " : " ",
+                                  int32_t(now[i]));
+                    line += buf;
+                }
+                for (uint32_t i = 0; i < 50; ++i) last[i] = now[i];
+                std::fprintf(stderr, "[nsmbw][demo-mng] %08X%s\n", mng, line.c_str());
+            }
+        }
+    }
     const uint8_t otherSceneFlg = Memory::Read8(kOtherSceneFlgAddr);
     const uint16_t nextScene = Memory::Read16(kNextSceneAddr);
 
@@ -151,6 +180,45 @@ extern "C" uint32_t CreateNextScene_Diag_800E1ED0()
 
     const uint32_t para = Memory::Read32(kParaAddr);
 
+    // NSMBW_TEST_START_COURSE=<world>,<level>,<area>,<entrance> (experiment): rewrite the course
+    // before the second CRSIN (the first course after the title), in the start info and in the dInfo_c
+    // instance (m_instance = r13 (0x8042F680) - 0x5704 = 0x80429F7C; mCurrentWorldNo +0x50, mCurrentStageNo +0x54).
+    static const char* testStart = std::getenv("NSMBW_TEST_START_COURSE");
+    static int crsinVisits = 0;
+    unsigned tw = 0, tl = 0, ta = 0, te = 0;
+    if (testStart != nullptr && nextScene == 7u && ++crsinVisits == 2 &&
+        std::sscanf(testStart, "%u,%u,%u,%u", &tw, &tl, &ta, &te) == 4) {
+        Memory::Write8(kStartGameInfoAddr + 5u, uint8_t(te));
+        Memory::Write8(kStartGameInfoAddr + 6u, uint8_t(ta));
+        Memory::Write8(kStartGameInfoAddr + 12u, uint8_t(tw));
+        Memory::Write8(kStartGameInfoAddr + 13u, uint8_t(tl));
+        Memory::Write8(kStartGameInfoAddr + 14u, uint8_t(tw));
+        Memory::Write8(kStartGameInfoAddr + 15u, uint8_t(tl));
+        const uint32_t info = Memory::Read32(0x80429F7Cu);
+        std::fprintf(stderr, "[nsmbw][test] course start replaced; dInfo %08X world %u stage %u -> %u %u\n", info,
+                     Memory::Read32(info + 0x50u), Memory::Read32(info + 0x54u), tw, tl);
+        Memory::Write32(info + 0x50u, tw);
+        Memory::Write32(info + 0x54u, tl);
+        // The course file the CRSIN scene loads is named in a buffer that dCd_c::setCourseArcName
+        // (0x8008EC90) filled earlier, called from 0x809281B0 with the buffer 0x80373D7C.
+        constexpr uint32_t kCourseArcName = 0x80373D7Cu;
+        char old[16] = {};
+        for (uint32_t i = 0; i < 15; ++i) old[i] = char(Memory::Read8(kCourseArcName + i));
+        char name[16];
+        std::snprintf(name, sizeof(name), "%02u-%02u", tw + 1, tl + 1);
+        for (uint32_t i = 0; i <= std::strlen(name); ++i) Memory::Write8(kCourseArcName + i, uint8_t(name[i]));
+        std::fprintf(stderr, "[nsmbw][test] course file name '%s' -> '%s'\n", old, name);
+    }
+    // NSMBW_LOG_START_INFO=1: the course the start info names at each scene change (0-based world and
+    // level, area, entrance), e.g. to see which course a scripted world-map press entered.
+    static const bool logStart = std::getenv("NSMBW_LOG_START_INFO") != nullptr;
+    if (logStart) {
+        std::fprintf(stderr, "[nsmbw][start-info] scene 0x%X: world %u level %u (2: %u %u) area %u entrance %u mode %u\n", nextScene,
+                     Memory::Read8(kStartGameInfoAddr + 12u), Memory::Read8(kStartGameInfoAddr + 13u),
+                     Memory::Read8(kStartGameInfoAddr + 14u), Memory::Read8(kStartGameInfoAddr + 15u),
+                     Memory::Read8(kStartGameInfoAddr + 6u), Memory::Read8(kStartGameInfoAddr + 5u),
+                     Memory::Read8(kStartGameInfoAddr + 11u));
+    }
     auto& cpu = GetPersistentCpuContext();
     cpu.gpr[3] = nextScene;
     cpu.gpr[4] = para;

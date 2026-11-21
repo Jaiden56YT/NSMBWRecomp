@@ -818,12 +818,25 @@ so before this the mod saw no GameCube controller at all.
   actually joining on the Select Players screen.
 - `NSMBW_TEST_EXIT_AFTER_S=<s>`: a test run quits by itself after that many seconds (scripted runs
   that are not online otherwise keep running; SIGTERM does not stop the game).
-- **Door softlock in World 2's castle (user report, not fixed):** the user's mod app also had the
-  *Meltdown* level mod installed (its own 02-24.arc), and Meltdown's one code patch
-  (`0x80117F6C li r0,3`, in func_80117DC0) is skipped by the mod build ("needs a mod build"). The door
-  could not be reproduced yet: `startGame` (0x800BB780) loads the course itself, so changing the start
-  info at scene creation is too late, and the castle file placed in the 2-1 slot hangs in
-  `dScStage_c::getLoopPosX`.
+- **Door softlock (user report, fixed in the mod build):** the room in the report is World 2's *tower*
+  (02-22, the two doors with a gear-hung mesh gate), not the castle, and it happened with only nsmbw-project
+  installed. Reproduced on the Mac mod build: after going through a door Mario stands beside it, the door
+  stays open and he never gets control back. The normal build is fine (same test: 9 door trips).
+  - Root cause: mod_build bakes the mod loader's code patches into the game. One reference patch moves
+    d_a_player_manager's statics into the mod's memory (r31 = 0x817EBDB4 in that file's static
+    constructor, 0x80061310). On the console that constructor runs at boot, before the loader patches it;
+    baked, it ran patched, building the game's 0x98-byte daPyDemoMng at 0x817EBE84 and the next object at
+    0x817EBF28, on top of the mod's 0xC8-byte daPyDemoMng at 0x817EBEFC. That object zeroed the mod's
+    extra fields and the course-in (door) queue at each area change, so the player's turn to come out of
+    the door was lost (queue `0 0 0 0` then all -1, against `0 -1 -1 -1` in the normal build).
+  - Fix (tools/mod_build.py `static_constructor_ranges`): code patches inside game static constructors
+    (main.dol's .ctors list and the RELs' .ctors sections, 688 functions) are not baked; 11 such patches.
+  - Verified: the same scripted tower test goes through the doors 9 times, the queue reads `0 -1 -1 -1`,
+    and the game's daPyDemoMng is back at 0x80354EE0. Not re-checked: other levels and mod features.
+- Test switches added (all off unless set): `NSMBW_TEST_START_COURSE=<world>,<level>,<area>,<entrance>`
+  (0-based; replaces the first course entered after the title: start info, dInfo_c current
+  world/stage and the course file name buffer 0x80373D7C - the entrance is not honoured yet),
+  `NSMBW_LOG_START_INFO=1`, `NSMBW_LOG_DEMO_MNG=1` (daPyDemoMng +0x60..+0xC4 on every change).
 
 ## 9. Open questions for the user
 
